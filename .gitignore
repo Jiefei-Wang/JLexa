@@ -1,0 +1,75 @@
+# Local models and application data
+models/*
+!models/.gitkeep
+models/dictionary/*
+!models/dictionary/.gitkeep
+models/llm/*
+!models/llm/.gitkeep
+models/whisper/*
+!models/whisper/.gitkeep
+data/*
+!data/.gitkeep
+*.gguf
+*.bin
+
+# Compiled native libraries & objects
+*.so
+*.a
+*.o
+*.obj
+*.dll
+*.dylib
+*.exe
+*.apk
+*.aab
+
+# Flutter & Dart build artifacts
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub/
+.pub-cache/
+build/
+app/build/
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/.pub/
+app/.pub-cache/
+app/build/
+app/coverage/
+
+# Android build outputs & local config
+app/android/.gradle/
+app/android/local.properties
+app/android/app/.cxx/
+app/android/app/build/
+app/android/app/debug/
+app/android/app/profile/
+app/android/app/release/
+.cxx/
+*.iml
+.idea/
+
+# iOS generated & pods
+app/ios/.symlinks/
+app/ios/Pods/
+app/ios/Podfile.lock
+app/ios/Flutter/.last_build_id
+app/ios/Flutter/Flutter.framework
+app/ios/Flutter/Flutter.podspec
+app/ios/Flutter/Generated.xcconfig
+app/ios/Flutter/app.framework
+app/ios/Flutter/flutter_export_environment.sh
+
+# Native build outputs
+native/llama.cpp/build/
+native/whisper.cpp/build/
+
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.history
