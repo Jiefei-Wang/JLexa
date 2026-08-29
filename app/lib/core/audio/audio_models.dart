@@ -146,8 +146,11 @@ class AudioSegment {
 
   int get durationMs => endMs - startMs;
 
-  bool containsPosition(int positionMs) {
-    return positionMs >= startMs && positionMs <= endMs;
+  bool containsPosition(int positionMs, {bool isLast = false}) {
+    if (isLast || startMs == endMs) {
+      return positionMs >= startMs && positionMs <= endMs;
+    }
+    return positionMs >= startMs && positionMs < endMs;
   }
 
   AudioSegment copyWith({

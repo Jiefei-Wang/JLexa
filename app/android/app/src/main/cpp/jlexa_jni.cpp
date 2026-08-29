@@ -4,6 +4,28 @@
 #include "jlexa_whisper_bridge.h"
 #include "jlexa_llama_bridge.h"
 
+static jstring makeJavaStringFromUtf8(JNIEnv* env, const std::string& str) {
+    if (str.empty()) {
+        return env->NewStringUTF("");
+    }
+    jsize len = static_cast<jsize>(str.length());
+    jbyteArray byteArray = env->NewByteArray(len);
+    if (!byteArray) return nullptr;
+
+    env->SetByteArrayRegion(byteArray, 0, len, reinterpret_cast<const jbyte*>(str.data()));
+
+    jclass stringClass = env->FindClass("java/lang/String");
+    jstring charsetName = env->NewStringUTF("UTF-8");
+    jmethodID stringConstructor = env->GetMethodID(stringClass, "<init>", "([BLjava/lang/String;)V");
+
+    jstring result = static_cast<jstring>(env->NewObject(stringClass, stringConstructor, byteArray, charsetName));
+
+    env->DeleteLocalRef(byteArray);
+    env->DeleteLocalRef(charsetName);
+    env->DeleteLocalRef(stringClass);
+    return result;
+}
+
 extern "C" {
 
 // ==========================================
@@ -61,12 +83,10 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeTranscribe(
     }
 
     std::function<void(int)> progress_fn = nullptr;
-    jclass progressClass = nullptr;
-    jmethodID onProgressMethod = nullptr;
     if (progress_callback) {
-        progressClass = env->GetObjectClass(progress_callback);
+        jclass progressClass = env->GetObjectClass(progress_callback);
         if (progressClass) {
-            onProgressMethod = env->GetMethodID(progressClass, "onProgress", "(I)V");
+            jmethodID onProgressMethod = env->GetMethodID(progressClass, "onProgress", "(I)V");
             if (onProgressMethod) {
                 progress_fn = [env, progress_callback, onProgressMethod](int prog) {
                     env->CallVoidMethod(progress_callback, onProgressMethod, static_cast<jint>(prog));
@@ -118,7 +138,7 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeTranscribe(
         env->CallObjectMethod(segMap, hashMapPut, kEnd, vEnd);
 
         jstring kText = env->NewStringUTF("text");
-        jstring vText = env->NewStringUTF(seg.text.c_str());
+        jstring vText = makeJavaStringFromUtf8(env, seg.text);
         env->CallObjectMethod(segMap, hashMapPut, kText, vText);
 
         jstring kConf = env->NewStringUTF("confidence");
@@ -132,7 +152,7 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeTranscribe(
 
             jobject tokMap = env->NewObject(hashMapClass, hashMapInit);
             jstring tkText = env->NewStringUTF("text");
-            jstring tvText = env->NewStringUTF(tok.text.c_str());
+            jstring tvText = makeJavaStringFromUtf8(env, tok.text);
             env->CallObjectMethod(tokMap, hashMapPut, tkText, tvText);
 
             jstring tkStart = env->NewStringUTF("start_ms");
@@ -212,12 +232,45 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGenerate(
     jint max_tokens,
     jfloat temperature,
     jfloat top_p,
+    jint seed,
+    jobjectArray chat_roles,
+    jobjectArray chat_contents,
     jobject callback
 ) {
-    if (!prompt || !callback) return;
-    const char* prompt_cstr = env->GetStringUTFChars(prompt, nullptr);
-    std::string prompt_str = prompt_cstr;
-    env->ReleaseStringUTFChars(prompt, prompt_cstr);
+    if (!callback) return;
+
+    std::string prompt_str = "";
+    if (prompt) {
+        const char* prompt_cstr = env->GetStringUTFChars(prompt, nullptr);
+        prompt_str = prompt_cstr;
+        env->ReleaseStringUTFChars(prompt, prompt_cstr);
+    }
+
+    std::vector<JLexaChatMessage> messages;
+    if (chat_roles && chat_contents) {
+        jsize n_roles = env->GetArrayLength(chat_roles);
+        jsize n_contents = env->GetArrayLength(chat_contents);
+        jsize count = n_roles < n_contents ? n_roles : n_contents;
+        for (jsize i = 0; i < count; ++i) {
+            jstring rStr = static_cast<jstring>(env->GetObjectArrayElement(chat_roles, i));
+            jstring cStr = static_cast<jstring>(env->GetObjectArrayElement(chat_contents, i));
+            std::string r = "user";
+            std::string c = "";
+            if (rStr) {
+                const char* rc = env->GetStringUTFChars(rStr, nullptr);
+                r = rc;
+                env->ReleaseStringUTFChars(rStr, rc);
+                env->DeleteLocalRef(rStr);
+            }
+            if (cStr) {
+                const char* cc = env->GetStringUTFChars(cStr, nullptr);
+                c = cc;
+                env->ReleaseStringUTFChars(cStr, cc);
+                env->DeleteLocalRef(cStr);
+            }
+            messages.push_back({r, c});
+        }
+    }
 
     jclass callbackClass = env->GetObjectClass(callback);
     jmethodID onTokenMethod = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
@@ -228,16 +281,18 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGenerate(
         max_tokens,
         temperature,
         top_p,
+        static_cast<uint32_t>(seed),
+        messages,
         [env, callback, onTokenMethod](const std::string& token) {
             if (env->PushLocalFrame(8) < 0) return;
-            jstring jtoken = env->NewStringUTF(token.c_str());
+            jstring jtoken = makeJavaStringFromUtf8(env, token);
             env->CallVoidMethod(callback, onTokenMethod, jtoken);
             env->PopLocalFrame(nullptr);
         },
         [env, callback, onCompleteMethod](bool cancelled, const std::string& errorMsg) {
             if (onCompleteMethod) {
                 if (env->PushLocalFrame(8) < 0) return;
-                jstring jerr = env->NewStringUTF(errorMsg.c_str());
+                jstring jerr = makeJavaStringFromUtf8(env, errorMsg);
                 env->CallVoidMethod(callback, onCompleteMethod, (jboolean)(cancelled ? JNI_TRUE : JNI_FALSE), jerr);
                 env->PopLocalFrame(nullptr);
             }

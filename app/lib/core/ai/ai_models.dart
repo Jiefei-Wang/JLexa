@@ -6,6 +6,34 @@ enum AiModelState {
   error,
 }
 
+abstract class AiException implements Exception {
+  final String message;
+  const AiException(this.message);
+
+  @override
+  String toString() => message;
+}
+
+class AiBusyException extends AiException {
+  const AiBusyException([super.message = 'Another generation is already in progress. Please wait.']);
+}
+
+class AiModelNotLoadedException extends AiException {
+  const AiModelNotLoadedException([super.message = 'No AI model loaded. Please load a model in Settings.']);
+}
+
+class AiGenerationException extends AiException {
+  const AiGenerationException(super.message);
+}
+
+class AiCancelledException extends AiException {
+  const AiCancelledException([super.message = 'AI generation was cancelled.']);
+}
+
+class AiUnsupportedPlatformException extends AiException {
+  const AiUnsupportedPlatformException([super.message = 'Local AI inference is not supported on this platform.']);
+}
+
 class AiGenerationSettings {
   final double temperature;
   final int maxTokens;
@@ -21,6 +49,22 @@ class AiGenerationSettings {
     this.threads = 4,
   });
 
+  AiGenerationSettings copyWith({
+    double? temperature,
+    int? maxTokens,
+    double? topP,
+    int? contextLength,
+    int? threads,
+  }) {
+    return AiGenerationSettings(
+      temperature: temperature ?? this.temperature,
+      maxTokens: maxTokens ?? this.maxTokens,
+      topP: topP ?? this.topP,
+      contextLength: contextLength ?? this.contextLength,
+      threads: threads ?? this.threads,
+    );
+  }
+
   Map<String, dynamic> toMap() {
     return {
       'temperature': temperature,
@@ -29,6 +73,31 @@ class AiGenerationSettings {
       'contextLength': contextLength,
       'threads': threads,
     };
+  }
+
+  factory AiGenerationSettings.fromMap(Map<String, dynamic> map) {
+    double temp = (map['temperature'] as num?)?.toDouble() ?? 0.7;
+    if (temp < 0.1 || temp > 2.0) temp = 0.7;
+
+    int maxTok = (map['maxTokens'] as num?)?.toInt() ?? 512;
+    if (maxTok < 16 || maxTok > 4096) maxTok = 512;
+
+    double p = (map['topP'] as num?)?.toDouble() ?? 0.9;
+    if (p < 0.05 || p > 1.0) p = 0.9;
+
+    int ctx = (map['contextLength'] as num?)?.toInt() ?? 2048;
+    if (ctx < 256 || ctx > 32768) ctx = 2048;
+
+    int th = (map['threads'] as num?)?.toInt() ?? 4;
+    if (th < 1 || th > 16) th = 4;
+
+    return AiGenerationSettings(
+      temperature: temp,
+      maxTokens: maxTok,
+      topP: p,
+      contextLength: ctx,
+      threads: th,
+    );
   }
 }
 

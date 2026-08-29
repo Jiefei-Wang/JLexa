@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import '../database/app_database.dart';
@@ -38,84 +40,139 @@ class AiService extends ChangeNotifier {
         for (var r in results) r['key'] as String: r['value'] as String
       };
 
-      if (map.containsKey('llm_model_path')) {
+      if (map.containsKey('llm_model_path') && map['llm_model_path']!.isNotEmpty) {
         _configuredLlmPath = map['llm_model_path'];
       }
 
-      if (map.containsKey('whisper_model_path')) {
+      if (map.containsKey('whisper_model_path') && map['whisper_model_path']!.isNotEmpty) {
         _configuredSpeechPath = map['whisper_model_path'];
+      }
+
+      if (map.containsKey('ai_generation_settings')) {
+        try {
+          final decoded = jsonDecode(map['ai_generation_settings']!) as Map<String, dynamic>;
+          _settings = AiGenerationSettings.fromMap(decoded);
+        } catch (_) {}
       }
 
       notifyListeners();
     } catch (_) {}
   }
 
-  Future<void> saveModelPath(String key, String path) async {
+  Future<void> saveSetting(String key, String value) async {
     try {
       final db = await AppDatabase.instance.database;
       await db.insert(
         'app_settings',
-        {'key': key, 'value': path},
+        {'key': key, 'value': value},
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
     } catch (_) {}
   }
 
+  Future<void> saveModelPath(String key, String path) async {
+    await saveSetting(key, path);
+  }
+
   Future<void> loadLlmModel(String path) async {
     _configuredLlmPath = path;
     await llmEngine.loadModel(path, settings: _settings);
-    await saveModelPath('llm_model_path', path);
+    await saveSetting('llm_model_path', path);
     notifyListeners();
   }
 
+  /// Unloads the native LLM model from RAM while preserving the configured path.
   Future<void> unloadLlmModel() async {
     await llmEngine.unload();
+    notifyListeners();
+  }
+
+  /// Explicitly removes the model configuration and optionally deletes the app-owned file.
+  Future<void> forgetLlmModel({bool deleteFile = false}) async {
+    final oldPath = _configuredLlmPath;
+    await llmEngine.unload();
     _configuredLlmPath = null;
-    await saveModelPath('llm_model_path', '');
+    await saveSetting('llm_model_path', '');
+    if (deleteFile && oldPath != null) {
+      try {
+        final f = File(oldPath);
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+    }
     notifyListeners();
   }
 
   Future<void> loadSpeechModel(String path) async {
     _configuredSpeechPath = path;
     await speechEngine.loadModel(path);
-    await saveModelPath('whisper_model_path', path);
+    await saveSetting('whisper_model_path', path);
     notifyListeners();
   }
 
+  /// Unloads the native Whisper model from RAM while preserving the configured path.
   Future<void> unloadSpeechModel() async {
     await speechEngine.unload();
+    notifyListeners();
+  }
+
+  /// Explicitly removes the speech model configuration and optionally deletes the app-owned file.
+  Future<void> forgetSpeechModel({bool deleteFile = false}) async {
+    final oldPath = _configuredSpeechPath;
+    await speechEngine.unload();
     _configuredSpeechPath = null;
-    await saveModelPath('whisper_model_path', '');
+    await saveSetting('whisper_model_path', '');
+    if (deleteFile && oldPath != null) {
+      try {
+        final f = File(oldPath);
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+    }
     notifyListeners();
   }
 
   void updateSettings(AiGenerationSettings newSettings) {
     _settings = newSettings;
+    saveSetting('ai_generation_settings', jsonEncode(newSettings.toMap()));
     notifyListeners();
   }
 
   Stream<String> explainSentence(SentenceContext context) {
     if (!llmEngine.isLoaded) {
-      return Stream.value('Load a local AI model to generate an explanation.');
+      return Stream.error(const AiModelNotLoadedException());
     }
+    final msgs = PromptBuilder.buildSentenceExplanationMessages(context);
     final prompt = PromptBuilder.buildSentenceExplanation(context);
-    return llmEngine.generate(prompt, settings: _settings);
+    return llmEngine.generate(
+      prompt,
+      settings: _settings,
+      chatMessages: msgs,
+    );
   }
 
   Stream<String> translateText(String text) {
     if (!llmEngine.isLoaded) {
-      return Stream.value('Load a local AI model to use AI translation.');
+      return Stream.error(const AiModelNotLoadedException());
     }
+    final msgs = PromptBuilder.buildTranslationMessages(text);
     final prompt = PromptBuilder.buildTranslation(text);
-    return llmEngine.generate(prompt, settings: _settings);
+    return llmEngine.generate(
+      prompt,
+      settings: _settings,
+      chatMessages: msgs,
+    );
   }
 
   Stream<String> explainWord(String word) {
     if (!llmEngine.isLoaded) {
-      return Stream.value('Load a local AI model to use AI explanation.');
+      return Stream.error(const AiModelNotLoadedException());
     }
+    final msgs = PromptBuilder.buildDictionaryExplanationMessages(word);
     final prompt = PromptBuilder.buildDictionaryExplanation(word);
-    return llmEngine.generate(prompt, settings: _settings);
+    return llmEngine.generate(
+      prompt,
+      settings: _settings,
+      chatMessages: msgs,
+    );
   }
 
   Stream<String> askSentenceQA({
@@ -124,14 +181,23 @@ class AiService extends ChangeNotifier {
     List<Map<String, String>> chatHistory = const [],
   }) {
     if (!llmEngine.isLoaded) {
-      return Stream.value('Load a local AI model to ask questions.');
+      return Stream.error(const AiModelNotLoadedException());
     }
+    final msgs = PromptBuilder.buildSentenceQAMessages(
+      context: context,
+      userQuestion: userQuestion,
+      chatHistory: chatHistory,
+    );
     final prompt = PromptBuilder.buildSentenceQA(
       context: context,
       userQuestion: userQuestion,
       chatHistory: chatHistory,
     );
-    return llmEngine.generate(prompt, settings: _settings);
+    return llmEngine.generate(
+      prompt,
+      settings: _settings,
+      chatMessages: msgs,
+    );
   }
 
   Stream<String> askGeneralQA({
@@ -139,12 +205,20 @@ class AiService extends ChangeNotifier {
     List<Map<String, String>> chatHistory = const [],
   }) {
     if (!llmEngine.isLoaded) {
-      return Stream.value('Load a local AI model to ask questions.');
+      return Stream.error(const AiModelNotLoadedException());
     }
+    final msgs = PromptBuilder.buildGeneralQAMessages(
+      userQuestion: userQuestion,
+      chatHistory: chatHistory,
+    );
     final prompt = PromptBuilder.buildGeneralQA(
       userQuestion: userQuestion,
       chatHistory: chatHistory,
     );
-    return llmEngine.generate(prompt, settings: _settings);
+    return llmEngine.generate(
+      prompt,
+      settings: _settings,
+      chatMessages: msgs,
+    );
   }
 }

@@ -115,13 +115,20 @@ class MainScaffoldState extends State<MainScaffold> {
         final targetPath = p.join(lessonsDir.path, '${DateTime.now().millisecondsSinceEpoch}_$fileName');
         await File(originalPath).copy(targetPath);
 
-        // Extract genuine audio duration & waveform peaks via native decoder
+        // Extract genuine audio duration via fast metadata detection, falling back to full audio info
         int durationMs = 0;
         try {
           if (Platform.isAndroid && widget.aiService.speechEngine is NativeWhisperEngine) {
-            final info = await (widget.aiService.speechEngine as NativeWhisperEngine).extractAudioInfo(targetPath);
-            if (info != null && info['durationMs'] != null) {
-              durationMs = (info['durationMs'] as num).toInt();
+            final engine = widget.aiService.speechEngine as NativeWhisperEngine;
+            final meta = await engine.getAudioMetadata(targetPath);
+            if (meta != null && meta['durationMs'] != null) {
+              durationMs = (meta['durationMs'] as num).toInt();
+            }
+            if (durationMs <= 0) {
+              final info = await engine.extractAudioInfo(targetPath);
+              if (info != null && info['durationMs'] != null) {
+                durationMs = (info['durationMs'] as num).toInt();
+              }
             }
           }
         } catch (_) {}

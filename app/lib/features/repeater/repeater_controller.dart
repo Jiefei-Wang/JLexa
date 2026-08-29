@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
+import '../../core/ai/ai_models.dart';
 import '../../core/ai/ai_service.dart';
 import '../../core/ai/prompt_builder.dart';
 import '../../core/audio/audio_models.dart';
@@ -27,10 +28,15 @@ class RepeaterController extends ChangeNotifier {
   bool _isAiGenerating = false;
   bool _isLoading = false;
 
+  bool _isTranscribing = false;
+  double _transcriptionProgress = 0.0;
+  String? _transcriptionError;
+
   int _loadGeneration = 0;
   String? _activeSegmentId;
   int _aiExplanationGeneration = 0;
-  Timer? _positionPersistDebounce;
+  int _lastPersistedPositionMs = -1;
+  DateTime _lastPersistTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   AudioLesson? get lesson => _lesson;
   List<AudioSegment> get segments => _segments;
@@ -40,6 +46,9 @@ class RepeaterController extends ChangeNotifier {
   String get aiExplanation => _aiExplanation;
   bool get isAiGenerating => _isAiGenerating;
   bool get isLoading => _isLoading;
+  bool get isTranscribing => _isTranscribing;
+  double get transcriptionProgress => _transcriptionProgress;
+  String? get transcriptionError => _transcriptionError;
 
   int get positionMs => audioService.positionMs;
   int get durationMs => audioService.durationMs > 0 ? audioService.durationMs : (_lesson?.durationMs ?? 0);
@@ -63,7 +72,7 @@ class RepeaterController extends ChangeNotifier {
   }
 
   void _onAudioServiceUpdate() {
-    _debouncePersistPosition();
+    _checkPersistPosition();
     final newSegId = audioService.currentSegment?.id;
     if (newSegId != _activeSegmentId) {
       _activeSegmentId = newSegId;
@@ -72,14 +81,22 @@ class RepeaterController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _debouncePersistPosition() {
+  void _checkPersistPosition() {
     if (_lesson == null) return;
-    _positionPersistDebounce?.cancel();
-    _positionPersistDebounce = Timer(const Duration(milliseconds: 1000), () {
-      if (_lesson != null && !_isDisposed) {
-        lessonRepo.updateLessonPosition(_lesson!.id, positionMs);
-      }
-    });
+    final now = DateTime.now();
+    // Persist every 5s during playback, or immediately if paused/stopped or position jumped
+    if (!audioService.isPlaying ||
+        now.difference(_lastPersistTime).inSeconds >= 5 ||
+        (_lastPersistedPositionMs - positionMs).abs() > 2000) {
+      _persistPositionNow();
+    }
+  }
+
+  void _persistPositionNow() {
+    if (_lesson == null || _isDisposed) return;
+    _lastPersistedPositionMs = positionMs;
+    _lastPersistTime = DateTime.now();
+    lessonRepo.updateLessonPosition(_lesson!.id, positionMs);
   }
 
   Future<void> _loadDefaultLesson() async {
@@ -94,6 +111,7 @@ class RepeaterController extends ChangeNotifier {
     _isLoading = true;
     _lesson = lesson;
     _activeSegmentId = null;
+    _transcriptionError = null;
     notifyListeners();
 
     try {
@@ -122,6 +140,53 @@ class RepeaterController extends ChangeNotifier {
     }
   }
 
+  Future<void> transcribeLesson() async {
+    if (_lesson == null) return;
+    if (!aiService.speechEngine.isLoaded) {
+      _transcriptionError = 'Whisper speech model not loaded. Please select a model in Settings.';
+      notifyListeners();
+      return;
+    }
+
+    _isTranscribing = true;
+    _transcriptionProgress = 0.0;
+    _transcriptionError = null;
+    notifyListeners();
+
+    try {
+      final segments = await aiService.speechEngine.transcribeAudio(
+        audioPath: _lesson!.localPath,
+        lessonId: _lesson!.id,
+        nThreads: aiService.settings.threads,
+        onProgress: (p) {
+          _transcriptionProgress = p;
+          notifyListeners();
+        },
+      );
+
+      _segments = segments;
+      audioService.updateSegments(_segments);
+      await lessonRepo.saveSegments(_lesson!.id, segments);
+      await lessonRepo.updateTranscriptStatus(_lesson!.id, 'ready');
+      _lesson = _lesson!.copyWith(transcriptStatus: 'ready');
+      _activeSegmentId = audioService.currentSegment?.id;
+      _fetchAiExplanation();
+    } catch (e) {
+      _transcriptionError = e.toString();
+    } finally {
+      _isTranscribing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> cancelTranscription() async {
+    try {
+      await aiService.speechEngine.cancel();
+    } catch (_) {}
+    _isTranscribing = false;
+    notifyListeners();
+  }
+
   void toggleSnapToSpeech() {
     _snapToSpeechEnabled = !_snapToSpeechEnabled;
     notifyListeners();
@@ -134,13 +199,15 @@ class RepeaterController extends ChangeNotifier {
 
   Future<void> seekTo(int targetMs) async {
     await audioService.seekTo(targetMs);
-    if (_lesson != null) {
-      await lessonRepo.updateLessonPosition(_lesson!.id, targetMs);
-    }
+    _persistPositionNow();
     notifyListeners();
   }
 
-  void togglePlayPause() => audioService.togglePlayPause();
+  void togglePlayPause() {
+    audioService.togglePlayPause();
+    _persistPositionNow();
+  }
+
   void toggleRepeatOne() => audioService.toggleRepeatOne();
   void previousSentence() => audioService.previousSentence();
   void nextSentence() => audioService.nextSentence();
@@ -246,7 +313,8 @@ class RepeaterController extends ChangeNotifier {
     String text1 = '';
     String text2 = '';
 
-    if (seg.tokens.isNotEmpty) {
+    final hasTimestamps = seg.tokens.any((t) => t.startMs > 0 || t.endMs > 0);
+    if (seg.tokens.isNotEmpty && hasTimestamps) {
       int splitIndex = -1;
       for (int i = 0; i < seg.tokens.length; i++) {
         final tok = seg.tokens[i];
@@ -355,7 +423,7 @@ class RepeaterController extends ChangeNotifier {
     final gen = ++_aiExplanationGeneration;
 
     if (!aiService.llmEngine.isLoaded) {
-      _aiExplanation = 'Load a local AI model to generate an explanation.';
+      _aiExplanation = 'Load a local AI model in Settings to generate explanations.';
       notifyListeners();
       return;
     }
@@ -371,7 +439,11 @@ class RepeaterController extends ChangeNotifier {
         _aiExplanation += chunk;
         notifyListeners();
       }
-    } catch (_) {}
+    } catch (e) {
+      if (gen == _aiExplanationGeneration && !_isDisposed) {
+        _aiExplanation = 'Explanation unavailable: $e';
+      }
+    }
 
     if (gen == _aiExplanationGeneration && !_isDisposed) {
       _isAiGenerating = false;
@@ -391,10 +463,7 @@ class RepeaterController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
-    _positionPersistDebounce?.cancel();
-    if (_lesson != null) {
-      lessonRepo.updateLessonPosition(_lesson!.id, positionMs);
-    }
+    _persistPositionNow();
     audioService.removeListener(_onAudioServiceUpdate);
     super.dispose();
   }

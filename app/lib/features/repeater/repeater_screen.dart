@@ -167,6 +167,88 @@ class _RepeaterScreenState extends State<RepeaterScreen> {
                   : ListView(
                       padding: const EdgeInsets.all(16),
                       children: [
+                        if (_controller.isTranscribing)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 16),
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(strokeWidth: 2.5),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        'Transcribing with Whisper (${(_controller.transcriptionProgress * 100).toInt()}%)...',
+                                        style: AppTypography.titleSmall,
+                                      ),
+                                    ),
+                                    TextButton(
+                                      onPressed: _controller.cancelTranscription,
+                                      child: const Text('Cancel', style: TextStyle(color: AppColors.error)),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                LinearProgressIndicator(
+                                  value: _controller.transcriptionProgress > 0 ? _controller.transcriptionProgress : null,
+                                  backgroundColor: AppColors.border,
+                                  color: AppColors.primary,
+                                ),
+                              ],
+                            ),
+                          )
+                        else if (_controller.segments.isEmpty)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 16),
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.subtitles_outlined, color: AppColors.primary),
+                                    const SizedBox(width: 8),
+                                    const Text('No Transcript Segments', style: AppTypography.titleSmall),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                const Text(
+                                  'Generate synchronized sentence boundaries and text using on-device Whisper AI.',
+                                  style: AppTypography.bodySmall,
+                                ),
+                                if (_controller.transcriptionError != null) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _controller.transcriptionError!,
+                                    style: const TextStyle(color: AppColors.error, fontSize: 12),
+                                  ),
+                                ],
+                                const SizedBox(height: 12),
+                                ElevatedButton.icon(
+                                  onPressed: _controller.transcribeLesson,
+                                  icon: const Icon(Icons.auto_awesome, size: 18),
+                                  label: const Text('Transcribe with Whisper'),
+                                ),
+                              ],
+                            ),
+                          ),
+
                         // Total Progress Scrubber
                         ProgressScrubber(
                           positionMs: _controller.positionMs,

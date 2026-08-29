@@ -11,6 +11,7 @@ abstract class SpeechRecognitionEngine {
     int nThreads = 4,
     void Function(double progress)? onProgress,
   });
+  Future<Map<String, dynamic>?> getAudioMetadata(String audioPath);
   Future<void> cancel();
   Future<void> unload();
 }

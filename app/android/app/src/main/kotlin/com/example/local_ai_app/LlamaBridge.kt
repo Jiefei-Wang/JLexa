@@ -38,6 +38,9 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
         maxTokens: Int,
         temperature: Float,
         topP: Float,
+        seed: Int,
+        chatRoles: Array<String>?,
+        chatContents: Array<String>?,
         callback: NativeGenerationCallback
     )
     private external fun nativeCancel()
@@ -46,6 +49,7 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
     private val scope = CoroutineScope(job + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
     private var eventSink: EventChannel.EventSink? = null
+    private val pendingEvents = mutableListOf<Map<String, Any>>()
     private val isGenerating = AtomicBoolean(false)
     private var activeRequestId: String? = null
 
@@ -53,6 +57,35 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
     interface NativeGenerationCallback {
         fun onToken(token: String)
         fun onComplete(cancelled: Boolean, errorMsg: String)
+    }
+
+    override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+        eventSink = events
+        if (events != null) {
+            synchronized(pendingEvents) {
+                for (ev in pendingEvents) {
+                    events.success(ev)
+                }
+                pendingEvents.clear()
+            }
+        }
+    }
+
+    override fun onCancel(arguments: Any?) {
+        eventSink = null
+    }
+
+    private fun sendEvent(event: Map<String, Any>) {
+        mainHandler.post {
+            val sink = eventSink
+            if (sink != null) {
+                sink.success(event)
+            } else {
+                synchronized(pendingEvents) {
+                    pendingEvents.add(event)
+                }
+            }
+        }
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -115,6 +148,12 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
                 val maxTokens = call.argument<Int>("maxTokens") ?: 512
                 val temperature = (call.argument<Double>("temperature") ?: 0.7).toFloat()
                 val topP = (call.argument<Double>("topP") ?: 0.9).toFloat()
+                val seed = call.argument<Int>("seed") ?: 0
+
+                val rolesList = call.argument<List<String>>("chatRoles")
+                val contentsList = call.argument<List<String>>("chatContents")
+                val chatRoles = rolesList?.toTypedArray()
+                val chatContents = contentsList?.toTypedArray()
 
                 if (!isGenerating.compareAndSet(false, true)) {
                     result.error("BUSY", "Another generation is already in progress", null)
@@ -131,17 +170,18 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
                             maxTokens,
                             temperature,
                             topP,
+                            seed,
+                            chatRoles,
+                            chatContents,
                             object : NativeGenerationCallback {
                                 override fun onToken(token: String) {
-                                    mainHandler.post {
-                                        eventSink?.success(
-                                            mapOf(
-                                                "requestId" to requestId,
-                                                "type" to "token",
-                                                "text" to token
-                                            )
+                                    sendEvent(
+                                        mapOf(
+                                            "requestId" to requestId,
+                                            "type" to "token",
+                                            "text" to token
                                         )
-                                    }
+                                    )
                                 }
 
                                 override fun onComplete(cancelled: Boolean, errorMsg: String) {
@@ -149,30 +189,28 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
                                     if (activeRequestId == requestId) {
                                         activeRequestId = null
                                     }
-                                    mainHandler.post {
-                                        if (cancelled) {
-                                            eventSink?.success(
-                                                mapOf(
-                                                    "requestId" to requestId,
-                                                    "type" to "cancelled"
-                                                )
+                                    if (cancelled) {
+                                        sendEvent(
+                                            mapOf(
+                                                "requestId" to requestId,
+                                                "type" to "cancelled"
                                             )
-                                        } else if (errorMsg.isNotEmpty()) {
-                                            eventSink?.success(
-                                                mapOf(
-                                                    "requestId" to requestId,
-                                                    "type" to "error",
-                                                    "message" to errorMsg
-                                                )
+                                        )
+                                    } else if (errorMsg.isNotEmpty()) {
+                                        sendEvent(
+                                            mapOf(
+                                                "requestId" to requestId,
+                                                "type" to "error",
+                                                "message" to errorMsg
                                             )
-                                        } else {
-                                            eventSink?.success(
-                                                mapOf(
-                                                    "requestId" to requestId,
-                                                    "type" to "done"
-                                                )
+                                        )
+                                    } else {
+                                        sendEvent(
+                                            mapOf(
+                                                "requestId" to requestId,
+                                                "type" to "done"
                                             )
-                                        }
+                                        )
                                     }
                                 }
                             }
@@ -182,28 +220,21 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
                         if (activeRequestId == requestId) {
                             activeRequestId = null
                         }
-                        mainHandler.post {
-                            eventSink?.success(
-                                mapOf(
-                                    "requestId" to requestId,
-                                    "type" to "error",
-                                    "message" to (e.message ?: "Generation exception")
-                                )
+                        sendEvent(
+                            mapOf(
+                                "requestId" to requestId,
+                                "type" to "error",
+                                "message" to (e.message ?: "Generation exception")
                             )
-                        }
+                        )
                     }
                 }
             }
 
             "cancelGeneration" -> {
-                val reqId = call.argument<String>("requestId") ?: activeRequestId
                 try {
                     nativeCancel()
                 } catch (_: Throwable) {}
-                isGenerating.set(false)
-                if (reqId != null && activeRequestId == reqId) {
-                    activeRequestId = null
-                }
                 result.success(null)
             }
 
@@ -211,17 +242,10 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
         }
     }
 
-    override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-        eventSink = events
-    }
-
-    override fun onCancel(arguments: Any?) {
-        eventSink = null
-    }
-
     fun cleanUp() {
         try {
             nativeCancel()
+            nativeUnloadModel()
         } catch (_: Throwable) {}
         isGenerating.set(false)
         activeRequestId = null
@@ -229,3 +253,4 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
         eventSink = null
     }
 }
+

@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import '../audio/audio_models.dart';
 import 'ai_engine.dart';
 import 'ai_models.dart';
+import 'prompt_builder.dart';
 import 'speech_engine.dart';
 
 class NativeLlamaEngine implements AiEngine {
@@ -44,18 +45,34 @@ class NativeLlamaEngine implements AiEngine {
                 controller.close();
               }
               _activeRequests.remove(requestId);
+              if (_currentRequestId == requestId) {
+                _isCurrentlyGenerating = false;
+                _currentRequestId = null;
+                _state = _isLoaded ? AiModelState.ready : AiModelState.noModel;
+              }
             } else if (type == 'cancelled') {
               if (!controller.isClosed) {
+                controller.addError(const AiCancelledException());
                 controller.close();
               }
               _activeRequests.remove(requestId);
+              if (_currentRequestId == requestId) {
+                _isCurrentlyGenerating = false;
+                _currentRequestId = null;
+                _state = _isLoaded ? AiModelState.ready : AiModelState.noModel;
+              }
             } else if (type == 'error') {
               final msg = event['message'] as String? ?? 'Generation failed';
               if (!controller.isClosed) {
-                controller.addError(Exception(msg));
+                controller.addError(AiGenerationException(msg));
                 controller.close();
               }
               _activeRequests.remove(requestId);
+              if (_currentRequestId == requestId) {
+                _isCurrentlyGenerating = false;
+                _currentRequestId = null;
+                _state = _isLoaded ? AiModelState.ready : AiModelState.noModel;
+              }
             }
           }
         }
@@ -63,11 +80,16 @@ class NativeLlamaEngine implements AiEngine {
       onError: (dynamic error) {
         for (final controller in _activeRequests.values) {
           if (!controller.isClosed) {
-            controller.addError(error is Exception ? error : Exception(error.toString()));
+            controller.addError(
+              error is Exception ? error : AiGenerationException(error.toString()),
+            );
             controller.close();
           }
         }
         _activeRequests.clear();
+        _isCurrentlyGenerating = false;
+        _currentRequestId = null;
+        _state = _isLoaded ? AiModelState.ready : AiModelState.noModel;
       },
     );
   }
@@ -84,7 +106,7 @@ class NativeLlamaEngine implements AiEngine {
   @override
   Future<void> loadModel(String modelPath, {AiGenerationSettings? settings}) async {
     if (!Platform.isAndroid) {
-      throw UnsupportedError('Local AI inference for iOS is not implemented yet.');
+      throw const AiUnsupportedPlatformException();
     }
 
     _state = AiModelState.loading;
@@ -104,7 +126,7 @@ class NativeLlamaEngine implements AiEngine {
         _isLoaded = false;
         _loadedModelPath = null;
         _state = AiModelState.error;
-        throw Exception('The selected AI model could not be loaded.');
+        throw const AiGenerationException('The selected AI model could not be loaded.');
       }
     } catch (e) {
       _isLoaded = false;
@@ -115,20 +137,22 @@ class NativeLlamaEngine implements AiEngine {
   }
 
   @override
-  Stream<String> generate(String prompt, {AiGenerationSettings? settings}) async* {
+  Stream<String> generate(
+    String prompt, {
+    AiGenerationSettings? settings,
+    int? seed,
+    List<ChatMessagePayload>? chatMessages,
+  }) async* {
     if (!Platform.isAndroid) {
-      yield 'Local AI inference for iOS is not implemented yet.';
-      return;
+      throw const AiUnsupportedPlatformException();
     }
 
     if (!_isLoaded) {
-      yield 'Load a local AI model to use AI explanation.';
-      return;
+      throw const AiModelNotLoadedException();
     }
 
     if (_isCurrentlyGenerating) {
-      yield 'Another generation is already in progress. Please wait.';
-      return;
+      throw const AiBusyException();
     }
 
     final requestId = _uuid.v4();
@@ -145,11 +169,14 @@ class NativeLlamaEngine implements AiEngine {
         'temperature': settings?.temperature ?? 0.7,
         'maxTokens': settings?.maxTokens ?? 512,
         'topP': settings?.topP ?? 0.9,
+        'seed': seed ?? 0,
+        if (chatMessages != null && chatMessages.isNotEmpty) ...{
+          'chatRoles': chatMessages.map((m) => m.role).toList(),
+          'chatContents': chatMessages.map((m) => m.content).toList(),
+        },
       });
 
       yield* controller.stream;
-    } catch (e) {
-      yield '\n[Error generating response: $e]';
     } finally {
       _activeRequests.remove(requestId);
       if (!controller.isClosed) {
@@ -158,8 +185,8 @@ class NativeLlamaEngine implements AiEngine {
       if (_currentRequestId == requestId) {
         _currentRequestId = null;
         _isCurrentlyGenerating = false;
+        _state = _isLoaded ? AiModelState.ready : AiModelState.noModel;
       }
-      _state = _isLoaded ? AiModelState.ready : AiModelState.noModel;
     }
   }
 
@@ -169,15 +196,6 @@ class NativeLlamaEngine implements AiEngine {
     try {
       final reqId = _currentRequestId;
       await _channel.invokeMethod('cancelGeneration', {'requestId': reqId});
-      if (reqId != null) {
-        final ctrl = _activeRequests.remove(reqId);
-        if (ctrl != null && !ctrl.isClosed) {
-          ctrl.close();
-        }
-      }
-      _isCurrentlyGenerating = false;
-      _currentRequestId = null;
-      _state = _isLoaded ? AiModelState.ready : AiModelState.noModel;
     } catch (_) {}
   }
 
@@ -204,9 +222,35 @@ class NativeLlamaEngine implements AiEngine {
 
 class NativeWhisperEngine implements SpeechRecognitionEngine {
   static const MethodChannel _channel = MethodChannel('com.jlexa.app/whisper');
+  static const EventChannel _eventChannel = EventChannel('com.jlexa.app/whisper_stream');
+  static const _uuid = Uuid();
 
   bool _isLoaded = false;
   String? _loadedModelPath;
+
+  final Map<String, void Function(double)> _progressCallbacks = {};
+  StreamSubscription? _streamSubscription;
+
+  NativeWhisperEngine() {
+    _initStream();
+  }
+
+  void _initStream() {
+    if (!Platform.isAndroid) return;
+    _streamSubscription = _eventChannel.receiveBroadcastStream().listen(
+      (dynamic event) {
+        if (event is Map) {
+          final requestId = event['requestId'] as String?;
+          final type = event['type'] as String?;
+          if (type == 'progress' && requestId != null && _progressCallbacks.containsKey(requestId)) {
+            final progress = (event['progress'] as num?)?.toDouble() ?? 0.0;
+            _progressCallbacks[requestId]?.call(progress.clamp(0.0, 1.0));
+          }
+        }
+      },
+      onError: (_) {},
+    );
+  }
 
   @override
   bool get isLoaded => _isLoaded;
@@ -217,7 +261,7 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
   @override
   Future<void> loadModel(String modelPath) async {
     if (!Platform.isAndroid) {
-      throw UnsupportedError('Local speech recognition for iOS is not implemented yet.');
+      throw const AiUnsupportedPlatformException();
     }
 
     final bool success = await _channel.invokeMethod('loadModel', {
@@ -231,7 +275,7 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
     } else {
       _isLoaded = false;
       _loadedModelPath = null;
-      throw Exception('The selected speech model could not be loaded.');
+      throw const AiGenerationException('The selected speech model could not be loaded.');
     }
   }
 
@@ -243,24 +287,53 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
     void Function(double progress)? onProgress,
   }) async {
     if (!Platform.isAndroid) {
-      throw UnsupportedError('Local speech recognition for iOS is not implemented yet.');
+      throw const AiUnsupportedPlatformException();
     }
 
     if (!_isLoaded) {
-      throw Exception('Speech model not configured. Please select a Whisper model.');
+      throw const AiModelNotLoadedException('Speech model not configured. Please select a Whisper model.');
     }
 
-    final dynamic rawResult = await _channel.invokeMethod('transcribeAudio', {
-      'audioPath': audioPath,
-      'lessonId': lessonId,
-      'threads': nThreads,
-    });
-
-    if (rawResult is List) {
-      return rawResult.map((e) => AudioSegment.fromMap(Map<String, dynamic>.from(e as Map))).toList();
+    final requestId = _uuid.v4();
+    if (onProgress != null) {
+      _progressCallbacks[requestId] = onProgress;
+      onProgress(0.0);
     }
 
-    return [];
+    try {
+      final dynamic rawResult = await _channel.invokeMethod('transcribeAudio', {
+        'audioPath': audioPath,
+        'lessonId': lessonId,
+        'requestId': requestId,
+        'threads': nThreads,
+      });
+
+      if (onProgress != null) {
+        onProgress(1.0);
+      }
+
+      if (rawResult is List) {
+        return rawResult.map((e) => AudioSegment.fromMap(Map<String, dynamic>.from(e as Map))).toList();
+      }
+
+      return [];
+    } finally {
+      _progressCallbacks.remove(requestId);
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>?> getAudioMetadata(String audioPath) async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final dynamic raw = await _channel.invokeMethod('getAudioMetadata', {
+        'audioPath': audioPath,
+      });
+      if (raw is Map) {
+        return Map<String, dynamic>.from(raw);
+      }
+    } catch (_) {}
+    return null;
   }
 
   Future<Map<String, dynamic>?> extractAudioInfo(String audioPath, {int numPeaks = 200}) async {
@@ -294,5 +367,10 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
       _isLoaded = false;
       _loadedModelPath = null;
     } catch (_) {}
+  }
+
+  void dispose() {
+    _streamSubscription?.cancel();
+    _progressCallbacks.clear();
   }
 }

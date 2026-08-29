@@ -131,6 +131,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             onPressed: _controller.isLoading ? null : _controller.loadConfiguredLlmModel,
                             child: const Text('Load'),
                           ),
+                          const SizedBox(width: 4),
+                          IconButton(
+                            onPressed: _controller.isLoading ? null : () => _controller.forgetLlmModel(deleteFile: false),
+                            icon: const Icon(Icons.delete_outline, color: AppColors.textTertiary, size: 20),
+                            tooltip: 'Forget Model',
+                          ),
                         ],
                         if (llmInfo?.isLoaded == true) ...[
                           const SizedBox(width: 8),
@@ -170,7 +176,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             children: [
                               Text(speechInfo?.name ?? 'No Whisper Model Loaded', style: AppTypography.labelLarge),
                               Text(
-                                speechInfo != null ? '${speechInfo.formattedSize} • Ready for speech-to-text' : 'Select a ggml whisper model (.bin) file',
+                                speechInfo != null ? '${speechInfo.formattedSize} • Ready for speech-to-text' : 'Select a ggml whisper model (.bin / .ggml) file',
                                 style: AppTypography.bodySmall,
                               ),
                             ],
@@ -208,6 +214,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           FilledButton.tonal(
                             onPressed: _controller.isLoading ? null : _controller.loadConfiguredSpeechModel,
                             child: const Text('Load'),
+                          ),
+                          const SizedBox(width: 4),
+                          IconButton(
+                            onPressed: _controller.isLoading ? null : () => _controller.forgetSpeechModel(deleteFile: false),
+                            icon: const Icon(Icons.delete_outline, color: AppColors.textTertiary, size: 20),
+                            tooltip: 'Forget Model',
                           ),
                         ],
                         if (speechInfo?.isLoaded == true) ...[
@@ -247,11 +259,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       displayValue: widget.aiService.settings.temperature.toStringAsFixed(2),
                       onChanged: (val) {
                         widget.aiService.updateSettings(
-                          AiGenerationSettings(
-                            temperature: val,
-                            maxTokens: widget.aiService.settings.maxTokens,
-                            contextLength: widget.aiService.settings.contextLength,
-                          ),
+                          widget.aiService.settings.copyWith(temperature: val),
                         );
                         setState(() {});
                       },
@@ -267,11 +275,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       displayValue: '${widget.aiService.settings.maxTokens}',
                       onChanged: (val) {
                         widget.aiService.updateSettings(
-                          AiGenerationSettings(
-                            temperature: widget.aiService.settings.temperature,
-                            maxTokens: val.round(),
-                            contextLength: widget.aiService.settings.contextLength,
-                          ),
+                          widget.aiService.settings.copyWith(maxTokens: val.round()),
                         );
                         setState(() {});
                       },

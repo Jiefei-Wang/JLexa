@@ -20,10 +20,29 @@ class SentenceContext {
   });
 }
 
+class ChatMessagePayload {
+  final String role; // 'system', 'user', 'assistant'
+  final String content;
+
+  const ChatMessagePayload({required this.role, required this.content});
+
+  Map<String, String> toMap() => {'role': role, 'content': content};
+}
+
 class PromptBuilder {
   static const String systemPrefix =
       'You are JLexa, an expert offline English learning AI assistant. '
       'Explain clearly, accurately, and concisely. When appropriate, provide natural Chinese explanations for English learners.';
+
+  static List<ChatMessagePayload> buildDictionaryExplanationMessages(String word) {
+    return [
+      const ChatMessagePayload(role: 'system', content: systemPrefix),
+      ChatMessagePayload(
+        role: 'user',
+        content: 'Explain the English word "$word" for a language learner.\nProvide:\n1. Core meaning and nuances\n2. Typical collocations and common usage\n3. Natural example sentences\n4. Chinese translation of key points',
+      ),
+    ];
+  }
 
   static String buildDictionaryExplanation(String word) {
     return '''$systemPrefix
@@ -36,11 +55,47 @@ Provide:
 4. Chinese translation of key points''';
   }
 
+  static List<ChatMessagePayload> buildTranslationMessages(String text) {
+    return [
+      const ChatMessagePayload(role: 'system', content: systemPrefix),
+      ChatMessagePayload(
+        role: 'user',
+        content: 'Translate the following English text into natural, fluent Chinese:\n"$text"',
+      ),
+    ];
+  }
+
   static String buildTranslation(String text) {
     return '''$systemPrefix
 
 Translate the following English text into natural, fluent Chinese:
 "$text"''';
+  }
+
+  static List<ChatMessagePayload> buildSentenceExplanationMessages(SentenceContext context) {
+    final buffer = StringBuffer();
+    buffer.writeln('Explain this sentence from the audio lesson "${context.lessonTitle}":');
+    buffer.writeln('Current sentence: "${context.sentenceText}"');
+
+    if (context.previousSentence != null && context.previousSentence!.isNotEmpty) {
+      buffer.writeln('Previous context: "${context.previousSentence}"');
+    }
+    if (context.nextSentence != null && context.nextSentence!.isNotEmpty) {
+      buffer.writeln('Following context: "${context.nextSentence}"');
+    }
+    if (context.uncertainWords.isNotEmpty) {
+      buffer.writeln('Note: The speech recognizer was uncertain about words: ${context.uncertainWords.join(', ')}');
+    }
+
+    buffer.writeln('\nPlease format your answer with:');
+    buffer.writeln('Summary: Concise 1-sentence explanation of what the speaker means.');
+    buffer.writeln('Meaning: Nuances of key phrases and idioms in this context.');
+    buffer.writeln('Possible correction: If any word seems misrecognized, suggest the intended word; otherwise state "No correction necessary."');
+
+    return [
+      const ChatMessagePayload(role: 'system', content: systemPrefix),
+      ChatMessagePayload(role: 'user', content: buffer.toString()),
+    ];
   }
 
   static String buildSentenceExplanation(SentenceContext context) {
@@ -65,6 +120,45 @@ Translate the following English text into natural, fluent Chinese:
     buffer.writeln('Possible correction: If any word seems misrecognized, suggest the intended word; otherwise state "No correction necessary."');
 
     return buffer.toString();
+  }
+
+  static List<ChatMessagePayload> buildSentenceQAMessages({
+    required SentenceContext context,
+    required String userQuestion,
+    List<Map<String, String>> chatHistory = const [],
+  }) {
+    final msgs = <ChatMessagePayload>[
+      const ChatMessagePayload(role: 'system', content: systemPrefix),
+    ];
+
+    final contextHeader = StringBuffer();
+    contextHeader.writeln('Lesson: "${context.lessonTitle}"');
+    contextHeader.writeln('Target sentence: "${context.sentenceText}"');
+    if (context.previousSentence != null && context.previousSentence!.isNotEmpty) {
+      contextHeader.writeln('Context before: "${context.previousSentence}"');
+    }
+    if (context.nextSentence != null && context.nextSentence!.isNotEmpty) {
+      contextHeader.writeln('Context after: "${context.nextSentence}"');
+    }
+
+    for (int i = 0; i < chatHistory.length; i++) {
+      final msg = chatHistory[i];
+      final role = msg['role'] == 'assistant' ? 'assistant' : 'user';
+      final content = msg['content'] ?? '';
+      if (i == 0 && role == 'user') {
+        msgs.add(ChatMessagePayload(role: 'user', content: '$contextHeader\n\n$content'));
+      } else {
+        msgs.add(ChatMessagePayload(role: role, content: content));
+      }
+    }
+
+    if (chatHistory.isEmpty) {
+      msgs.add(ChatMessagePayload(role: 'user', content: '$contextHeader\n\nQuestion: $userQuestion'));
+    } else {
+      msgs.add(ChatMessagePayload(role: 'user', content: userQuestion));
+    }
+
+    return msgs;
   }
 
   static String buildSentenceQA({
@@ -96,6 +190,23 @@ Translate the following English text into natural, fluent Chinese:
     buffer.writeln('Assistant:');
 
     return buffer.toString();
+  }
+
+  static List<ChatMessagePayload> buildGeneralQAMessages({
+    required String userQuestion,
+    List<Map<String, String>> chatHistory = const [],
+  }) {
+    final msgs = <ChatMessagePayload>[
+      const ChatMessagePayload(role: 'system', content: systemPrefix),
+    ];
+
+    for (final msg in chatHistory) {
+      final role = msg['role'] == 'assistant' ? 'assistant' : 'user';
+      msgs.add(ChatMessagePayload(role: role, content: msg['content'] ?? ''));
+    }
+
+    msgs.add(ChatMessagePayload(role: 'user', content: userQuestion));
+    return msgs;
   }
 
   static String buildGeneralQA({

@@ -40,6 +40,9 @@ void setupMockPlatformChannels() {
   messenger.setMockMessageHandler('com.jlexa.app/llama_stream', (ByteData? message) async {
     return const StandardMethodCodec().encodeSuccessEnvelope(null);
   });
+  messenger.setMockMessageHandler('com.jlexa.app/whisper_stream', (ByteData? message) async {
+    return const StandardMethodCodec().encodeSuccessEnvelope(null);
+  });
 
   // Mock record
   messenger.setMockMethodCallHandler(

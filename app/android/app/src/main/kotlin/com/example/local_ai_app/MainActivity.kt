@@ -13,11 +13,16 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // Register Whisper method channel
+        // Register Whisper method channel and progress stream channel
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.jlexa.app/whisper"
         ).setMethodCallHandler(whisperBridge)
+
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.jlexa.app/whisper_stream"
+        ).setStreamHandler(whisperBridge)
 
         // Register Llama method channel and stream channel
         MethodChannel(

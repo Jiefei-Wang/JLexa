@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:uuid/uuid.dart';
+import '../../core/ai/ai_models.dart';
 import '../../core/ai/ai_service.dart';
+import '../../core/ai/prompt_builder.dart';
 import '../../core/dictionary/dictionary_models.dart';
 import '../../core/dictionary/dictionary_repository.dart';
 import '../../core/utils/text_normalization.dart';
@@ -16,6 +18,7 @@ class DictionaryController extends ChangeNotifier {
 
   int _queryGeneration = 0;
   int _searchGeneration = 0;
+  int _aiGeneration = 0;
   bool _isSaving = false;
 
   String _currentQuery = '';
@@ -152,8 +155,10 @@ class DictionaryController extends ChangeNotifier {
 
   Future<void> _fetchAiTranslation() async {
     if (_currentEntry == null) return;
+    final gen = ++_aiGeneration;
+
     if (!aiService.llmEngine.isLoaded) {
-      _aiTranslationText = 'Load a local AI model to use AI translation.';
+      _aiTranslationText = 'Load a local AI model in Settings to use AI translation.';
       notifyListeners();
       return;
     }
@@ -162,18 +167,30 @@ class DictionaryController extends ChangeNotifier {
     _aiTranslationText = '';
     notifyListeners();
 
-    await for (final chunk in aiService.translateText(_currentEntry!.word)) {
-      _aiTranslationText += chunk;
-      notifyListeners();
+    try {
+      await for (final chunk in aiService.translateText(_currentEntry!.word)) {
+        if (gen != _aiGeneration || _isDisposed) break;
+        _aiTranslationText += chunk;
+        notifyListeners();
+      }
+    } catch (e) {
+      if (gen == _aiGeneration && !_isDisposed) {
+        _aiTranslationText = 'Translation unavailable: $e';
+      }
+    } finally {
+      if (gen == _aiGeneration && !_isDisposed) {
+        _isAiGenerating = false;
+        notifyListeners();
+      }
     }
-    _isAiGenerating = false;
-    notifyListeners();
   }
 
   Future<void> _fetchAiExplanation() async {
     if (_currentEntry == null) return;
+    final gen = ++_aiGeneration;
+
     if (!aiService.llmEngine.isLoaded) {
-      _aiExplanationText = 'Load a local AI model to use AI explanation.';
+      _aiExplanationText = 'Load a local AI model in Settings to use AI explanation.';
       notifyListeners();
       return;
     }
@@ -182,18 +199,30 @@ class DictionaryController extends ChangeNotifier {
     _aiExplanationText = '';
     notifyListeners();
 
-    await for (final chunk in aiService.explainWord(_currentEntry!.word)) {
-      _aiExplanationText += chunk;
-      notifyListeners();
+    try {
+      await for (final chunk in aiService.explainWord(_currentEntry!.word)) {
+        if (gen != _aiGeneration || _isDisposed) break;
+        _aiExplanationText += chunk;
+        notifyListeners();
+      }
+    } catch (e) {
+      if (gen == _aiGeneration && !_isDisposed) {
+        _aiExplanationText = 'Explanation unavailable: $e';
+      }
+    } finally {
+      if (gen == _aiGeneration && !_isDisposed) {
+        _isAiGenerating = false;
+        notifyListeners();
+      }
     }
-    _isAiGenerating = false;
-    notifyListeners();
   }
 
   Future<void> askAiAboutWord(String prompt) async {
     if (_currentEntry == null) return;
+    final gen = ++_aiGeneration;
+
     if (!aiService.llmEngine.isLoaded) {
-      _aiExplanationText = 'Load a local AI model to use AI explanation.';
+      _aiExplanationText = 'Load a local AI model in Settings to use AI explanation.';
       _selectedTab = 2;
       notifyListeners();
       return;
@@ -204,13 +233,35 @@ class DictionaryController extends ChangeNotifier {
     _aiExplanationText = 'Querying local model: "$prompt"...\n\n';
     notifyListeners();
 
-    final fullPrompt = 'Word: ${_currentEntry!.word}\nRequest: $prompt\nProvide a clear, educational response.';
-    await for (final chunk in aiService.llmEngine.generate(fullPrompt, settings: aiService.settings)) {
-      _aiExplanationText += chunk;
-      notifyListeners();
+    try {
+      final msgs = [
+        const ChatMessagePayload(role: 'system', content: PromptBuilder.systemPrefix),
+        ChatMessagePayload(
+          role: 'user',
+          content: 'Word: "${_currentEntry!.word}"\nRequest: $prompt\nProvide a clear, concise educational explanation.',
+        ),
+      ];
+      final plainPrompt = 'Word: ${_currentEntry!.word}\nRequest: $prompt\nProvide a clear, concise educational explanation.';
+
+      await for (final chunk in aiService.llmEngine.generate(
+        plainPrompt,
+        settings: aiService.settings,
+        chatMessages: msgs,
+      )) {
+        if (gen != _aiGeneration || _isDisposed) break;
+        _aiExplanationText += chunk;
+        notifyListeners();
+      }
+    } catch (e) {
+      if (gen == _aiGeneration && !_isDisposed) {
+        _aiExplanationText = 'AI explanation unavailable: $e';
+      }
+    } finally {
+      if (gen == _aiGeneration && !_isDisposed) {
+        _isAiGenerating = false;
+        notifyListeners();
+      }
     }
-    _isAiGenerating = false;
-    notifyListeners();
   }
 
   bool _isDisposed = false;

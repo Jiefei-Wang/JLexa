@@ -2,8 +2,14 @@
 #define JLEXA_LLAMA_BRIDGE_H
 
 #include <string>
+#include <vector>
 #include <functional>
 #include <cstdint>
+
+struct JLexaChatMessage {
+    std::string role;
+    std::string content;
+};
 
 class JLexaLlamaBridge {
 public:
@@ -18,6 +24,8 @@ public:
         int maxTokens,
         float temperature,
         float topP,
+        uint32_t seed,
+        const std::vector<JLexaChatMessage>& chatMessages,
         std::function<void(const std::string& token)> tokenCallback,
         std::function<void(bool cancelled, const std::string& errorMsg)> completionCallback
     );

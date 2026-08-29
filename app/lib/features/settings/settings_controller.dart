@@ -84,7 +84,7 @@ class SettingsController extends ChangeNotifier {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['gguf', 'bin'],
+        allowedExtensions: ['gguf'],
       );
 
       if (result != null && result.files.single.path != null) {
@@ -135,12 +135,17 @@ class SettingsController extends ChangeNotifier {
     _refreshModelInfo();
   }
 
+  Future<void> forgetLlmModel({bool deleteFile = false}) async {
+    await aiService.forgetLlmModel(deleteFile: deleteFile);
+    _refreshModelInfo();
+  }
+
   Future<void> pickAndLoadSpeechModel() async {
     _errorMessage = null;
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['bin', 'ggml', 'gguf'],
+        allowedExtensions: ['bin', 'ggml'],
       );
 
       if (result != null && result.files.single.path != null) {
@@ -188,6 +193,11 @@ class SettingsController extends ChangeNotifier {
 
   Future<void> unloadSpeechModel() async {
     await aiService.unloadSpeechModel();
+    _refreshModelInfo();
+  }
+
+  Future<void> forgetSpeechModel({bool deleteFile = false}) async {
+    await aiService.forgetSpeechModel(deleteFile: deleteFile);
     _refreshModelInfo();
   }
 

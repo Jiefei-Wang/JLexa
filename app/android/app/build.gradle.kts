@@ -54,10 +54,8 @@ android {
     buildTypes {
         release {
             val releaseConfig = signingConfigs.getByName("release")
-            signingConfig = if (releaseConfig.storeFile != null) {
-                releaseConfig
-            } else {
-                signingConfigs.getByName("debug")
+            if (releaseConfig.storeFile != null) {
+                signingConfig = releaseConfig
             }
         }
     }

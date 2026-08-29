@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'audio_models.dart';
@@ -48,11 +49,15 @@ class AudioService extends ChangeNotifier {
   int _durationMs = 0;
   bool _isRepeatOne = false;
   bool _isSeeking = false;
+  bool _hasLoadError = false;
+  String? _loadErrorMessage;
 
   bool get isPlaying => _isPlaying;
   int get positionMs => _positionMs;
   int get durationMs => _durationMs;
   bool get isRepeatOne => _isRepeatOne;
+  bool get hasLoadError => _hasLoadError;
+  String? get loadErrorMessage => _loadErrorMessage;
   AudioLesson? get currentLesson => _currentLesson;
   List<AudioSegment> get segments => _segments;
   int get currentSegmentIndex => _currentSegmentIndex;
@@ -104,8 +109,11 @@ class AudioService extends ChangeNotifier {
 
       _durationSub = player.onDurationChanged.listen(
         (dur) {
-          _durationMs = dur.inMilliseconds;
-          notifyListeners();
+          final newDurationMs = dur.inMilliseconds;
+          if (newDurationMs > 0 && newDurationMs != _durationMs) {
+            _durationMs = newDurationMs;
+            notifyListeners();
+          }
         },
         onError: (_) {},
       );
@@ -113,6 +121,8 @@ class AudioService extends ChangeNotifier {
   }
 
   Future<void> loadLesson(AudioLesson lesson, List<AudioSegment> segments) async {
+    _hasLoadError = false;
+    _loadErrorMessage = null;
     _currentLesson = lesson;
     _segments = List.from(segments);
     _positionMs = lesson.currentPositionMs;
@@ -124,12 +134,21 @@ class AudioService extends ChangeNotifier {
       if (lesson.localPath.startsWith('asset:')) {
         await _player.setSource(AssetSource(lesson.localPath.replaceFirst('asset:', '')));
       } else {
+        final file = File(lesson.localPath);
+        if (!await file.exists()) {
+          throw Exception('Audio file does not exist at ${lesson.localPath}');
+        }
         await _player.setSource(DeviceFileSource(lesson.localPath));
       }
       if (_positionMs > 0) {
         await _player.seek(Duration(milliseconds: _positionMs));
       }
-    } catch (_) {}
+    } catch (e) {
+      _hasLoadError = true;
+      _loadErrorMessage = 'Failed to load audio: $e';
+      notifyListeners();
+      rethrow;
+    }
 
     notifyListeners();
   }
@@ -146,7 +165,9 @@ class AudioService extends ChangeNotifier {
       return;
     }
 
-    final index = _segments.indexWhere((s) => s.containsPosition(_positionMs));
+    final index = _segments.indexWhere(
+      (s) => s.containsPosition(_positionMs, isLast: s == _segments.last),
+    );
     if (index != -1) {
       _currentSegmentIndex = index;
     } else {

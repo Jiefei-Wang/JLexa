@@ -4,6 +4,8 @@
 #include <atomic>
 #include <vector>
 #include <cstring>
+#include <chrono>
+#include <random>
 
 struct JLexaLlamaBridge::Impl {
     llama_model* model = nullptr;
@@ -35,13 +37,14 @@ static size_t get_valid_utf8_length(const std::string& str) {
         size_t char_len = 0;
         if (c <= 0x7F) {
             char_len = 1;
-        } else if ((c & 0xE0) == 0xC0) {
+        } else if (c >= 0xC2 && c <= 0xDF) {
             char_len = 2;
-        } else if ((c & 0xF0) == 0xE0) {
+        } else if (c >= 0xE0 && c <= 0xEF) {
             char_len = 3;
-        } else if ((c & 0xF8) == 0xF0) {
+        } else if (c >= 0xF0 && c <= 0xF4) {
             char_len = 4;
         } else {
+            // Invalid leading byte, advance to next byte
             i++;
             continue;
         }
@@ -61,6 +64,7 @@ static size_t get_valid_utf8_length(const std::string& str) {
                 i++;
             }
         } else {
+            // Incomplete multi-byte sequence at end of buffer
             break;
         }
     }
@@ -129,6 +133,8 @@ void JLexaLlamaBridge::generate(
     int maxTokens,
     float temperature,
     float topP,
+    uint32_t seed,
+    const std::vector<JLexaChatMessage>& chatMessages,
     std::function<void(const std::string& token)> tokenCallback,
     std::function<void(bool cancelled, const std::string& errorMsg)> completionCallback
 ) {
@@ -137,7 +143,36 @@ void JLexaLlamaBridge::generate(
         if (completionCallback) completionCallback(false, "Model not loaded");
         return;
     }
-    if (prompt.empty()) {
+
+    std::string prompt_to_use = prompt;
+
+    // Apply chat template if chatMessages are provided and model supports template
+    if (!chatMessages.empty()) {
+        const char* tmpl = llama_model_chat_template(pImpl->model, nullptr);
+        if (tmpl != nullptr) {
+            std::vector<llama_chat_message> msgs;
+            msgs.reserve(chatMessages.size());
+            for (const auto& msg : chatMessages) {
+                msgs.push_back({msg.role.c_str(), msg.content.c_str()});
+            }
+
+            int32_t alloc_size = 2048;
+            for (const auto& m : chatMessages) {
+                alloc_size += static_cast<int32_t>(m.content.length() + 64);
+            }
+            std::vector<char> buf(alloc_size);
+            int32_t res = llama_chat_apply_template(tmpl, msgs.data(), msgs.size(), true, buf.data(), static_cast<int32_t>(buf.size()));
+            if (res > static_cast<int32_t>(buf.size())) {
+                buf.resize(res + 1);
+                res = llama_chat_apply_template(tmpl, msgs.data(), msgs.size(), true, buf.data(), static_cast<int32_t>(buf.size()));
+            }
+            if (res > 0) {
+                prompt_to_use = std::string(buf.data(), res);
+            }
+        }
+    }
+
+    if (prompt_to_use.empty()) {
         if (completionCallback) completionCallback(false, "Empty prompt");
         return;
     }
@@ -151,12 +186,12 @@ void JLexaLlamaBridge::generate(
     }
 
     // 1. Tokenize prompt
-    const int n_prompt_max = static_cast<int>(prompt.length()) + 256;
+    const int n_prompt_max = static_cast<int>(prompt_to_use.length()) + 256;
     std::vector<llama_token> prompt_tokens(n_prompt_max);
     int n_prompt = llama_tokenize(
         pImpl->vocab,
-        prompt.c_str(),
-        static_cast<int32_t>(prompt.length()),
+        prompt_to_use.c_str(),
+        static_cast<int32_t>(prompt_to_use.length()),
         prompt_tokens.data(),
         n_prompt_max,
         true, // add BOS
@@ -167,8 +202,8 @@ void JLexaLlamaBridge::generate(
         prompt_tokens.resize(-n_prompt);
         n_prompt = llama_tokenize(
             pImpl->vocab,
-            prompt.c_str(),
-            static_cast<int32_t>(prompt.length()),
+            prompt_to_use.c_str(),
+            static_cast<int32_t>(prompt_to_use.length()),
             prompt_tokens.data(),
             prompt_tokens.size(),
             true,
@@ -196,17 +231,22 @@ void JLexaLlamaBridge::generate(
         max_to_gen = static_cast<int>(n_ctx - n_prompt);
     }
 
-    // 2. Prepare Sampler with RAII
+    // 2. Prepare Sampler with RAII and non-deterministic seed if not specified
     struct SamplerGuard {
         llama_sampler* smpl = nullptr;
         ~SamplerGuard() { if (smpl) llama_sampler_free(smpl); }
     } sampler_guard;
 
+    uint32_t actual_seed = seed;
+    if (actual_seed == 0) {
+        actual_seed = static_cast<uint32_t>(std::chrono::system_clock::now().time_since_epoch().count());
+    }
+
     llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
     sampler_guard.smpl = llama_sampler_chain_init(sparams);
     llama_sampler_chain_add(sampler_guard.smpl, llama_sampler_init_temp(temperature > 0.0f ? temperature : 0.7f));
     llama_sampler_chain_add(sampler_guard.smpl, llama_sampler_init_top_p(topP > 0.0f ? topP : 0.9f, 1));
-    llama_sampler_chain_add(sampler_guard.smpl, llama_sampler_init_dist(42));
+    llama_sampler_chain_add(sampler_guard.smpl, llama_sampler_init_dist(actual_seed));
 
     // 3. Process prompt with RAII batch
     struct BatchGuard {
@@ -237,6 +277,7 @@ void JLexaLlamaBridge::generate(
     int n_cur = n_prompt;
     int n_generated = 0;
     char piece_buf[256];
+    bool decode_failed = false;
 
     while (n_generated < max_to_gen && !pImpl->isCancelled && static_cast<uint32_t>(n_cur) < n_ctx) {
         const llama_token new_token_id = llama_sampler_sample(sampler_guard.smpl, pImpl->ctx, -1);
@@ -278,16 +319,26 @@ void JLexaLlamaBridge::generate(
         n_generated++;
 
         if (llama_decode(pImpl->ctx, batch_guard.batch) != 0) {
+            decode_failed = true;
             break;
         }
     }
 
-    // Flush any remaining accumulated bytes if valid
-    if (!utf8_accum.empty() && tokenCallback) {
-        tokenCallback(utf8_accum);
+    // Flush any remaining accumulated bytes if valid UTF-8
+    if (!utf8_accum.empty()) {
+        size_t valid_len = get_valid_utf8_length(utf8_accum);
+        if (valid_len > 0 && tokenCallback) {
+            tokenCallback(utf8_accum.substr(0, valid_len));
+        }
     }
 
     if (completionCallback) {
-        completionCallback(pImpl->isCancelled.load(), "");
+        if (pImpl->isCancelled.load()) {
+            completionCallback(true, "");
+        } else if (decode_failed) {
+            completionCallback(false, "Decode failed mid-generation");
+        } else {
+            completionCallback(false, "");
+        }
     }
 }

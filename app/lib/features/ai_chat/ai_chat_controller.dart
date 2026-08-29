@@ -22,12 +22,14 @@ class AiChatController extends ChangeNotifier {
   bool _isGenerating = false;
   bool _isRecording = false;
   bool _isSummaryExpanded = true;
+  String? _voiceErrorMessage;
 
   SentenceContext? get sentenceContext => _context;
   List<ChatMessage> get messages => _messages;
   bool get isGenerating => _isGenerating;
   bool get isRecording => _isRecording;
   bool get isSummaryExpanded => _isSummaryExpanded;
+  String? get voiceErrorMessage => _voiceErrorMessage;
 
   AiChatController({
     required this.aiService,
@@ -143,6 +145,7 @@ class AiChatController extends ChangeNotifier {
   }
 
   Future<String?> startStopRecording() async {
+    _voiceErrorMessage = null;
     if (_isRecording) {
       // Stop recording
       _isRecording = false;
@@ -151,39 +154,56 @@ class AiChatController extends ChangeNotifier {
         final path = await _audioRecorder.stop();
         if (path != null) {
           try {
-            if (speechEngine.isLoaded) {
-              final segments = await speechEngine.transcribeAudio(
-                audioPath: path,
-                lessonId: 'voice_input',
-              );
-              if (segments.isNotEmpty) {
-                return segments.map((s) => s.text.trim()).join(' ');
-              }
+            if (!speechEngine.isLoaded) {
+              _voiceErrorMessage = 'Speech model not loaded. Please select a Whisper model in Settings.';
+              notifyListeners();
+              return null;
             }
+            final segments = await speechEngine.transcribeAudio(
+              audioPath: path,
+              lessonId: 'voice_input',
+            );
+            if (segments.isNotEmpty) {
+              return segments.map((s) => s.text.trim()).join(' ');
+            }
+          } catch (e) {
+            _voiceErrorMessage = 'Voice transcription error: $e';
+            notifyListeners();
           } finally {
             // Delete temp recording file
-            final tempFile = File(path);
-            if (await tempFile.exists()) {
-              await tempFile.delete();
-            }
+            try {
+              final tempFile = File(path);
+              if (await tempFile.exists()) {
+                await tempFile.delete();
+              }
+            } catch (_) {}
           }
         }
-      } catch (_) {}
+      } catch (e) {
+        _voiceErrorMessage = 'Error stopping recording: $e';
+        notifyListeners();
+      }
     } else {
       // Start recording
       try {
-        if (await _audioRecorder.hasPermission()) {
-          final tempDir = await getTemporaryDirectory();
-          final filePath = '${tempDir.path}/voice_input_${DateTime.now().millisecondsSinceEpoch}.wav';
-          await _audioRecorder.start(
-            const RecordConfig(encoder: AudioEncoder.wav, sampleRate: 16000, numChannels: 1),
-            path: filePath,
-          );
-          _isRecording = true;
+        final hasPerm = await _audioRecorder.hasPermission();
+        if (!hasPerm) {
+          _voiceErrorMessage = 'Microphone permission denied.';
           notifyListeners();
+          return null;
         }
-      } catch (_) {
+
+        final tempDir = await getTemporaryDirectory();
+        final filePath = '${tempDir.path}/voice_input_${DateTime.now().millisecondsSinceEpoch}.wav';
+        await _audioRecorder.start(
+          const RecordConfig(encoder: AudioEncoder.wav, sampleRate: 16000, numChannels: 1),
+          path: filePath,
+        );
+        _isRecording = true;
+        notifyListeners();
+      } catch (e) {
         _isRecording = false;
+        _voiceErrorMessage = 'Error starting recording: $e';
         notifyListeners();
       }
     }

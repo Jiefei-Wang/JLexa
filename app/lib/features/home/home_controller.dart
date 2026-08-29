@@ -20,6 +20,11 @@ class HomeController extends ChangeNotifier {
     required this.dictionaryRepo,
     required this.lessonRepo,
   }) {
+    lessonRepo.addListener(_onLessonRepoChanged);
+    loadData();
+  }
+
+  void _onLessonRepoChanged() {
     loadData();
   }
 
@@ -33,6 +38,7 @@ class HomeController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    lessonRepo.removeListener(_onLessonRepoChanged);
     super.dispose();
   }
 

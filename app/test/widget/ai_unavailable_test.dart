@@ -31,6 +31,11 @@ class MockSpeechEngine implements SpeechRecognitionEngine {
   }
 
   @override
+  Future<Map<String, dynamic>?> getAudioMetadata(String audioPath) async {
+    return {'durationMs': 1000};
+  }
+
+  @override
   Future<void> unload() async {}
 }
 

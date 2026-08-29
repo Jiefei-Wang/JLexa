@@ -88,6 +88,15 @@ class _AiChatScreenState extends State<AiChatScreen> {
     final transcribedText = await _controller.startStopRecording();
     if (transcribedText != null && transcribedText.isNotEmpty) {
       _inputController.text = transcribedText;
+    } else if (_controller.voiceErrorMessage != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_controller.voiceErrorMessage!),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
     }
   }
 

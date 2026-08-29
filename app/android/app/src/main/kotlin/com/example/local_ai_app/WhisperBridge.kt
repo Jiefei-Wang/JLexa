@@ -1,5 +1,8 @@
 package com.example.local_ai_app
 
+import android.os.Handler
+import android.os.Looper
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.CoroutineScope
@@ -10,8 +13,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
-class WhisperBridge : MethodChannel.MethodCallHandler {
+class WhisperBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
     companion object {
         var isLibraryAvailable: Boolean = false
@@ -41,13 +45,26 @@ class WhisperBridge : MethodChannel.MethodCallHandler {
 
     private val job = SupervisorJob()
     private val scope = CoroutineScope(job + Dispatchers.IO)
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var eventSink: EventChannel.EventSink? = null
+    private val isTranscribing = AtomicBoolean(false)
+    private val isCancelled = AtomicBoolean(false)
+    private var activeRequestId: String? = null
 
     interface NativeProgressCallback {
         fun onProgress(progress: Int)
     }
 
+    override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+        eventSink = events
+    }
+
+    override fun onCancel(arguments: Any?) {
+        eventSink = null
+    }
+
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-        if (!isLibraryAvailable && call.method != "extractAudioInfo") {
+        if (!isLibraryAvailable && call.method != "extractAudioInfo" && call.method != "getAudioMetadata") {
             result.error("NATIVE_LIBRARY_UNAVAILABLE", "Native library libjlexa_native.so failed to load", null)
             return
         }
@@ -96,6 +113,26 @@ class WhisperBridge : MethodChannel.MethodCallHandler {
                 }
             }
 
+            "getAudioMetadata" -> {
+                val audioPath = call.argument<String>("audioPath")
+                if (audioPath == null) {
+                    result.error("INVALID_ARGS", "audioPath is required", null)
+                    return
+                }
+                scope.launch {
+                    try {
+                        val durationMs = AudioDecoder.getAudioMetadata(audioPath) ?: 0L
+                        withContext(Dispatchers.Main) {
+                            result.success(mapOf("durationMs" to durationMs))
+                        }
+                    } catch (e: Throwable) {
+                        withContext(Dispatchers.Main) {
+                            result.error("METADATA_ERROR", e.message, null)
+                        }
+                    }
+                }
+            }
+
             "extractAudioInfo" -> {
                 val audioPath = call.argument<String>("audioPath")
                 val numPeaks = call.argument<Int>("numPeaks") ?: 200
@@ -132,6 +169,7 @@ class WhisperBridge : MethodChannel.MethodCallHandler {
             "transcribeAudio" -> {
                 val audioPath = call.argument<String>("audioPath")
                 val lessonId = call.argument<String>("lessonId") ?: UUID.randomUUID().toString()
+                val requestId = call.argument<String>("requestId") ?: UUID.randomUUID().toString()
                 val threads = call.argument<Int>("threads") ?: 4
 
                 if (audioPath == null) {
@@ -139,9 +177,24 @@ class WhisperBridge : MethodChannel.MethodCallHandler {
                     return
                 }
 
+                if (!isTranscribing.compareAndSet(false, true)) {
+                    result.error("BUSY", "Another transcription is currently in progress", null)
+                    return
+                }
+
+                activeRequestId = requestId
+                isCancelled.set(false)
+
                 scope.launch {
                     try {
-                        val pcm = AudioDecoder.decodeTo16kHzMonoPcm(audioPath)
+                        val pcm = AudioDecoder.decodeTo16kHzMonoPcm(audioPath, isCancelled = { isCancelled.get() })
+                        if (isCancelled.get()) {
+                            withContext(Dispatchers.Main) {
+                                result.error("CANCELLED", "Transcription was cancelled during decoding", null)
+                            }
+                            return@launch
+                        }
+
                         if (pcm.isEmpty()) {
                             withContext(Dispatchers.Main) {
                                 result.error("DECODE_ERROR", "Could not decode audio file: $audioPath", null)
@@ -149,9 +202,33 @@ class WhisperBridge : MethodChannel.MethodCallHandler {
                             return@launch
                         }
 
-                        val rawSegments = nativeTranscribe(pcm, threads, "en", null)
-                        val formattedList = mutableListOf<Map<String, Any>>()
+                        val rawSegments = nativeTranscribe(
+                            pcm,
+                            threads,
+                            "en",
+                            object : NativeProgressCallback {
+                                override fun onProgress(progress: Int) {
+                                    mainHandler.post {
+                                        eventSink?.success(
+                                            mapOf(
+                                                "requestId" to requestId,
+                                                "type" to "progress",
+                                                "progress" to (progress.toDouble() / 100.0).coerceIn(0.0, 1.0)
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        )
 
+                        if (isCancelled.get()) {
+                            withContext(Dispatchers.Main) {
+                                result.error("CANCELLED", "Transcription was cancelled", null)
+                            }
+                            return@launch
+                        }
+
+                        val formattedList = mutableListOf<Map<String, Any>>()
                         rawSegments?.forEachIndexed { index, seg ->
                             val segId = "${lessonId}_seg_$index"
                             val startMs = (seg["start_ms"] as? Number)?.toInt() ?: 0
@@ -179,13 +256,20 @@ class WhisperBridge : MethodChannel.MethodCallHandler {
                         }
                     } catch (e: Throwable) {
                         withContext(Dispatchers.Main) {
-                            result.error("TRANSCRIBE_ERROR", e.message, null)
+                            result.error("TRANSCRIBE_ERROR", e.message ?: "Transcription exception", null)
+                        }
+                    } finally {
+                        isTranscribing.set(false)
+                        if (activeRequestId == requestId) {
+                            activeRequestId = null
                         }
                     }
                 }
             }
 
             "cancelTranscription" -> {
+                val reqId = call.argument<String>("requestId") ?: activeRequestId
+                isCancelled.set(true)
                 try {
                     nativeCancel()
                 } catch (_: Throwable) {}
@@ -210,9 +294,15 @@ class WhisperBridge : MethodChannel.MethodCallHandler {
     }
 
     fun cleanUp() {
+        isCancelled.set(true)
         try {
             nativeCancel()
+            nativeUnloadModel()
         } catch (_: Throwable) {}
+        isTranscribing.set(false)
+        activeRequestId = null
         job.cancel()
+        eventSink = null
     }
 }
+

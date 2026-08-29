@@ -1,22 +1,25 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 import '../database/app_database.dart';
 import 'audio_models.dart';
 import 'waveform_service.dart';
 
-abstract class ILessonRepository {
+abstract class ILessonRepository implements Listenable {
   Future<List<AudioLesson>> getAllLessons();
   Future<AudioLesson?> getLesson(String id);
   Future<void> saveLesson(AudioLesson lesson);
   Future<void> updateLessonPosition(String id, int positionMs);
+  Future<void> updateLessonDuration(String id, int durationMs);
+  Future<void> updateTranscriptStatus(String id, String status);
   Future<void> deleteLesson(String id);
   Future<List<AudioSegment>> getSegmentsForLesson(String lessonId);
   Future<void> saveSegments(String lessonId, List<AudioSegment> segments);
   Future<void> updateSegment(AudioSegment segment);
 }
 
-class LessonRepository implements ILessonRepository {
+class LessonRepository extends ChangeNotifier implements ILessonRepository {
   final _uuid = const Uuid();
 
   @override
@@ -55,6 +58,7 @@ class LessonRepository implements ILessonRepository {
       finalLesson.toMap(),
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+    notifyListeners();
   }
 
   @override
@@ -69,6 +73,31 @@ class LessonRepository implements ILessonRepository {
       where: 'id = ?',
       whereArgs: [id],
     );
+    notifyListeners();
+  }
+
+  @override
+  Future<void> updateLessonDuration(String id, int durationMs) async {
+    final db = await AppDatabase.instance.database;
+    await db.update(
+      'audio_lessons',
+      {'duration_ms': durationMs},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    notifyListeners();
+  }
+
+  @override
+  Future<void> updateTranscriptStatus(String id, String status) async {
+    final db = await AppDatabase.instance.database;
+    await db.update(
+      'audio_lessons',
+      {'transcript_status': status},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    notifyListeners();
   }
 
   @override
@@ -102,6 +131,8 @@ class LessonRepository implements ILessonRepository {
       final waveformService = WaveformService();
       await waveformService.deleteCachedWaveform(id);
     } catch (_) {}
+
+    notifyListeners();
   }
 
   @override
@@ -222,6 +253,7 @@ class LessonRepository implements ILessonRepository {
     }
 
     await batch.commit(noResult: true);
+    notifyListeners();
   }
 
   @override
@@ -233,5 +265,6 @@ class LessonRepository implements ILessonRepository {
       where: 'id = ?',
       whereArgs: [segment.id],
     );
+    notifyListeners();
   }
 }
