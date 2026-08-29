@@ -26,6 +26,28 @@ static jstring makeJavaStringFromUtf8(JNIEnv* env, const std::string& str) {
     return result;
 }
 
+static std::string getStdUtf8FromJavaString(JNIEnv* env, jstring jstr) {
+    if (!jstr) return "";
+    
+    // Use String.getBytes("UTF-8") to get standard UTF-8 bytes
+    jclass stringClass = env->GetObjectClass(jstr);
+    jmethodID getBytesMethod = env->GetMethodID(stringClass, "getBytes", "(Ljava/lang/String;)[B");
+    jstring charsetName = env->NewStringUTF("UTF-8");
+    
+    jbyteArray bytes = static_cast<jbyteArray>(env->CallObjectMethod(jstr, getBytesMethod, charsetName));
+    env->DeleteLocalRef(charsetName);
+    env->DeleteLocalRef(stringClass);
+    
+    if (!bytes) return "";
+    
+    jsize len = env->GetArrayLength(bytes);
+    std::string result(len, '\0');
+    env->GetByteArrayRegion(bytes, 0, len, reinterpret_cast<jbyte*>(&result[0]));
+    env->DeleteLocalRef(bytes);
+    
+    return result;
+}
+
 extern "C" {
 
 // ==========================================
@@ -39,9 +61,8 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeLoadModel(
     jstring model_path
 ) {
     if (!model_path) return JNI_FALSE;
-    const char* path = env->GetStringUTFChars(model_path, nullptr);
+    std::string path = getStdUtf8FromJavaString(env, model_path);
     bool result = JLexaWhisperBridge::instance().loadModel(path);
-    env->ReleaseStringUTFChars(model_path, path);
     return result ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -77,9 +98,7 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeTranscribe(
 
     std::string lang = "en";
     if (language) {
-        const char* lang_cstr = env->GetStringUTFChars(language, nullptr);
-        lang = lang_cstr;
-        env->ReleaseStringUTFChars(language, lang_cstr);
+        lang = getStdUtf8FromJavaString(env, language);
     }
 
     std::function<void(int)> progress_fn = nullptr;
@@ -189,6 +208,14 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeCancel(
     JLexaWhisperBridge::instance().cancel();
 }
 
+JNIEXPORT void JNICALL
+Java_com_example_local_1ai_1app_WhisperBridge_nativeResetCancellation(
+    JNIEnv* /* env */,
+    jobject /* this */
+) {
+    JLexaWhisperBridge::instance().resetCancellation();
+}
+
 // ==========================================
 // LLAMA JNI
 // ==========================================
@@ -202,9 +229,8 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeLoadModel(
     jint threads
 ) {
     if (!model_path) return JNI_FALSE;
-    const char* path = env->GetStringUTFChars(model_path, nullptr);
+    std::string path = getStdUtf8FromJavaString(env, model_path);
     bool result = JLexaLlamaBridge::instance().loadModel(path, context_length, threads);
-    env->ReleaseStringUTFChars(model_path, path);
     return result ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -241,9 +267,7 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGenerate(
 
     std::string prompt_str = "";
     if (prompt) {
-        const char* prompt_cstr = env->GetStringUTFChars(prompt, nullptr);
-        prompt_str = prompt_cstr;
-        env->ReleaseStringUTFChars(prompt, prompt_cstr);
+        prompt_str = getStdUtf8FromJavaString(env, prompt);
     }
 
     std::vector<JLexaChatMessage> messages;
@@ -257,15 +281,11 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGenerate(
             std::string r = "user";
             std::string c = "";
             if (rStr) {
-                const char* rc = env->GetStringUTFChars(rStr, nullptr);
-                r = rc;
-                env->ReleaseStringUTFChars(rStr, rc);
+                r = getStdUtf8FromJavaString(env, rStr);
                 env->DeleteLocalRef(rStr);
             }
             if (cStr) {
-                const char* cc = env->GetStringUTFChars(cStr, nullptr);
-                c = cc;
-                env->ReleaseStringUTFChars(cStr, cc);
+                c = getStdUtf8FromJavaString(env, cStr);
                 env->DeleteLocalRef(cStr);
             }
             messages.push_back({r, c});

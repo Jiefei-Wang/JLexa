@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jlexa/core/audio/audio_models.dart';
 import 'package:jlexa/core/audio/lesson_repository.dart';
-import 'package:jlexa/core/audio/waveform_service.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../test_helper.dart';
@@ -43,7 +42,6 @@ void main() {
 
   test('LessonRepository deleteLesson removes database records, audio file, and waveform cache', () async {
     final lessonRepo = LessonRepository();
-    final waveformService = WaveformService();
 
     final audioFile = File('${tempDir.path}/test_audio.wav');
     await audioFile.writeAsBytes(List.filled(100, 0));
@@ -80,7 +78,7 @@ void main() {
     // Create fake cached peaks file in waveforms directory
     final waveformsDir = Directory('${tempDir.path}/waveforms');
     await waveformsDir.create(recursive: true);
-    final peaksFile = File('${waveformsDir.path}/v2_${lessonId}.peaks');
+    final peaksFile = File('${waveformsDir.path}/v2_$lessonId.peaks');
     await peaksFile.writeAsString('0.1,0.5,0.8');
 
     expect(await audioFile.exists(), isTrue);

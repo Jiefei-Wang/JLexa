@@ -57,6 +57,5 @@ class HomeController extends ChangeNotifier {
 
   Future<void> deleteLesson(String id) async {
     await lessonRepo.deleteLesson(id);
-    await loadData();
   }
 }

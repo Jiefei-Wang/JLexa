@@ -8,6 +8,10 @@ class AppDatabase {
 
   AppDatabase._init();
 
+  static void setDatabaseForTesting(Database? db) {
+    _database = db;
+  }
+
   Future<Database> get database async {
     if (_database != null) return _database!;
     _database = await _initDB('jlexa_app.db');

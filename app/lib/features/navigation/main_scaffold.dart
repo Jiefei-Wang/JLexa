@@ -141,7 +141,7 @@ class MainScaffoldState extends State<MainScaffold> {
           durationMs: durationMs,
           createdAt: DateTime.now(),
           lastOpenedAt: DateTime.now(),
-          transcriptStatus: widget.aiService.speechEngine.isLoaded ? 'none' : 'pending_model',
+          transcriptStatus: widget.aiService.speechEngine.isLoaded ? TranscriptStatus.none : TranscriptStatus.pendingModel,
         );
 
         await widget.lessonRepo.saveLesson(newLesson);

@@ -139,11 +139,11 @@ void main() {
       expect(fetched?.durationMs, equals(45000));
 
       listenerNotified = false;
-      await repo.updateTranscriptStatus('lesson_test_notif', 'ready');
+      await repo.updateTranscriptStatus('lesson_test_notif', TranscriptStatus.completed);
       expect(listenerNotified, isTrue);
 
       final fetchedAfterStatus = await repo.getLesson('lesson_test_notif');
-      expect(fetchedAfterStatus?.transcriptStatus, equals('ready'));
+      expect(fetchedAfterStatus?.transcriptStatus, equals(TranscriptStatus.completed));
 
       await repo.deleteLesson('lesson_test_notif');
     });

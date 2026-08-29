@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:uuid/uuid.dart';
-import '../../core/ai/ai_models.dart';
 import '../../core/ai/ai_service.dart';
 import '../../core/ai/prompt_builder.dart';
 import '../../core/dictionary/dictionary_models.dart';
@@ -73,6 +72,7 @@ class DictionaryController extends ChangeNotifier {
   Future<void> onQueryChanged(String query) async {
     _currentQuery = query;
     if (query.trim().isEmpty) {
+      ++_queryGeneration;
       _suggestions = [];
       notifyListeners();
       return;
@@ -80,7 +80,7 @@ class DictionaryController extends ChangeNotifier {
 
     final gen = ++_queryGeneration;
     final results = await dictionaryRepo.searchSuggestions(query.trim());
-    if (gen != _queryGeneration) return;
+    if (gen != _queryGeneration || _isDisposed) return;
 
     _suggestions = results;
     notifyListeners();
@@ -91,6 +91,7 @@ class DictionaryController extends ChangeNotifier {
     if (clean.isEmpty) return;
 
     final gen = ++_searchGeneration;
+    ++_aiGeneration; // Invalidate any running AI requests immediately
     _isLoading = true;
     _currentQuery = clean;
     _suggestions = [];
@@ -99,15 +100,16 @@ class DictionaryController extends ChangeNotifier {
     notifyListeners();
 
     final entry = await dictionaryRepo.lookupWord(clean);
-    if (gen != _searchGeneration) return;
+    if (gen != _searchGeneration || _isDisposed) return;
+
+    bool saved = false;
+    if (entry != null) {
+      saved = await vocabularyRepo.isWordSaved(entry.word);
+    }
+    if (gen != _searchGeneration || _isDisposed) return;
 
     _currentEntry = entry;
-    if (_currentEntry != null) {
-      _isSaved = await vocabularyRepo.isWordSaved(_currentEntry!.word);
-    } else {
-      _isSaved = false;
-    }
-
+    _isSaved = saved;
     _isLoading = false;
     notifyListeners();
 
@@ -155,6 +157,7 @@ class DictionaryController extends ChangeNotifier {
 
   Future<void> _fetchAiTranslation() async {
     if (_currentEntry == null) return;
+    final targetWord = _currentEntry!.word;
     final gen = ++_aiGeneration;
 
     if (!aiService.llmEngine.isLoaded) {
@@ -168,7 +171,7 @@ class DictionaryController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await for (final chunk in aiService.translateText(_currentEntry!.word)) {
+      await for (final chunk in aiService.translateText(targetWord)) {
         if (gen != _aiGeneration || _isDisposed) break;
         _aiTranslationText += chunk;
         notifyListeners();
@@ -187,6 +190,7 @@ class DictionaryController extends ChangeNotifier {
 
   Future<void> _fetchAiExplanation() async {
     if (_currentEntry == null) return;
+    final targetWord = _currentEntry!.word;
     final gen = ++_aiGeneration;
 
     if (!aiService.llmEngine.isLoaded) {
@@ -200,7 +204,7 @@ class DictionaryController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await for (final chunk in aiService.explainWord(_currentEntry!.word)) {
+      await for (final chunk in aiService.explainWord(targetWord)) {
         if (gen != _aiGeneration || _isDisposed) break;
         _aiExplanationText += chunk;
         notifyListeners();
@@ -219,6 +223,7 @@ class DictionaryController extends ChangeNotifier {
 
   Future<void> askAiAboutWord(String prompt) async {
     if (_currentEntry == null) return;
+    final targetWord = _currentEntry!.word;
     final gen = ++_aiGeneration;
 
     if (!aiService.llmEngine.isLoaded) {
@@ -238,10 +243,10 @@ class DictionaryController extends ChangeNotifier {
         const ChatMessagePayload(role: 'system', content: PromptBuilder.systemPrefix),
         ChatMessagePayload(
           role: 'user',
-          content: 'Word: "${_currentEntry!.word}"\nRequest: $prompt\nProvide a clear, concise educational explanation.',
+          content: 'Word: "$targetWord"\nRequest: $prompt\nProvide a clear, concise educational explanation.',
         ),
       ];
-      final plainPrompt = 'Word: ${_currentEntry!.word}\nRequest: $prompt\nProvide a clear, concise educational explanation.';
+      final plainPrompt = 'Word: $targetWord\nRequest: $prompt\nProvide a clear, concise educational explanation.';
 
       await for (final chunk in aiService.llmEngine.generate(
         plainPrompt,

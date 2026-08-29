@@ -1,5 +1,4 @@
-﻿import 'package:flutter_test/flutter_test.dart';
-import 'package:jlexa/core/vocabulary/srs_scheduler.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:jlexa/core/vocabulary/vocabulary_models.dart';
 import 'package:jlexa/core/vocabulary/vocabulary_repository.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -20,9 +19,9 @@ void main() {
     });
 
     final word = VocabularyWord(
-      id: 'voc_test_1',
-      word: '  Resilient!  ',
-      definitionSnapshot: 'Able to withstand hardship',
+      id: 'voc_test_notifier_1',
+      word: '  Serendipity!  ',
+      definitionSnapshot: 'Finding good things without looking',
       dateAdded: DateTime.now(),
     );
 
@@ -31,19 +30,19 @@ void main() {
     expect(notificationCount, equals(1));
 
     // Verify word was normalized
-    final saved = await repo.getWord('resilient');
+    final saved = await repo.getWord('serendipity');
     expect(saved, isNotNull);
-    expect(saved!.word, equals('resilient'));
+    expect(saved!.word, equals('serendipity'));
 
     // Review word
-    await repo.reviewWord('voc_test_1', ReviewRating.good);
+    await repo.reviewWord('voc_test_notifier_1', ReviewRating.good);
     expect(notificationCount, equals(2));
 
     // Delete word
-    await repo.deleteWord('voc_test_1');
+    await repo.deleteWord('voc_test_notifier_1');
     expect(notificationCount, equals(3));
 
-    final deleted = await repo.getWord('resilient');
+    final deleted = await repo.getWord('serendipity');
     expect(deleted, isNull);
   });
 }

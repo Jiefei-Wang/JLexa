@@ -24,6 +24,16 @@ void setupMockPlatformChannels() {
             return const StandardMethodCodec().encodeSuccessEnvelope(null);
           },
         );
+
+        if (call.method == 'setSource') {
+          Future.microtask(() {
+            messenger.handlePlatformMessage(
+              'xyz.luan/audioplayers/events/$playerId',
+              const StandardMethodCodec().encodeSuccessEnvelope({'event': 'audio.onPrepared', 'value': true}),
+              (data) {},
+            );
+          });
+        }
       }
       return 1;
     },

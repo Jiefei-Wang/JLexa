@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:uuid/uuid.dart';
+import '../../../core/ai/ai_models.dart';
 import '../../../core/ai/ai_service.dart';
 import '../../../core/dictionary/dictionary_models.dart';
 import '../../../core/dictionary/dictionary_repository.dart';
@@ -36,6 +37,8 @@ class _WordExplanationSheetState extends State<WordExplanationSheet> {
   bool _isLoading = true;
   bool _isSaved = false;
   String _aiTranslation = '';
+  AiGenerationHandle? _aiHandle;
+  int _aiGen = 0;
 
   @override
   void initState() {
@@ -61,13 +64,15 @@ class _WordExplanationSheetState extends State<WordExplanationSheet> {
   }
 
   Future<void> _fetchAiTranslation(String word) async {
+    final gen = ++_aiGen;
+    final handle = widget.aiService.startTranslateText(word);
+    _aiHandle = handle;
     try {
-      await for (final chunk in widget.aiService.translateText(word)) {
-        if (mounted) {
-          setState(() {
-            _aiTranslation += chunk;
-          });
-        }
+      await for (final chunk in handle.stream) {
+        if (gen != _aiGen || !mounted) break;
+        setState(() {
+          _aiTranslation += chunk;
+        });
       }
     } catch (_) {}
   }
@@ -113,6 +118,7 @@ class _WordExplanationSheetState extends State<WordExplanationSheet> {
 
   @override
   void dispose() {
+    _aiHandle?.cancel();
     _tts.stop();
     super.dispose();
   }

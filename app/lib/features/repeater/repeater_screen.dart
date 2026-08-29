@@ -167,6 +167,28 @@ class _RepeaterScreenState extends State<RepeaterScreen> {
                   : ListView(
                       padding: const EdgeInsets.all(16),
                       children: [
+                        if (_controller.audioLoadError != null)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 16),
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: AppColors.errorLight,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: AppColors.error),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.error_outline, color: AppColors.error),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    _controller.audioLoadError!,
+                                    style: const TextStyle(color: AppColors.error, fontSize: 13),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         if (_controller.isTranscribing)
                           Container(
                             margin: const EdgeInsets.only(bottom: 16),

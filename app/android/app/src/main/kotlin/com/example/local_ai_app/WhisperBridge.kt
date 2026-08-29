@@ -42,6 +42,7 @@ class WhisperBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandle
         progressCallback: NativeProgressCallback?
     ): List<Map<String, Any>>?
     private external fun nativeCancel()
+    private external fun nativeResetCancellation()
 
     private val job = SupervisorJob()
     private val scope = CoroutineScope(job + Dispatchers.IO)
@@ -143,8 +144,8 @@ class WhisperBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandle
 
                 scope.launch {
                     try {
-                        val decoded = AudioDecoder.decodeAudioFull(audioPath, numPeaks)
-                        if (decoded == null) {
+                        val waveformResult = AudioDecoder.extractWaveformOnly(audioPath, numPeaks)
+                        if (waveformResult == null) {
                             withContext(Dispatchers.Main) {
                                 result.error("DECODE_ERROR", "Failed to decode audio file: $audioPath", null)
                             }
@@ -153,8 +154,8 @@ class WhisperBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandle
                         withContext(Dispatchers.Main) {
                             result.success(
                                 mapOf(
-                                    "durationMs" to decoded.durationMs,
-                                    "peaks" to decoded.waveformPeaks
+                                    "durationMs" to waveformResult.durationMs,
+                                    "peaks" to waveformResult.waveformPeaks
                                 )
                             )
                         }
@@ -187,6 +188,7 @@ class WhisperBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandle
 
                 scope.launch {
                     try {
+                        nativeResetCancellation()
                         val pcm = AudioDecoder.decodeTo16kHzMonoPcm(audioPath, isCancelled = { isCancelled.get() })
                         if (isCancelled.get()) {
                             withContext(Dispatchers.Main) {

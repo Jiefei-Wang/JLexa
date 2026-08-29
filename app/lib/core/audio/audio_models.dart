@@ -1,5 +1,42 @@
 import 'dart:convert';
 
+/// Canonical transcript status for lessons.
+enum TranscriptStatus {
+  none,
+  pendingModel,
+  processing,
+  completed,
+  failed;
+
+  String toDbString() => name;
+
+  static TranscriptStatus fromDbString(String? s) {
+    switch (s) {
+      case 'pendingModel':
+        return TranscriptStatus.pendingModel;
+      case 'processing':
+        return TranscriptStatus.processing;
+      case 'completed':
+        return TranscriptStatus.completed;
+      case 'ready': // legacy compatibility
+        return TranscriptStatus.completed;
+      case 'failed':
+        return TranscriptStatus.failed;
+      case 'pending_model':
+        return TranscriptStatus.pendingModel;
+      default:
+        return TranscriptStatus.none;
+    }
+  }
+}
+
+/// State machine for an active transcription operation.
+enum TranscriptionState {
+  idle,
+  transcribing,
+  cancelling,
+}
+
 class AudioLesson {
   final String id;
   final String title;
@@ -9,7 +46,7 @@ class AudioLesson {
   final int currentPositionMs;
   final DateTime createdAt;
   final DateTime lastOpenedAt;
-  final String transcriptStatus; // 'none', 'processing', 'completed', 'failed'
+  final TranscriptStatus transcriptStatus;
   final String? waveformCachePath;
 
   const AudioLesson({
@@ -21,7 +58,7 @@ class AudioLesson {
     this.currentPositionMs = 0,
     required this.createdAt,
     required this.lastOpenedAt,
-    this.transcriptStatus = 'none',
+    this.transcriptStatus = TranscriptStatus.none,
     this.waveformCachePath,
   });
 
@@ -40,7 +77,7 @@ class AudioLesson {
     int? currentPositionMs,
     DateTime? createdAt,
     DateTime? lastOpenedAt,
-    String? transcriptStatus,
+    TranscriptStatus? transcriptStatus,
     String? waveformCachePath,
   }) {
     return AudioLesson(
@@ -67,7 +104,7 @@ class AudioLesson {
       'current_position_ms': currentPositionMs,
       'created_at': createdAt.millisecondsSinceEpoch,
       'last_opened_at': lastOpenedAt.millisecondsSinceEpoch,
-      'transcript_status': transcriptStatus,
+      'transcript_status': transcriptStatus.toDbString(),
       'waveform_cache_path': waveformCachePath,
     };
   }
@@ -82,7 +119,7 @@ class AudioLesson {
       currentPositionMs: map['current_position_ms'] as int? ?? 0,
       createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int),
       lastOpenedAt: DateTime.fromMillisecondsSinceEpoch(map['last_opened_at'] as int),
-      transcriptStatus: map['transcript_status'] as String? ?? 'none',
+      transcriptStatus: TranscriptStatus.fromDbString(map['transcript_status'] as String?),
       waveformCachePath: map['waveform_cache_path'] as String?,
     );
   }

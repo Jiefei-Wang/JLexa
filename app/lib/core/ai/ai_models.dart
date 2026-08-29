@@ -34,6 +34,25 @@ class AiUnsupportedPlatformException extends AiException {
   const AiUnsupportedPlatformException([super.message = 'Local AI inference is not supported on this platform.']);
 }
 
+enum AiRequestPriority {
+  background,
+  user,
+}
+
+class AiGenerationHandle {
+  final String requestId;
+  final Stream<String> stream;
+  final Future<void> Function() onCancel;
+
+  const AiGenerationHandle({
+    required this.requestId,
+    required this.stream,
+    required this.onCancel,
+  });
+
+  Future<void> cancel() => onCancel();
+}
+
 class AiGenerationSettings {
   final double temperature;
   final int maxTokens;

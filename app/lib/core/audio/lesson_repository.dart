@@ -12,7 +12,7 @@ abstract class ILessonRepository implements Listenable {
   Future<void> saveLesson(AudioLesson lesson);
   Future<void> updateLessonPosition(String id, int positionMs);
   Future<void> updateLessonDuration(String id, int durationMs);
-  Future<void> updateTranscriptStatus(String id, String status);
+  Future<void> updateTranscriptStatus(String id, TranscriptStatus status);
   Future<void> deleteLesson(String id);
   Future<List<AudioSegment>> getSegmentsForLesson(String lessonId);
   Future<void> saveSegments(String lessonId, List<AudioSegment> segments);
@@ -73,7 +73,9 @@ class LessonRepository extends ChangeNotifier implements ILessonRepository {
       where: 'id = ?',
       whereArgs: [id],
     );
-    notifyListeners();
+    // Intentionally do NOT call notifyListeners() here.
+    // Position-only updates during playback should not trigger Home DB reloads.
+    // Home refreshes on structural changes (save/delete/import/status).
   }
 
   @override
@@ -89,11 +91,11 @@ class LessonRepository extends ChangeNotifier implements ILessonRepository {
   }
 
   @override
-  Future<void> updateTranscriptStatus(String id, String status) async {
+  Future<void> updateTranscriptStatus(String id, TranscriptStatus status) async {
     final db = await AppDatabase.instance.database;
     await db.update(
       'audio_lessons',
-      {'transcript_status': status},
+      {'transcript_status': status.toDbString()},
       where: 'id = ?',
       whereArgs: [id],
     );

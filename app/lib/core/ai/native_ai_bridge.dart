@@ -136,67 +136,122 @@ class NativeLlamaEngine implements AiEngine {
     }
   }
 
+  AiRequestPriority _currentPriority = AiRequestPriority.user;
+
   @override
   Stream<String> generate(
     String prompt, {
     AiGenerationSettings? settings,
     int? seed,
     List<ChatMessagePayload>? chatMessages,
-  }) async* {
+  }) {
+    return startGeneration(
+      prompt,
+      settings: settings,
+      seed: seed,
+      chatMessages: chatMessages,
+      priority: AiRequestPriority.user,
+    ).stream;
+  }
+
+  @override
+  AiGenerationHandle startGeneration(
+    String prompt, {
+    AiGenerationSettings? settings,
+    int? seed,
+    List<ChatMessagePayload>? chatMessages,
+    AiRequestPriority priority = AiRequestPriority.user,
+  }) {
     if (!Platform.isAndroid) {
-      throw const AiUnsupportedPlatformException();
+      return AiGenerationHandle(
+        requestId: '',
+        stream: Stream.error(const AiUnsupportedPlatformException()),
+        onCancel: () async {},
+      );
     }
 
     if (!_isLoaded) {
-      throw const AiModelNotLoadedException();
+      return AiGenerationHandle(
+        requestId: '',
+        stream: Stream.error(const AiModelNotLoadedException()),
+        onCancel: () async {},
+      );
     }
 
+    // Pre-empt background task if a user task arrives
     if (_isCurrentlyGenerating) {
-      throw const AiBusyException();
+      if (_currentPriority == AiRequestPriority.background && priority == AiRequestPriority.user) {
+        if (_currentRequestId != null) {
+          cancelRequest(_currentRequestId!);
+        }
+      } else {
+        return AiGenerationHandle(
+          requestId: '',
+          stream: Stream.error(const AiBusyException()),
+          onCancel: () async {},
+        );
+      }
     }
 
     final requestId = _uuid.v4();
     final controller = StreamController<String>();
     _activeRequests[requestId] = controller;
     _currentRequestId = requestId;
+    _currentPriority = priority;
     _isCurrentlyGenerating = true;
     _state = AiModelState.generating;
 
-    try {
-      await _channel.invokeMethod('startGeneration', {
-        'requestId': requestId,
-        'prompt': prompt,
-        'temperature': settings?.temperature ?? 0.7,
-        'maxTokens': settings?.maxTokens ?? 512,
-        'topP': settings?.topP ?? 0.9,
-        'seed': seed ?? 0,
-        if (chatMessages != null && chatMessages.isNotEmpty) ...{
-          'chatRoles': chatMessages.map((m) => m.role).toList(),
-          'chatContents': chatMessages.map((m) => m.content).toList(),
-        },
-      });
+    () async {
+      try {
+        await _channel.invokeMethod('startGeneration', {
+          'requestId': requestId,
+          'prompt': prompt,
+          'temperature': settings?.temperature ?? 0.7,
+          'maxTokens': settings?.maxTokens ?? 512,
+          'topP': settings?.topP ?? 0.9,
+          'seed': seed ?? 0,
+          if (chatMessages != null && chatMessages.isNotEmpty) ...{
+            'chatRoles': chatMessages.map((m) => m.role).toList(),
+            'chatContents': chatMessages.map((m) => m.content).toList(),
+          },
+        });
+      } catch (e) {
+        if (!controller.isClosed) {
+          controller.addError(e is Exception ? e : AiGenerationException(e.toString()));
+          controller.close();
+        }
+        _activeRequests.remove(requestId);
+        if (_currentRequestId == requestId) {
+          _currentRequestId = null;
+          _isCurrentlyGenerating = false;
+          _state = _isLoaded ? AiModelState.ready : AiModelState.noModel;
+        }
+      }
+    }();
 
-      yield* controller.stream;
-    } finally {
-      _activeRequests.remove(requestId);
-      if (!controller.isClosed) {
-        controller.close();
-      }
-      if (_currentRequestId == requestId) {
-        _currentRequestId = null;
-        _isCurrentlyGenerating = false;
-        _state = _isLoaded ? AiModelState.ready : AiModelState.noModel;
-      }
+    return AiGenerationHandle(
+      requestId: requestId,
+      stream: controller.stream,
+      onCancel: () => cancelRequest(requestId),
+    );
+  }
+
+  @override
+  Future<void> cancelRequest(String requestId) async {
+    if (!Platform.isAndroid) return;
+    if (_currentRequestId == requestId) {
+      try {
+        await _channel.invokeMethod('cancelGeneration', {'requestId': requestId});
+      } catch (_) {}
     }
   }
 
   @override
   Future<void> cancel() async {
     if (!Platform.isAndroid) return;
-    try {
-      final reqId = _currentRequestId;
-      await _channel.invokeMethod('cancelGeneration', {'requestId': reqId});
-    } catch (_) {}
+    if (_currentRequestId != null) {
+      await cancelRequest(_currentRequestId!);
+    }
   }
 
   @override

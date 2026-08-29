@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../core/ai/ai_models.dart';
 import '../../core/ai/ai_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
@@ -30,6 +29,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  Future<void> _confirmForgetModel({
+    required String modelName,
+    required VoidCallback onConfirm,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Forget Model Configuration?'),
+        content: Text('Remove "$modelName" from configured models?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Forget'),
+          ),
+        ],
+      ),
+    );
+    if (result == true) {
+      onConfirm();
+    }
   }
 
   @override
@@ -133,7 +159,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           const SizedBox(width: 4),
                           IconButton(
-                            onPressed: _controller.isLoading ? null : () => _controller.forgetLlmModel(deleteFile: false),
+                            onPressed: _controller.isLoading
+                                ? null
+                                : () => _confirmForgetModel(
+                                      modelName: llmInfo.name,
+                                      onConfirm: () => _controller.forgetLlmModel(deleteFile: false),
+                                    ),
                             icon: const Icon(Icons.delete_outline, color: AppColors.textTertiary, size: 20),
                             tooltip: 'Forget Model',
                           ),
@@ -217,7 +248,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           const SizedBox(width: 4),
                           IconButton(
-                            onPressed: _controller.isLoading ? null : () => _controller.forgetSpeechModel(deleteFile: false),
+                            onPressed: _controller.isLoading
+                                ? null
+                                : () => _confirmForgetModel(
+                                      modelName: speechInfo.name,
+                                      onConfirm: () => _controller.forgetSpeechModel(deleteFile: false),
+                                    ),
                             icon: const Icon(Icons.delete_outline, color: AppColors.textTertiary, size: 20),
                             tooltip: 'Forget Model',
                           ),

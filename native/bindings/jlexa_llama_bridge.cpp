@@ -30,7 +30,6 @@ struct JLexaLlamaBridge::Impl {
 
 static size_t get_valid_utf8_length(const std::string& str) {
     size_t i = 0;
-    size_t last_valid = 0;
     const size_t len = str.length();
     while (i < len) {
         unsigned char c = static_cast<unsigned char>(str[i]);
@@ -44,31 +43,30 @@ static size_t get_valid_utf8_length(const std::string& str) {
         } else if (c >= 0xF0 && c <= 0xF4) {
             char_len = 4;
         } else {
-            // Invalid leading byte, advance to next byte
-            i++;
-            continue;
-        }
-
-        if (i + char_len <= len) {
-            bool valid = true;
-            for (size_t k = 1; k < char_len; ++k) {
-                if ((static_cast<unsigned char>(str[i + k]) & 0xC0) != 0x80) {
-                    valid = false;
-                    break;
-                }
-            }
-            if (valid) {
-                i += char_len;
-                last_valid = i;
-            } else {
-                i++;
-            }
-        } else {
-            // Incomplete multi-byte sequence at end of buffer
+            // Invalid leading byte — stop here
             break;
         }
+
+        if (i + char_len > len) {
+            // Incomplete multi-byte sequence at end — stop here
+            break;
+        }
+
+        bool valid = true;
+        for (size_t k = 1; k < char_len; ++k) {
+            if ((static_cast<unsigned char>(str[i + k]) & 0xC0) != 0x80) {
+                valid = false;
+                break;
+            }
+        }
+        if (!valid) {
+            // Invalid continuation byte — stop here
+            break;
+        }
+
+        i += char_len;
     }
-    return last_valid;
+    return i;
 }
 
 JLexaLlamaBridge& JLexaLlamaBridge::instance() {
@@ -287,7 +285,7 @@ void JLexaLlamaBridge::generate(
             break;
         }
 
-        const int n_piece = llama_token_to_piece(
+        int n_piece = llama_token_to_piece(
             pImpl->vocab,
             new_token_id,
             piece_buf,
@@ -296,8 +294,24 @@ void JLexaLlamaBridge::generate(
             true
         );
 
+        char* piece_ptr = piece_buf;
+        std::vector<char> large_buf;
+        if (n_piece < 0) {
+            // Buffer too small, retry with larger buffer
+            large_buf.resize(-n_piece);
+            n_piece = llama_token_to_piece(
+                pImpl->vocab,
+                new_token_id,
+                large_buf.data(),
+                static_cast<int32_t>(large_buf.size()),
+                0,
+                true
+            );
+            piece_ptr = large_buf.data();
+        }
+
         if (n_piece > 0) {
-            utf8_accum.append(piece_buf, n_piece);
+            utf8_accum.append(piece_ptr, n_piece);
             size_t valid_len = get_valid_utf8_length(utf8_accum);
             if (valid_len > 0) {
                 std::string token_to_emit = utf8_accum.substr(0, valid_len);

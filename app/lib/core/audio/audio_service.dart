@@ -130,18 +130,18 @@ class AudioService extends ChangeNotifier {
     _updateActiveSegment();
 
     try {
-      await _player.stop();
+      await _player.stop().timeout(const Duration(milliseconds: 500), onTimeout: () {});
       if (lesson.localPath.startsWith('asset:')) {
-        await _player.setSource(AssetSource(lesson.localPath.replaceFirst('asset:', '')));
+        await _player.setSource(AssetSource(lesson.localPath.replaceFirst('asset:', ''))).timeout(const Duration(milliseconds: 500), onTimeout: () {});
       } else {
         final file = File(lesson.localPath);
         if (!await file.exists()) {
           throw Exception('Audio file does not exist at ${lesson.localPath}');
         }
-        await _player.setSource(DeviceFileSource(lesson.localPath));
+        await _player.setSource(DeviceFileSource(lesson.localPath)).timeout(const Duration(milliseconds: 500), onTimeout: () {});
       }
       if (_positionMs > 0) {
-        await _player.seek(Duration(milliseconds: _positionMs));
+        await _player.seek(Duration(milliseconds: _positionMs)).timeout(const Duration(milliseconds: 500), onTimeout: () {});
       }
     } catch (e) {
       _hasLoadError = true;
@@ -194,7 +194,7 @@ class AudioService extends ChangeNotifier {
 
   Future<void> play() async {
     try {
-      await _player.resume();
+      await _player.resume().timeout(const Duration(milliseconds: 500), onTimeout: () {});
       _isPlaying = true;
       notifyListeners();
     } catch (_) {}
@@ -202,7 +202,7 @@ class AudioService extends ChangeNotifier {
 
   Future<void> pause() async {
     try {
-      await _player.pause();
+      await _player.pause().timeout(const Duration(milliseconds: 500), onTimeout: () {});
       _isPlaying = false;
       notifyListeners();
     } catch (_) {}
@@ -215,10 +215,19 @@ class AudioService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _player.seek(Duration(milliseconds: _positionMs));
+      await _player.seek(Duration(milliseconds: _positionMs)).timeout(const Duration(milliseconds: 500), onTimeout: () {});
     } catch (_) {}
+    finally {
+      _isSeeking = false;
+    }
+  }
 
-    _isSeeking = false;
+  Future<void> stop() async {
+    try {
+      await _player.stop().timeout(const Duration(milliseconds: 500), onTimeout: () {});
+      _isPlaying = false;
+      notifyListeners();
+    } catch (_) {}
   }
 
   void toggleRepeatOne() {

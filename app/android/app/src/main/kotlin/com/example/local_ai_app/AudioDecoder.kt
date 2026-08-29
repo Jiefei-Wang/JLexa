@@ -20,6 +20,11 @@ object AudioDecoder {
         val waveformPeaks: List<Double>
     )
 
+    data class WaveformResult(
+        val durationMs: Long,
+        val waveformPeaks: List<Double>
+    )
+
     class FloatChunkBuffer(private val chunkSize: Int = 65536) {
         private val chunks = mutableListOf<FloatArray>()
         private var currentChunk = FloatArray(chunkSize)
@@ -47,6 +52,10 @@ object AudioDecoder {
             if (currentPos > 0) {
                 System.arraycopy(currentChunk, 0, result, offset, currentPos)
             }
+            // Release chunk references to allow GC
+            chunks.clear()
+            currentChunk = FloatArray(0)
+            currentPos = 0
             return result
         }
     }
@@ -180,6 +189,149 @@ object AudioDecoder {
         }
 
         return null
+    }
+
+    /**
+     * Extracts waveform peaks incrementally without retaining full PCM in memory.
+     * Memory usage is O(numPeaks) instead of O(audioLength).
+     */
+    fun extractWaveformOnly(filePath: String, numPeaks: Int = 200): WaveformResult? {
+        val file = File(filePath)
+        if (!file.exists() || file.length() < 12) return null
+
+        // Get duration first
+        val durationMs = getAudioMetadata(filePath) ?: return null
+        if (durationMs <= 0) return null
+
+        val extractor = MediaExtractor()
+        var codec: MediaCodec? = null
+        try {
+            extractor.setDataSource(filePath)
+            var audioTrackIdx = -1
+            var format: MediaFormat? = null
+            for (i in 0 until extractor.trackCount) {
+                val tf = extractor.getTrackFormat(i)
+                val mime = tf.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.startsWith("audio/")) {
+                    audioTrackIdx = i
+                    format = tf
+                    break
+                }
+            }
+            if (audioTrackIdx < 0 || format == null) return null
+            extractor.selectTrack(audioTrackIdx)
+
+            val sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            val channelCount = try { format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) } catch (_: Exception) { 1 }
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
+
+            codec = MediaCodec.createDecoderByType(mime)
+            codec.configure(format, null, null, 0)
+            codec.start()
+
+            val totalSamples = (sampleRate.toLong() * durationMs) / 1000L
+            val samplesPerPeak = max(1L, totalSamples / numPeaks)
+            
+            val peaks = mutableListOf<Double>()
+            var currentPeakMax = 0.0
+            var samplesInCurrentPeak = 0L
+            var totalSamplesProcessed = 0L
+            
+            val bufferInfo = MediaCodec.BufferInfo()
+            var inputDone = false
+            var outputDone = false
+            val timeoutUs = 10000L
+
+            while (!outputDone) {
+                if (!inputDone) {
+                    val inputIdx = codec.dequeueInputBuffer(timeoutUs)
+                    if (inputIdx >= 0) {
+                        val inputBuf = codec.getInputBuffer(inputIdx) ?: continue
+                        val sampleSize = extractor.readSampleData(inputBuf, 0)
+                        if (sampleSize < 0) {
+                            codec.queueInputBuffer(inputIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputDone = true
+                        } else {
+                            val pts = extractor.sampleTime
+                            codec.queueInputBuffer(inputIdx, 0, sampleSize, pts, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+
+                val outputIdx = codec.dequeueOutputBuffer(bufferInfo, timeoutUs)
+                if (outputIdx >= 0) {
+                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                        outputDone = true
+                    }
+                    val outputBuf = codec.getOutputBuffer(outputIdx)
+                    if (outputBuf != null && bufferInfo.size > 0) {
+                        outputBuf.position(bufferInfo.offset)
+                        outputBuf.limit(bufferInfo.offset + bufferInfo.size)
+                        val outputFormat = codec.outputFormat
+                        val isFloat = try {
+                            outputFormat.getInteger(MediaFormat.KEY_PCM_ENCODING) == android.media.AudioFormat.ENCODING_PCM_FLOAT
+                        } catch (_: Exception) { false }
+                        
+                        if (isFloat) {
+                            val floatBuf = outputBuf.order(ByteOrder.nativeOrder()).asFloatBuffer()
+                            val frameCount = floatBuf.remaining() / channelCount
+                            for (f in 0 until frameCount) {
+                                var mono = 0.0f
+                                for (ch in 0 until channelCount) {
+                                    mono += floatBuf.get()
+                                }
+                                mono /= channelCount
+                                val amp = abs(mono.toDouble()).coerceAtMost(1.0)
+                                if (amp > currentPeakMax) currentPeakMax = amp
+                                samplesInCurrentPeak++
+                                totalSamplesProcessed++
+                                if (samplesInCurrentPeak >= samplesPerPeak) {
+                                    peaks.add(currentPeakMax.coerceIn(0.02, 1.0))
+                                    currentPeakMax = 0.0
+                                    samplesInCurrentPeak = 0
+                                }
+                            }
+                        } else {
+                            // PCM16
+                            val shortBuf = outputBuf.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+                            val frameCount = shortBuf.remaining() / channelCount
+                            for (f in 0 until frameCount) {
+                                var mono = 0.0f
+                                for (ch in 0 until channelCount) {
+                                    mono += shortBuf.get().toFloat() / 32768.0f
+                                }
+                                mono /= channelCount
+                                val amp = abs(mono.toDouble()).coerceAtMost(1.0)
+                                if (amp > currentPeakMax) currentPeakMax = amp
+                                samplesInCurrentPeak++
+                                totalSamplesProcessed++
+                                if (samplesInCurrentPeak >= samplesPerPeak) {
+                                    peaks.add(currentPeakMax.coerceIn(0.02, 1.0))
+                                    currentPeakMax = 0.0
+                                    samplesInCurrentPeak = 0
+                                }
+                            }
+                        }
+                    }
+                    codec.releaseOutputBuffer(outputIdx, false)
+                }
+            }
+            
+            // Flush remaining samples
+            if (samplesInCurrentPeak > 0) {
+                peaks.add(currentPeakMax.coerceIn(0.02, 1.0))
+            }
+
+            return WaveformResult(durationMs, peaks)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return null
+        } finally {
+            try { codec?.stop() } catch (_: Exception) {}
+            try { codec?.release() } catch (_: Exception) {}
+            extractor.release()
+        }
     }
 
     /**

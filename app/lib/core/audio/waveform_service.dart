@@ -6,7 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 abstract class IWaveformService {
   Future<List<double>> extractAndCacheWaveform(String audioPath, String lessonId, int durationMs);
-  Future<List<double>?> loadCachedWaveform(String lessonId);
+  Future<List<double>?> loadCachedWaveform(String lessonId, {int? fileSize});
   Future<void> deleteCachedWaveform(String lessonId);
   List<double> getWindowSlice({
     required List<double> fullPeaks,
@@ -32,8 +32,16 @@ class WaveformService implements IWaveformService {
       return _memoryCache[lessonId]!;
     }
 
+    int fileSize = 0;
+    final file = File(audioPath);
+    if (await file.exists()) {
+      try {
+        fileSize = await file.length();
+      } catch (_) {}
+    }
+
     // Check disk cache
-    final cached = await loadCachedWaveform(lessonId);
+    final cached = await loadCachedWaveform(lessonId, fileSize: fileSize);
     if (cached != null && cached.isNotEmpty) {
       _memoryCache[lessonId] = cached;
       return cached;
@@ -41,7 +49,6 @@ class WaveformService implements IWaveformService {
 
     // Compute peaks from file
     List<double> peaks = [];
-    final file = File(audioPath);
 
     if (await file.exists()) {
       try {
@@ -64,17 +71,20 @@ class WaveformService implements IWaveformService {
 
     if (peaks.isNotEmpty) {
       _memoryCache[lessonId] = peaks;
-      await _saveCachedWaveform(lessonId, peaks);
+      await _saveCachedWaveform(lessonId, peaks, fileSize: fileSize);
     }
 
     return peaks;
   }
 
   @override
-  Future<List<double>?> loadCachedWaveform(String lessonId) async {
+  Future<List<double>?> loadCachedWaveform(String lessonId, {int? fileSize}) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/waveforms/v2_$lessonId.peaks');
+      final targetFileName = fileSize != null && fileSize > 0
+          ? 'v3_${lessonId}_$fileSize.peaks'
+          : 'v3_$lessonId.peaks';
+      final file = File('${dir.path}/waveforms/$targetFileName');
       if (await file.exists()) {
         final bytes = await file.readAsBytes();
         final floatList = Float32List.view(bytes.buffer);
@@ -89,26 +99,35 @@ class WaveformService implements IWaveformService {
     try {
       _memoryCache.remove(lessonId);
       final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/waveforms/v2_$lessonId.peaks');
-      if (await file.exists()) {
-        await file.delete();
-      }
-      // Also delete any legacy cache file
-      final legacyFile = File('${dir.path}/waveforms/$lessonId.peaks');
-      if (await legacyFile.exists()) {
-        await legacyFile.delete();
+      final waveformsDir = Directory('${dir.path}/waveforms');
+      if (await waveformsDir.exists()) {
+        final files = await waveformsDir.list().toList();
+        for (final f in files) {
+          if (f is File) {
+            final name = f.uri.pathSegments.last;
+            if (name.contains(lessonId)) {
+              await f.delete();
+            }
+          }
+        }
       }
     } catch (_) {}
   }
 
-  Future<void> _saveCachedWaveform(String lessonId, List<double> peaks) async {
+  Future<void> saveCachedWaveform(String lessonId, List<double> peaks, {int? fileSize}) =>
+      _saveCachedWaveform(lessonId, peaks, fileSize: fileSize);
+
+  Future<void> _saveCachedWaveform(String lessonId, List<double> peaks, {int? fileSize}) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
       final waveformsDir = Directory('${dir.path}/waveforms');
       if (!await waveformsDir.exists()) {
         await waveformsDir.create(recursive: true);
       }
-      final file = File('${waveformsDir.path}/v2_$lessonId.peaks');
+      final targetFileName = fileSize != null && fileSize > 0
+          ? 'v3_${lessonId}_$fileSize.peaks'
+          : 'v3_$lessonId.peaks';
+      final file = File('${waveformsDir.path}/$targetFileName');
       final float32 = Float32List.fromList(peaks);
       await file.writeAsBytes(float32.buffer.asUint8List());
     } catch (_) {}

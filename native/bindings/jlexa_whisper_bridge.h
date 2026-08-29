@@ -38,6 +38,7 @@ public:
     );
 
     void cancel();
+    void resetCancellation();
 
 private:
     JLexaWhisperBridge();

@@ -13,6 +13,14 @@ abstract class AiEngine {
     int? seed,
     List<ChatMessagePayload>? chatMessages,
   });
+  AiGenerationHandle startGeneration(
+    String prompt, {
+    AiGenerationSettings? settings,
+    int? seed,
+    List<ChatMessagePayload>? chatMessages,
+    AiRequestPriority priority = AiRequestPriority.user,
+  });
   Future<void> cancel();
+  Future<void> cancelRequest(String requestId);
   Future<void> unload();
 }

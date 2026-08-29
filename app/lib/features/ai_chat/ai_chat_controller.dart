@@ -23,6 +23,7 @@ class AiChatController extends ChangeNotifier {
   bool _isRecording = false;
   bool _isSummaryExpanded = true;
   String? _voiceErrorMessage;
+  AiGenerationHandle? _activeHandle;
 
   SentenceContext? get sentenceContext => _context;
   List<ChatMessage> get messages => _messages;
@@ -103,19 +104,20 @@ class AiChatController extends ChangeNotifier {
         .toList();
 
     try {
-      final stream = _context != null
-          ? aiService.askSentenceQA(
+      final handle = _context != null
+          ? aiService.startSentenceQA(
               context: _context,
               userQuestion: clean,
               chatHistory: priorHistory,
             )
-          : aiService.askGeneralQA(
+          : aiService.startGeneralQA(
               userQuestion: clean,
               chatHistory: priorHistory,
             );
+      _activeHandle = handle;
 
       String accumulated = '';
-      await for (final chunk in stream) {
+      await for (final chunk in handle.stream) {
         accumulated += chunk;
         final idx = _messages.indexWhere((m) => m.id == assistantMsgId);
         if (idx != -1) {
@@ -140,6 +142,7 @@ class AiChatController extends ChangeNotifier {
       }
     } finally {
       _isGenerating = false;
+      _activeHandle = null;
       notifyListeners();
     }
   }
@@ -212,7 +215,11 @@ class AiChatController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _activeHandle?.cancel();
     _tts.stop();
+    if (_isRecording) {
+      _audioRecorder.stop();
+    }
     _audioRecorder.dispose();
     super.dispose();
   }

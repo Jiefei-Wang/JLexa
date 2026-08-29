@@ -54,6 +54,10 @@ void JLexaWhisperBridge::cancel() {
     pImpl->isCancelled = true;
 }
 
+void JLexaWhisperBridge::resetCancellation() {
+    pImpl->isCancelled = false;
+}
+
 std::vector<JLexaAudioSegment> JLexaWhisperBridge::transcribe(
     const float* samples,
     size_t n_samples,
@@ -67,8 +71,6 @@ std::vector<JLexaAudioSegment> JLexaWhisperBridge::transcribe(
     if (pImpl->ctx == nullptr || samples == nullptr || n_samples == 0) {
         return results;
     }
-
-    pImpl->isCancelled = false;
 
     whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     wparams.print_special   = false;

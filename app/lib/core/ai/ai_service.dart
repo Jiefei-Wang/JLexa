@@ -75,10 +75,17 @@ class AiService extends ChangeNotifier {
   }
 
   Future<void> loadLlmModel(String path) async {
-    _configuredLlmPath = path;
-    await llmEngine.loadModel(path, settings: _settings);
-    await saveSetting('llm_model_path', path);
-    notifyListeners();
+    final prevPath = _configuredLlmPath;
+    try {
+      await llmEngine.loadModel(path, settings: _settings);
+      _configuredLlmPath = path;
+      await saveSetting('llm_model_path', path);
+      notifyListeners();
+    } catch (e) {
+      _configuredLlmPath = prevPath;
+      notifyListeners();
+      rethrow;
+    }
   }
 
   /// Unloads the native LLM model from RAM while preserving the configured path.
@@ -103,10 +110,17 @@ class AiService extends ChangeNotifier {
   }
 
   Future<void> loadSpeechModel(String path) async {
-    _configuredSpeechPath = path;
-    await speechEngine.loadModel(path);
-    await saveSetting('whisper_model_path', path);
-    notifyListeners();
+    final prevPath = _configuredSpeechPath;
+    try {
+      await speechEngine.loadModel(path);
+      _configuredSpeechPath = path;
+      await saveSetting('whisper_model_path', path);
+      notifyListeners();
+    } catch (e) {
+      _configuredSpeechPath = prevPath;
+      notifyListeners();
+      rethrow;
+    }
   }
 
   /// Unloads the native Whisper model from RAM while preserving the configured path.
@@ -136,52 +150,93 @@ class AiService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Stream<String> explainSentence(SentenceContext context) {
+  AiGenerationHandle startExplainSentence(
+    SentenceContext context, {
+    AiRequestPriority priority = AiRequestPriority.background,
+  }) {
     if (!llmEngine.isLoaded) {
-      return Stream.error(const AiModelNotLoadedException());
+      return AiGenerationHandle(
+        requestId: '',
+        stream: Stream.error(const AiModelNotLoadedException()),
+        onCancel: () async {},
+      );
     }
     final msgs = PromptBuilder.buildSentenceExplanationMessages(context);
     final prompt = PromptBuilder.buildSentenceExplanation(context);
-    return llmEngine.generate(
+    return llmEngine.startGeneration(
       prompt,
       settings: _settings,
       chatMessages: msgs,
+      priority: priority,
+    );
+  }
+
+  Stream<String> explainSentence(SentenceContext context) {
+    return startExplainSentence(context, priority: AiRequestPriority.background).stream;
+  }
+
+  AiGenerationHandle startTranslateText(
+    String text, {
+    AiRequestPriority priority = AiRequestPriority.user,
+  }) {
+    if (!llmEngine.isLoaded) {
+      return AiGenerationHandle(
+        requestId: '',
+        stream: Stream.error(const AiModelNotLoadedException()),
+        onCancel: () async {},
+      );
+    }
+    final msgs = PromptBuilder.buildTranslationMessages(text);
+    final prompt = PromptBuilder.buildTranslation(text);
+    return llmEngine.startGeneration(
+      prompt,
+      settings: _settings,
+      chatMessages: msgs,
+      priority: priority,
     );
   }
 
   Stream<String> translateText(String text) {
+    return startTranslateText(text).stream;
+  }
+
+  AiGenerationHandle startExplainWord(
+    String word, {
+    AiRequestPriority priority = AiRequestPriority.user,
+  }) {
     if (!llmEngine.isLoaded) {
-      return Stream.error(const AiModelNotLoadedException());
+      return AiGenerationHandle(
+        requestId: '',
+        stream: Stream.error(const AiModelNotLoadedException()),
+        onCancel: () async {},
+      );
     }
-    final msgs = PromptBuilder.buildTranslationMessages(text);
-    final prompt = PromptBuilder.buildTranslation(text);
-    return llmEngine.generate(
+    final msgs = PromptBuilder.buildDictionaryExplanationMessages(word);
+    final prompt = PromptBuilder.buildDictionaryExplanation(word);
+    return llmEngine.startGeneration(
       prompt,
       settings: _settings,
       chatMessages: msgs,
+      priority: priority,
     );
   }
 
   Stream<String> explainWord(String word) {
-    if (!llmEngine.isLoaded) {
-      return Stream.error(const AiModelNotLoadedException());
-    }
-    final msgs = PromptBuilder.buildDictionaryExplanationMessages(word);
-    final prompt = PromptBuilder.buildDictionaryExplanation(word);
-    return llmEngine.generate(
-      prompt,
-      settings: _settings,
-      chatMessages: msgs,
-    );
+    return startExplainWord(word).stream;
   }
 
-  Stream<String> askSentenceQA({
+  AiGenerationHandle startSentenceQA({
     required SentenceContext context,
     required String userQuestion,
     List<Map<String, String>> chatHistory = const [],
+    AiRequestPriority priority = AiRequestPriority.user,
   }) {
     if (!llmEngine.isLoaded) {
-      return Stream.error(const AiModelNotLoadedException());
+      return AiGenerationHandle(
+        requestId: '',
+        stream: Stream.error(const AiModelNotLoadedException()),
+        onCancel: () async {},
+      );
     }
     final msgs = PromptBuilder.buildSentenceQAMessages(
       context: context,
@@ -193,19 +248,37 @@ class AiService extends ChangeNotifier {
       userQuestion: userQuestion,
       chatHistory: chatHistory,
     );
-    return llmEngine.generate(
+    return llmEngine.startGeneration(
       prompt,
       settings: _settings,
       chatMessages: msgs,
+      priority: priority,
     );
   }
 
-  Stream<String> askGeneralQA({
+  Stream<String> askSentenceQA({
+    required SentenceContext context,
     required String userQuestion,
     List<Map<String, String>> chatHistory = const [],
   }) {
+    return startSentenceQA(
+      context: context,
+      userQuestion: userQuestion,
+      chatHistory: chatHistory,
+    ).stream;
+  }
+
+  AiGenerationHandle startGeneralQA({
+    required String userQuestion,
+    List<Map<String, String>> chatHistory = const [],
+    AiRequestPriority priority = AiRequestPriority.user,
+  }) {
     if (!llmEngine.isLoaded) {
-      return Stream.error(const AiModelNotLoadedException());
+      return AiGenerationHandle(
+        requestId: '',
+        stream: Stream.error(const AiModelNotLoadedException()),
+        onCancel: () async {},
+      );
     }
     final msgs = PromptBuilder.buildGeneralQAMessages(
       userQuestion: userQuestion,
@@ -215,10 +288,21 @@ class AiService extends ChangeNotifier {
       userQuestion: userQuestion,
       chatHistory: chatHistory,
     );
-    return llmEngine.generate(
+    return llmEngine.startGeneration(
       prompt,
       settings: _settings,
       chatMessages: msgs,
+      priority: priority,
     );
+  }
+
+  Stream<String> askGeneralQA({
+    required String userQuestion,
+    List<Map<String, String>> chatHistory = const [],
+  }) {
+    return startGeneralQA(
+      userQuestion: userQuestion,
+      chatHistory: chatHistory,
+    ).stream;
   }
 }
