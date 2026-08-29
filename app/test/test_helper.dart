@@ -15,7 +15,18 @@ void setupMockPlatformChannels() {
   // Mock audioplayers method channels
   messenger.setMockMethodCallHandler(
     const MethodChannel('xyz.luan/audioplayers'),
-    (MethodCall call) async => 1,
+    (MethodCall call) async {
+      if (call.arguments is Map && (call.arguments as Map)['playerId'] != null) {
+        final playerId = (call.arguments as Map)['playerId'] as String;
+        messenger.setMockMessageHandler(
+          'xyz.luan/audioplayers/events/$playerId',
+          (ByteData? message) async {
+            return const StandardMethodCodec().encodeSuccessEnvelope(null);
+          },
+        );
+      }
+      return 1;
+    },
   );
   messenger.setMockMethodCallHandler(
     const MethodChannel('xyz.luan/audioplayers.global'),

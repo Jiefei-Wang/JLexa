@@ -125,6 +125,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             label: const Text('Choose GGUF Model'),
                           ),
                         ),
+                        if (llmInfo != null && !llmInfo.isLoaded) ...[
+                          const SizedBox(width: 8),
+                          FilledButton.tonal(
+                            onPressed: _controller.isLoading ? null : _controller.loadConfiguredLlmModel,
+                            child: const Text('Load'),
+                          ),
+                        ],
                         if (llmInfo?.isLoaded == true) ...[
                           const SizedBox(width: 8),
                           OutlinedButton(
@@ -176,7 +183,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            speechInfo?.isLoaded == true ? 'Ready' : 'Not Loaded',
+                            speechInfo?.isLoaded == true ? 'Ready' : (speechInfo != null ? 'Configured' : 'Not Loaded'),
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
@@ -196,6 +203,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             label: const Text('Choose Whisper Model'),
                           ),
                         ),
+                        if (speechInfo != null && !speechInfo.isLoaded) ...[
+                          const SizedBox(width: 8),
+                          FilledButton.tonal(
+                            onPressed: _controller.isLoading ? null : _controller.loadConfiguredSpeechModel,
+                            child: const Text('Load'),
+                          ),
+                        ],
                         if (speechInfo?.isLoaded == true) ...[
                           const SizedBox(width: 8),
                           OutlinedButton(

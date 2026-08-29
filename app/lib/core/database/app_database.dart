@@ -21,6 +21,9 @@ class AppDatabase {
     return await openDatabase(
       path,
       version: 1,
+      onConfigure: (db) async {
+        await db.execute('PRAGMA foreign_keys = ON');
+      },
       onCreate: _createDB,
     );
   }
@@ -110,6 +113,7 @@ class AppDatabase {
 
   Future<void> close() async {
     final db = _database;
+    _database = null;
     if (db != null) {
       await db.close();
     }

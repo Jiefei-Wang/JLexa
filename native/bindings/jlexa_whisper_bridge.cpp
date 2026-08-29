@@ -8,6 +8,13 @@ struct JLexaWhisperBridge::Impl {
     whisper_context* ctx = nullptr;
     std::mutex mtx;
     std::atomic<bool> isCancelled{false};
+
+    void unloadModelLocked() {
+        if (ctx != nullptr) {
+            whisper_free(ctx);
+            ctx = nullptr;
+        }
+    }
 };
 
 JLexaWhisperBridge& JLexaWhisperBridge::instance() {
@@ -24,10 +31,7 @@ JLexaWhisperBridge::~JLexaWhisperBridge() {
 
 bool JLexaWhisperBridge::loadModel(const std::string& modelPath) {
     std::lock_guard<std::mutex> lock(pImpl->mtx);
-    if (pImpl->ctx != nullptr) {
-        whisper_free(pImpl->ctx);
-        pImpl->ctx = nullptr;
-    }
+    pImpl->unloadModelLocked();
 
     whisper_context_params cparams = whisper_context_default_params();
     cparams.use_gpu = false; // CPU fallback on mobile for stability
@@ -38,13 +42,11 @@ bool JLexaWhisperBridge::loadModel(const std::string& modelPath) {
 
 void JLexaWhisperBridge::unloadModel() {
     std::lock_guard<std::mutex> lock(pImpl->mtx);
-    if (pImpl->ctx != nullptr) {
-        whisper_free(pImpl->ctx);
-        pImpl->ctx = nullptr;
-    }
+    pImpl->unloadModelLocked();
 }
 
-bool JLexaWhisperBridge::isModelLoaded() const {
+bool JLexaWhisperBridge::isModelLoaded() {
+    std::lock_guard<std::mutex> lock(pImpl->mtx);
     return pImpl->ctx != nullptr;
 }
 
@@ -78,13 +80,35 @@ std::vector<JLexaAudioSegment> JLexaWhisperBridge::transcribe(
     wparams.n_threads       = n_threads > 0 ? n_threads : 4;
     wparams.token_timestamps = true;
 
+    // Connect abort callback to atomic cancellation state
+    wparams.abort_callback = [](void* user_data) -> bool {
+        auto* impl = static_cast<JLexaWhisperBridge::Impl*>(user_data);
+        return impl ? impl->isCancelled.load() : false;
+    };
+    wparams.abort_callback_user_data = pImpl;
+
+    // Connect progress callback
+    if (progressCallback) {
+        wparams.progress_callback = [](whisper_context* /*ctx*/, whisper_state* /*state*/, int progress, void* user_data) {
+            auto* cb = static_cast<std::function<void(int)>*>(user_data);
+            if (cb && *cb) {
+                (*cb)(progress);
+            }
+        };
+        wparams.progress_callback_user_data = &progressCallback;
+    }
+
     if (whisper_full(pImpl->ctx, wparams, samples, static_cast<int>(n_samples)) != 0) {
+        return results;
+    }
+
+    if (pImpl->isCancelled.load()) {
         return results;
     }
 
     const int n_segments = whisper_full_n_segments(pImpl->ctx);
     for (int i = 0; i < n_segments; ++i) {
-        if (pImpl->isCancelled) break;
+        if (pImpl->isCancelled.load()) break;
 
         const int64_t t0 = whisper_full_get_segment_t0(pImpl->ctx, i) * 10; // Convert centiseconds to ms
         const int64_t t1 = whisper_full_get_segment_t1(pImpl->ctx, i) * 10;
@@ -122,10 +146,6 @@ std::vector<JLexaAudioSegment> JLexaWhisperBridge::transcribe(
 
         segment.confidence = token_count > 0 ? (total_prob / token_count) : 1.0f;
         results.push_back(segment);
-
-        if (progressCallback) {
-            progressCallback(static_cast<int>((i + 1) * 100 / n_segments));
-        }
     }
 
     return results;

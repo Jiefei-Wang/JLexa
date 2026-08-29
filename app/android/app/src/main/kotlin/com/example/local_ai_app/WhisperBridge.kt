@@ -4,17 +4,25 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.UUID
 
 class WhisperBridge : MethodChannel.MethodCallHandler {
 
     companion object {
+        var isLibraryAvailable: Boolean = false
+            private set
+
         init {
             try {
                 System.loadLibrary("jlexa_native")
-            } catch (e: UnsatisfiedLinkError) {
+                isLibraryAvailable = true
+            } catch (e: Throwable) {
+                isLibraryAvailable = false
                 e.printStackTrace()
             }
         }
@@ -26,13 +34,24 @@ class WhisperBridge : MethodChannel.MethodCallHandler {
     private external fun nativeTranscribe(
         samples: FloatArray,
         nThreads: Int,
-        language: String
+        language: String,
+        progressCallback: NativeProgressCallback?
     ): List<Map<String, Any>>?
     private external fun nativeCancel()
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val job = SupervisorJob()
+    private val scope = CoroutineScope(job + Dispatchers.IO)
+
+    interface NativeProgressCallback {
+        fun onProgress(progress: Int)
+    }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        if (!isLibraryAvailable && call.method != "extractAudioInfo") {
+            result.error("NATIVE_LIBRARY_UNAVAILABLE", "Native library libjlexa_native.so failed to load", null)
+            return
+        }
+
         when (call.method) {
             "loadModel" -> {
                 val modelPath = call.argument<String>("modelPath")
@@ -41,24 +60,73 @@ class WhisperBridge : MethodChannel.MethodCallHandler {
                     return
                 }
                 scope.launch {
-                    val loaded = nativeLoadModel(modelPath)
-                    withContext(Dispatchers.Main) {
-                        result.success(loaded)
+                    try {
+                        val loaded = nativeLoadModel(modelPath)
+                        withContext(Dispatchers.Main) {
+                            result.success(loaded)
+                        }
+                    } catch (e: Throwable) {
+                        withContext(Dispatchers.Main) {
+                            result.error("LOAD_ERROR", e.message, null)
+                        }
                     }
                 }
             }
 
             "unloadModel" -> {
                 scope.launch {
-                    nativeUnloadModel()
-                    withContext(Dispatchers.Main) {
-                        result.success(null)
+                    try {
+                        nativeUnloadModel()
+                        withContext(Dispatchers.Main) {
+                            result.success(null)
+                        }
+                    } catch (e: Throwable) {
+                        withContext(Dispatchers.Main) {
+                            result.error("UNLOAD_ERROR", e.message, null)
+                        }
                     }
                 }
             }
 
             "isModelLoaded" -> {
-                result.success(nativeIsModelLoaded())
+                try {
+                    result.success(nativeIsModelLoaded())
+                } catch (e: Throwable) {
+                    result.error("STATUS_ERROR", e.message, null)
+                }
+            }
+
+            "extractAudioInfo" -> {
+                val audioPath = call.argument<String>("audioPath")
+                val numPeaks = call.argument<Int>("numPeaks") ?: 200
+                if (audioPath == null) {
+                    result.error("INVALID_ARGS", "audioPath is required", null)
+                    return
+                }
+
+                scope.launch {
+                    try {
+                        val decoded = AudioDecoder.decodeAudioFull(audioPath, numPeaks)
+                        if (decoded == null) {
+                            withContext(Dispatchers.Main) {
+                                result.error("DECODE_ERROR", "Failed to decode audio file: $audioPath", null)
+                            }
+                            return@launch
+                        }
+                        withContext(Dispatchers.Main) {
+                            result.success(
+                                mapOf(
+                                    "durationMs" to decoded.durationMs,
+                                    "peaks" to decoded.waveformPeaks
+                                )
+                            )
+                        }
+                    } catch (e: Throwable) {
+                        withContext(Dispatchers.Main) {
+                            result.error("DECODE_ERROR", e.message, null)
+                        }
+                    }
+                }
             }
 
             "transcribeAudio" -> {
@@ -81,7 +149,7 @@ class WhisperBridge : MethodChannel.MethodCallHandler {
                             return@launch
                         }
 
-                        val rawSegments = nativeTranscribe(pcm, threads, "en")
+                        val rawSegments = nativeTranscribe(pcm, threads, "en", null)
                         val formattedList = mutableListOf<Map<String, Any>>()
 
                         rawSegments?.forEachIndexed { index, seg ->
@@ -109,7 +177,7 @@ class WhisperBridge : MethodChannel.MethodCallHandler {
                         withContext(Dispatchers.Main) {
                             result.success(formattedList)
                         }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         withContext(Dispatchers.Main) {
                             result.error("TRANSCRIBE_ERROR", e.message, null)
                         }
@@ -118,7 +186,9 @@ class WhisperBridge : MethodChannel.MethodCallHandler {
             }
 
             "cancelTranscription" -> {
-                nativeCancel()
+                try {
+                    nativeCancel()
+                } catch (_: Throwable) {}
                 result.success(null)
             }
 
@@ -127,17 +197,22 @@ class WhisperBridge : MethodChannel.MethodCallHandler {
     }
 
     private fun buildTokensJson(tokens: List<Map<String, Any>>): String {
-        val sb = StringBuilder("[")
-        tokens.forEachIndexed { i, tok ->
-            val text = (tok["text"] as? String ?: "").replace("\"", "\\\"")
-            val startMs = (tok["start_ms"] as? Number)?.toInt() ?: 0
-            val endMs = (tok["end_ms"] as? Number)?.toInt() ?: 0
-            val conf = (tok["confidence"] as? Number)?.toDouble() ?: 1.0
-
-            sb.append("{\"text\":\"$text\",\"start_ms\":$startMs,\"end_ms\":$endMs,\"confidence\":$conf}")
-            if (i < tokens.size - 1) sb.append(",")
+        val jsonArray = JSONArray()
+        for (tok in tokens) {
+            val obj = JSONObject()
+            obj.put("text", tok["text"] as? String ?: "")
+            obj.put("start_ms", (tok["start_ms"] as? Number)?.toInt() ?: 0)
+            obj.put("end_ms", (tok["end_ms"] as? Number)?.toInt() ?: 0)
+            obj.put("confidence", (tok["confidence"] as? Number)?.toDouble() ?: 1.0)
+            jsonArray.put(obj)
         }
-        sb.append("]")
-        return sb.toString()
+        return jsonArray.toString()
+    }
+
+    fun cleanUp() {
+        try {
+            nativeCancel()
+        } catch (_: Throwable) {}
+        job.cancel()
     }
 }

@@ -45,10 +45,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
         uncertainWords: (map['uncertainWords'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
       );
     } else {
-      sentenceCtx = const SentenceContext(
-        lessonTitle: 'TED Talk: The power of habit',
-        sentenceText: 'The key is not to prioritize what\'s on your schedule, but to schedule your priorities.',
-      );
+      sentenceCtx = null;
     }
 
     _controller = AiChatController(

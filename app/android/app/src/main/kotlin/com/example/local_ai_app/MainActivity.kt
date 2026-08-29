@@ -30,4 +30,10 @@ class MainActivity : FlutterActivity() {
             "com.jlexa.app/llama_stream"
         ).setStreamHandler(llamaBridge)
     }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        whisperBridge.cleanUp()
+        llamaBridge.cleanUp()
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
 }

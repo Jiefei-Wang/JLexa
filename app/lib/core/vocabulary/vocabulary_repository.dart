@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 import '../database/app_database.dart';
+import '../utils/text_normalization.dart';
 import 'srs_scheduler.dart';
 import 'vocabulary_models.dart';
 
@@ -14,7 +16,7 @@ abstract class IVocabularyRepository {
   Future<void> deleteWord(String id);
 }
 
-class VocabularyRepository implements IVocabularyRepository {
+class VocabularyRepository extends ChangeNotifier implements IVocabularyRepository {
   final ISrsScheduler _scheduler;
   final _uuid = const Uuid();
 
@@ -39,7 +41,9 @@ class VocabularyRepository implements IVocabularyRepository {
 
   @override
   Future<VocabularyWord?> getWord(String word) async {
-    final clean = word.trim().toLowerCase();
+    final clean = TextNormalization.normalizeWord(word);
+    if (clean.isEmpty) return null;
+
     final db = await AppDatabase.instance.database;
     final results = await db.query(
       'vocabulary',
@@ -59,18 +63,21 @@ class VocabularyRepository implements IVocabularyRepository {
 
   @override
   Future<void> saveWord(VocabularyWord word) async {
+    final clean = TextNormalization.normalizeWord(word.word);
     final db = await AppDatabase.instance.database;
-    final existing = await getWord(word.word);
+    final existing = await getWord(clean);
 
-    final finalWord = word.id.isEmpty
-        ? word.copyWith(id: existing?.id ?? _uuid.v4())
-        : word;
+    final finalWord = word.copyWith(
+      id: word.id.isEmpty ? (existing?.id ?? _uuid.v4()) : (existing?.id ?? word.id),
+      word: clean,
+    );
 
     await db.insert(
       'vocabulary',
       finalWord.toMap(),
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+    notifyListeners();
   }
 
   @override
@@ -93,6 +100,7 @@ class VocabularyRepository implements IVocabularyRepository {
       where: 'id = ?',
       whereArgs: [wordId],
     );
+    notifyListeners();
   }
 
   @override
@@ -103,5 +111,6 @@ class VocabularyRepository implements IVocabularyRepository {
       where: 'id = ?',
       whereArgs: [id],
     );
+    notifyListeners();
   }
 }

@@ -53,6 +53,10 @@ void main() {
         home: AiChatScreen(
           aiService: aiService,
           speechEngine: aiService.speechEngine,
+          initialContext: const {
+            'lessonTitle': 'TED Talk: The power of habit',
+            'sentenceText': 'The key is not to prioritize what is on your schedule.',
+          },
         ),
       ),
     );

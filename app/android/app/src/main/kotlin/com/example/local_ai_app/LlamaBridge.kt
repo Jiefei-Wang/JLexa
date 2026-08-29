@@ -7,16 +7,24 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
     companion object {
+        var isLibraryAvailable: Boolean = false
+            private set
+
         init {
             try {
                 System.loadLibrary("jlexa_native")
-            } catch (e: UnsatisfiedLinkError) {
+                isLibraryAvailable = true
+            } catch (e: Throwable) {
+                isLibraryAvailable = false
                 e.printStackTrace()
             }
         }
@@ -30,20 +38,29 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
         maxTokens: Int,
         temperature: Float,
         topP: Float,
-        callback: TokenCallback
+        callback: NativeGenerationCallback
     )
     private external fun nativeCancel()
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val job = SupervisorJob()
+    private val scope = CoroutineScope(job + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
     private var eventSink: EventChannel.EventSink? = null
+    private val isGenerating = AtomicBoolean(false)
+    private var activeRequestId: String? = null
 
-    // Native token callback interface
-    interface TokenCallback {
+    // Native token & completion callback interface
+    interface NativeGenerationCallback {
         fun onToken(token: String)
+        fun onComplete(cancelled: Boolean, errorMsg: String)
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        if (!isLibraryAvailable) {
+            result.error("NATIVE_LIBRARY_UNAVAILABLE", "Native library libjlexa_native.so failed to load", null)
+            return
+        }
+
         when (call.method) {
             "loadModel" -> {
                 val modelPath = call.argument<String>("modelPath")
@@ -56,32 +73,55 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
                 }
 
                 scope.launch {
-                    val loaded = nativeLoadModel(modelPath, contextLength, threads)
-                    withContext(Dispatchers.Main) {
-                        result.success(loaded)
+                    try {
+                        val loaded = nativeLoadModel(modelPath, contextLength, threads)
+                        withContext(Dispatchers.Main) {
+                            result.success(loaded)
+                        }
+                    } catch (e: Throwable) {
+                        withContext(Dispatchers.Main) {
+                            result.error("LOAD_ERROR", e.message, null)
+                        }
                     }
                 }
             }
 
             "unloadModel" -> {
                 scope.launch {
-                    nativeUnloadModel()
-                    withContext(Dispatchers.Main) {
-                        result.success(null)
+                    try {
+                        nativeUnloadModel()
+                        withContext(Dispatchers.Main) {
+                            result.success(null)
+                        }
+                    } catch (e: Throwable) {
+                        withContext(Dispatchers.Main) {
+                            result.error("UNLOAD_ERROR", e.message, null)
+                        }
                     }
                 }
             }
 
             "isModelLoaded" -> {
-                result.success(nativeIsModelLoaded())
+                try {
+                    result.success(nativeIsModelLoaded())
+                } catch (e: Throwable) {
+                    result.error("STATUS_ERROR", e.message, null)
+                }
             }
 
             "startGeneration" -> {
+                val requestId = call.argument<String>("requestId") ?: UUID.randomUUID().toString()
                 val prompt = call.argument<String>("prompt") ?: ""
                 val maxTokens = call.argument<Int>("maxTokens") ?: 512
                 val temperature = (call.argument<Double>("temperature") ?: 0.7).toFloat()
                 val topP = (call.argument<Double>("topP") ?: 0.9).toFloat()
 
+                if (!isGenerating.compareAndSet(false, true)) {
+                    result.error("BUSY", "Another generation is already in progress", null)
+                    return
+                }
+
+                activeRequestId = requestId
                 result.success(null)
 
                 scope.launch {
@@ -91,24 +131,79 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
                             maxTokens,
                             temperature,
                             topP,
-                            object : TokenCallback {
+                            object : NativeGenerationCallback {
                                 override fun onToken(token: String) {
                                     mainHandler.post {
-                                        eventSink?.success(token)
+                                        eventSink?.success(
+                                            mapOf(
+                                                "requestId" to requestId,
+                                                "type" to "token",
+                                                "text" to token
+                                            )
+                                        )
+                                    }
+                                }
+
+                                override fun onComplete(cancelled: Boolean, errorMsg: String) {
+                                    isGenerating.set(false)
+                                    if (activeRequestId == requestId) {
+                                        activeRequestId = null
+                                    }
+                                    mainHandler.post {
+                                        if (cancelled) {
+                                            eventSink?.success(
+                                                mapOf(
+                                                    "requestId" to requestId,
+                                                    "type" to "cancelled"
+                                                )
+                                            )
+                                        } else if (errorMsg.isNotEmpty()) {
+                                            eventSink?.success(
+                                                mapOf(
+                                                    "requestId" to requestId,
+                                                    "type" to "error",
+                                                    "message" to errorMsg
+                                                )
+                                            )
+                                        } else {
+                                            eventSink?.success(
+                                                mapOf(
+                                                    "requestId" to requestId,
+                                                    "type" to "done"
+                                                )
+                                            )
+                                        }
                                     }
                                 }
                             }
                         )
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
+                        isGenerating.set(false)
+                        if (activeRequestId == requestId) {
+                            activeRequestId = null
+                        }
                         mainHandler.post {
-                            eventSink?.error("GENERATION_ERROR", e.message, null)
+                            eventSink?.success(
+                                mapOf(
+                                    "requestId" to requestId,
+                                    "type" to "error",
+                                    "message" to (e.message ?: "Generation exception")
+                                )
+                            )
                         }
                     }
                 }
             }
 
             "cancelGeneration" -> {
-                nativeCancel()
+                val reqId = call.argument<String>("requestId") ?: activeRequestId
+                try {
+                    nativeCancel()
+                } catch (_: Throwable) {}
+                isGenerating.set(false)
+                if (reqId != null && activeRequestId == reqId) {
+                    activeRequestId = null
+                }
                 result.success(null)
             }
 
@@ -121,6 +216,16 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
     }
 
     override fun onCancel(arguments: Any?) {
+        eventSink = null
+    }
+
+    fun cleanUp() {
+        try {
+            nativeCancel()
+        } catch (_: Throwable) {}
+        isGenerating.set(false)
+        activeRequestId = null
+        job.cancel()
         eventSink = null
     }
 }

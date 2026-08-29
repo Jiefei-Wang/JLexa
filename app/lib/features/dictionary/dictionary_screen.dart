@@ -78,16 +78,18 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                   color: _controller.isSaved ? Colors.amber : AppColors.textPrimary,
                 ),
                 onPressed: _controller.currentEntry != null
-                    ? () {
-                        _controller.toggleSaveToVocabulary();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              _controller.isSaved ? 'Saved to Vocabulary' : 'Removed from Vocabulary',
+                    ? () async {
+                        await _controller.toggleSaveToVocabulary();
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                _controller.isSaved ? 'Saved to Vocabulary' : 'Removed from Vocabulary',
+                              ),
+                              duration: const Duration(seconds: 1),
                             ),
-                            duration: const Duration(seconds: 1),
-                          ),
-                        );
+                          );
+                        }
                       }
                     : null,
                 tooltip: 'Save to Vocabulary',

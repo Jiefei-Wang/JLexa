@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/ai/ai_service.dart';
@@ -25,6 +26,11 @@ class RepeaterController extends ChangeNotifier {
   String _aiExplanation = '';
   bool _isAiGenerating = false;
   bool _isLoading = false;
+
+  int _loadGeneration = 0;
+  String? _activeSegmentId;
+  int _aiExplanationGeneration = 0;
+  Timer? _positionPersistDebounce;
 
   AudioLesson? get lesson => _lesson;
   List<AudioSegment> get segments => _segments;
@@ -57,7 +63,23 @@ class RepeaterController extends ChangeNotifier {
   }
 
   void _onAudioServiceUpdate() {
+    _debouncePersistPosition();
+    final newSegId = audioService.currentSegment?.id;
+    if (newSegId != _activeSegmentId) {
+      _activeSegmentId = newSegId;
+      _fetchAiExplanation();
+    }
     notifyListeners();
+  }
+
+  void _debouncePersistPosition() {
+    if (_lesson == null) return;
+    _positionPersistDebounce?.cancel();
+    _positionPersistDebounce = Timer(const Duration(milliseconds: 1000), () {
+      if (_lesson != null && !_isDisposed) {
+        lessonRepo.updateLessonPosition(_lesson!.id, positionMs);
+      }
+    });
   }
 
   Future<void> _loadDefaultLesson() async {
@@ -68,24 +90,36 @@ class RepeaterController extends ChangeNotifier {
   }
 
   Future<void> loadLesson(AudioLesson lesson) async {
+    final currentGen = ++_loadGeneration;
     _isLoading = true;
     _lesson = lesson;
+    _activeSegmentId = null;
     notifyListeners();
 
     try {
-      _segments = await lessonRepo.getSegmentsForLesson(lesson.id);
-      _fullWaveformPeaks = await waveformService.extractAndCacheWaveform(
+      final segs = await lessonRepo.getSegmentsForLesson(lesson.id);
+      if (currentGen != _loadGeneration) return;
+      _segments = segs;
+
+      final peaks = await waveformService.extractAndCacheWaveform(
         lesson.localPath,
         lesson.id,
         lesson.durationMs,
       );
+      if (currentGen != _loadGeneration) return;
+      _fullWaveformPeaks = peaks;
 
       await audioService.loadLesson(lesson, _segments);
+      if (currentGen != _loadGeneration) return;
+
+      _activeSegmentId = audioService.currentSegment?.id;
       _fetchAiExplanation();
     } catch (_) {}
 
-    _isLoading = false;
-    notifyListeners();
+    if (currentGen == _loadGeneration) {
+      _isLoading = false;
+      notifyListeners();
+    }
   }
 
   void toggleSnapToSpeech() {
@@ -112,7 +146,7 @@ class RepeaterController extends ChangeNotifier {
   void nextSentence() => audioService.nextSentence();
   void repeatCurrentSentence() => audioService.repeatCurrentSentence();
 
-  // Segment adjustment operations
+  // Segment adjustment operations with strict boundary validation
   Future<void> updateSegmentBounds({
     required String segmentId,
     required int newStartMs,
@@ -121,24 +155,46 @@ class RepeaterController extends ChangeNotifier {
     final index = _segments.indexWhere((s) => s.id == segmentId);
     if (index == -1) return;
 
-    int finalStart = newStartMs.clamp(0, durationMs);
-    int finalEnd = newEndMs.clamp(0, durationMs);
+    final totalDur = durationMs > 0 ? durationMs : 1000000;
+    int finalStart = newStartMs.clamp(0, totalDur);
+    int finalEnd = newEndMs.clamp(0, totalDur);
 
     if (_snapToSpeechEnabled) {
       finalStart = snapToSpeechService.snapBoundary(
         proposedPositionMs: finalStart,
         waveformPeaks: _fullWaveformPeaks,
-        totalDurationMs: durationMs,
+        totalDurationMs: totalDur,
       );
       finalEnd = snapToSpeechService.snapBoundary(
         proposedPositionMs: finalEnd,
         waveformPeaks: _fullWaveformPeaks,
-        totalDurationMs: durationMs,
+        totalDurationMs: totalDur,
       );
     }
 
+    // Min duration clamp without exceeding total duration
     if (finalEnd - finalStart < 500) {
-      finalEnd = finalStart + 500;
+      if (finalStart + 500 <= totalDur) {
+        finalEnd = finalStart + 500;
+      } else if (totalDur >= 500) {
+        finalEnd = totalDur;
+        finalStart = totalDur - 500;
+      } else {
+        finalStart = 0;
+        finalEnd = totalDur;
+      }
+    }
+
+    // Prevent overlap with adjacent segments
+    if (index > 0) {
+      finalStart = max(finalStart, _segments[index - 1].endMs);
+    }
+    if (index < _segments.length - 1) {
+      finalEnd = min(finalEnd, _segments[index + 1].startMs);
+    }
+
+    if (finalEnd <= finalStart) {
+      finalEnd = min(finalStart + 500, totalDur);
     }
 
     final updated = _segments[index].copyWith(
@@ -185,15 +241,42 @@ class RepeaterController extends ChangeNotifier {
     final index = _segments.indexWhere((s) => s.id == seg.id);
     if (index == -1) return;
 
-    // Split words between the two segments approximately
-    final words = seg.text.split(' ');
-    final mid = words.length ~/ 2;
-    final text1 = words.take(mid).join(' ');
-    final text2 = words.skip(mid).join(' ');
+    List<TranscriptToken> tokens1 = [];
+    List<TranscriptToken> tokens2 = [];
+    String text1 = '';
+    String text2 = '';
+
+    if (seg.tokens.isNotEmpty) {
+      int splitIndex = -1;
+      for (int i = 0; i < seg.tokens.length; i++) {
+        final tok = seg.tokens[i];
+        final tokMid = tok.startMs > 0 && tok.endMs > 0 ? (tok.startMs + tok.endMs) ~/ 2 : tok.endMs;
+        if (tokMid <= positionMs) {
+          splitIndex = i + 1;
+        } else {
+          break;
+        }
+      }
+
+      if (splitIndex <= 0) splitIndex = 1;
+      if (splitIndex >= seg.tokens.length) splitIndex = seg.tokens.length - 1;
+
+      tokens1 = seg.tokens.sublist(0, splitIndex);
+      tokens2 = seg.tokens.sublist(splitIndex);
+      text1 = tokens1.map((t) => t.text).join(' ');
+      text2 = tokens2.map((t) => t.text).join(' ');
+    } else {
+      final words = seg.text.split(' ');
+      final ratio = (positionMs - seg.startMs) / max(1, seg.endMs - seg.startMs);
+      final wordIndex = (words.length * ratio).round().clamp(1, max(1, words.length - 1)).toInt();
+      text1 = words.take(wordIndex).join(' ');
+      text2 = words.skip(wordIndex).join(' ');
+    }
 
     final firstSeg = seg.copyWith(
       endMs: positionMs,
       text: text1.isNotEmpty ? text1 : seg.text,
+      tokens: tokens1,
       isUserEdited: true,
     );
 
@@ -204,6 +287,7 @@ class RepeaterController extends ChangeNotifier {
       endMs: seg.endMs,
       text: text2.isNotEmpty ? text2 : '...',
       confidence: seg.confidence,
+      tokens: tokens2,
       isUserEdited: true,
     );
 
@@ -268,6 +352,8 @@ class RepeaterController extends ChangeNotifier {
     final cur = currentSegment;
     if (cur == null) return;
 
+    final gen = ++_aiExplanationGeneration;
+
     if (!aiService.llmEngine.isLoaded) {
       _aiExplanation = 'Load a local AI model to generate an explanation.';
       notifyListeners();
@@ -278,13 +364,19 @@ class RepeaterController extends ChangeNotifier {
     _aiExplanation = '';
     notifyListeners();
 
-    final context = getCurrentSentenceContext();
-    await for (final chunk in aiService.explainSentence(context)) {
-      _aiExplanation += chunk;
+    try {
+      final context = getCurrentSentenceContext();
+      await for (final chunk in aiService.explainSentence(context)) {
+        if (gen != _aiExplanationGeneration || _isDisposed) break;
+        _aiExplanation += chunk;
+        notifyListeners();
+      }
+    } catch (_) {}
+
+    if (gen == _aiExplanationGeneration && !_isDisposed) {
+      _isAiGenerating = false;
       notifyListeners();
     }
-    _isAiGenerating = false;
-    notifyListeners();
   }
 
   bool _isDisposed = false;
@@ -299,6 +391,10 @@ class RepeaterController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    _positionPersistDebounce?.cancel();
+    if (_lesson != null) {
+      lessonRepo.updateLessonPosition(_lesson!.id, positionMs);
+    }
     audioService.removeListener(_onAudioServiceUpdate);
     super.dispose();
   }

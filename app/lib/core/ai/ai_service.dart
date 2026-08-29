@@ -14,6 +14,14 @@ class AiService extends ChangeNotifier {
   AiGenerationSettings _settings = const AiGenerationSettings();
   AiGenerationSettings get settings => _settings;
 
+  String? _configuredLlmPath;
+  String? get configuredLlmPath => _configuredLlmPath;
+
+  String? _configuredSpeechPath;
+  String? get configuredSpeechPath => _configuredSpeechPath;
+
+  bool get isGenerating => llmEngine.state == AiModelState.generating;
+
   AiService({
     AiEngine? llm,
     SpeechRecognitionEngine? speech,
@@ -31,21 +39,11 @@ class AiService extends ChangeNotifier {
       };
 
       if (map.containsKey('llm_model_path')) {
-        final path = map['llm_model_path']!;
-        if (path.isNotEmpty) {
-          try {
-            await llmEngine.loadModel(path, settings: _settings);
-          } catch (_) {}
-        }
+        _configuredLlmPath = map['llm_model_path'];
       }
 
       if (map.containsKey('whisper_model_path')) {
-        final path = map['whisper_model_path']!;
-        if (path.isNotEmpty) {
-          try {
-            await speechEngine.loadModel(path);
-          } catch (_) {}
-        }
+        _configuredSpeechPath = map['whisper_model_path'];
       }
 
       notifyListeners();
@@ -64,6 +62,7 @@ class AiService extends ChangeNotifier {
   }
 
   Future<void> loadLlmModel(String path) async {
+    _configuredLlmPath = path;
     await llmEngine.loadModel(path, settings: _settings);
     await saveModelPath('llm_model_path', path);
     notifyListeners();
@@ -71,11 +70,13 @@ class AiService extends ChangeNotifier {
 
   Future<void> unloadLlmModel() async {
     await llmEngine.unload();
+    _configuredLlmPath = null;
     await saveModelPath('llm_model_path', '');
     notifyListeners();
   }
 
   Future<void> loadSpeechModel(String path) async {
+    _configuredSpeechPath = path;
     await speechEngine.loadModel(path);
     await saveModelPath('whisper_model_path', path);
     notifyListeners();
@@ -83,6 +84,7 @@ class AiService extends ChangeNotifier {
 
   Future<void> unloadSpeechModel() async {
     await speechEngine.unload();
+    _configuredSpeechPath = null;
     await saveModelPath('whisper_model_path', '');
     notifyListeners();
   }
@@ -126,6 +128,20 @@ class AiService extends ChangeNotifier {
     }
     final prompt = PromptBuilder.buildSentenceQA(
       context: context,
+      userQuestion: userQuestion,
+      chatHistory: chatHistory,
+    );
+    return llmEngine.generate(prompt, settings: _settings);
+  }
+
+  Stream<String> askGeneralQA({
+    required String userQuestion,
+    List<Map<String, String>> chatHistory = const [],
+  }) {
+    if (!llmEngine.isLoaded) {
+      return Stream.value('Load a local AI model to ask questions.');
+    }
+    final prompt = PromptBuilder.buildGeneralQA(
       userQuestion: userQuestion,
       chatHistory: chatHistory,
     );

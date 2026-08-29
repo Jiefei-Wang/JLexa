@@ -27,7 +27,7 @@ public:
 
     bool loadModel(const std::string& modelPath);
     void unloadModel();
-    bool isModelLoaded() const;
+    bool isModelLoaded();
 
     std::vector<JLexaAudioSegment> transcribe(
         const float* samples,

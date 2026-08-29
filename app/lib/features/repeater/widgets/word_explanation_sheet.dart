@@ -6,6 +6,7 @@ import '../../../core/dictionary/dictionary_models.dart';
 import '../../../core/dictionary/dictionary_repository.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
+import '../../../core/utils/text_normalization.dart';
 import '../../../core/vocabulary/vocabulary_models.dart';
 import '../../../core/vocabulary/vocabulary_repository.dart';
 
@@ -43,10 +44,11 @@ class _WordExplanationSheetState extends State<WordExplanationSheet> {
   }
 
   Future<void> _loadWordInfo() async {
-    final clean = widget.word.replaceAll(RegExp(r'[^\w\s]'), '').trim();
+    final clean = TextNormalization.normalizeWord(widget.word);
     final entry = await widget.dictionaryRepo.lookupWord(clean);
     final saved = await widget.vocabularyRepo.isWordSaved(clean);
 
+    if (!mounted) return;
     setState(() {
       _entry = entry;
       _isSaved = saved;
@@ -77,14 +79,16 @@ class _WordExplanationSheetState extends State<WordExplanationSheet> {
   }
 
   Future<void> _toggleSave() async {
-    final clean = widget.word.replaceAll(RegExp(r'[^\w\s]'), '').trim();
+    final clean = TextNormalization.normalizeWord(widget.word);
     if (_isSaved) {
       final existing = await widget.vocabularyRepo.getWord(clean);
       if (existing != null) {
         await widget.vocabularyRepo.deleteWord(existing.id);
-        setState(() {
-          _isSaved = false;
-        });
+        if (mounted) {
+          setState(() {
+            _isSaved = false;
+          });
+        }
       }
     } else {
       final newWord = VocabularyWord(
@@ -99,15 +103,23 @@ class _WordExplanationSheetState extends State<WordExplanationSheet> {
         dateAdded: DateTime.now(),
       );
       await widget.vocabularyRepo.saveWord(newWord);
-      setState(() {
-        _isSaved = true;
-      });
+      if (mounted) {
+        setState(() {
+          _isSaved = true;
+        });
+      }
     }
   }
 
   @override
+  void dispose() {
+    _tts.stop();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final cleanWord = widget.word.replaceAll(RegExp(r'[^\w\s]'), '').trim();
+    final cleanWord = TextNormalization.normalizeWord(widget.word);
 
     return Container(
       padding: const EdgeInsets.all(20),

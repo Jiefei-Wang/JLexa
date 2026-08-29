@@ -97,4 +97,25 @@ Translate the following English text into natural, fluent Chinese:
 
     return buffer.toString();
   }
+
+  static String buildGeneralQA({
+    required String userQuestion,
+    List<Map<String, String>> chatHistory = const [],
+  }) {
+    final buffer = StringBuffer();
+    buffer.writeln(systemPrefix);
+
+    if (chatHistory.isNotEmpty) {
+      buffer.writeln('\nConversation history:');
+      for (final msg in chatHistory) {
+        final role = msg['role'] == 'user' ? 'User' : 'Assistant';
+        buffer.writeln('$role: ${msg['content']}');
+      }
+    }
+
+    buffer.writeln('\nUser: $userQuestion');
+    buffer.writeln('Assistant:');
+
+    return buffer.toString();
+  }
 }

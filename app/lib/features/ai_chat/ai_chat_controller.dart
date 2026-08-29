@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/ai/ai_models.dart';
@@ -33,7 +35,6 @@ class AiChatController extends ChangeNotifier {
     SentenceContext? initialContext,
   }) : _context = initialContext {
     _initTts();
-    _initSampleConversation();
   }
 
   void _initTts() {
@@ -41,31 +42,6 @@ class AiChatController extends ChangeNotifier {
       _tts.setLanguage('en-US');
       _tts.setSpeechRate(0.45);
     } catch (_) {}
-  }
-
-  void _initSampleConversation() {
-    if (_context != null) {
-      _messages.add(
-        ChatMessage(
-          id: _uuid.v4(),
-          role: 'user',
-          content: 'Why is this phrase used?',
-          timestamp: DateTime.now().subtract(const Duration(minutes: 2)),
-          audioTimestampLabel: '02:41',
-        ),
-      );
-      _messages.add(
-        ChatMessage(
-          id: _uuid.v4(),
-          role: 'assistant',
-          content:
-              'It\'s used to highlight the importance of intentionally focusing on what matters most. '
-              '"Prioritize" means to decide the order of importance, while "schedule" refers to allocating time on your calendar.',
-          timestamp: DateTime.now().subtract(const Duration(minutes: 2)),
-          audioTimestampLabel: '02:41',
-        ),
-      );
-    }
   }
 
   void toggleSummaryExpanded() {
@@ -82,6 +58,8 @@ class AiChatController extends ChangeNotifier {
   Future<void> sendMessage(String text) async {
     final clean = text.trim();
     if (clean.isEmpty) return;
+
+    if (_isGenerating || aiService.isGenerating) return;
 
     final userMessage = ChatMessage(
       id: _uuid.v4(),
@@ -116,38 +94,52 @@ class AiChatController extends ChangeNotifier {
     _messages.add(assistantMsg);
     notifyListeners();
 
-    final ctx = _context ??
-        const SentenceContext(
-          lessonTitle: 'General Q&A',
-          sentenceText: '',
-        );
-
-    final historyList = _messages
-        .take(_messages.length - 1)
+    // Pass conversation history excluding the current query
+    final priorHistory = _messages
+        .take(_messages.length - 2)
         .map((m) => {'role': m.role, 'content': m.content})
         .toList();
 
-    String accumulated = '';
-    await for (final chunk in aiService.askSentenceQA(
-      context: ctx,
-      userQuestion: clean,
-      chatHistory: historyList,
-    )) {
-      accumulated += chunk;
+    try {
+      final stream = _context != null
+          ? aiService.askSentenceQA(
+              context: _context,
+              userQuestion: clean,
+              chatHistory: priorHistory,
+            )
+          : aiService.askGeneralQA(
+              userQuestion: clean,
+              chatHistory: priorHistory,
+            );
+
+      String accumulated = '';
+      await for (final chunk in stream) {
+        accumulated += chunk;
+        final idx = _messages.indexWhere((m) => m.id == assistantMsgId);
+        if (idx != -1) {
+          _messages[idx] = ChatMessage(
+            id: assistantMsgId,
+            role: 'assistant',
+            content: accumulated,
+            timestamp: DateTime.now(),
+          );
+          notifyListeners();
+        }
+      }
+    } catch (e) {
       final idx = _messages.indexWhere((m) => m.id == assistantMsgId);
       if (idx != -1) {
         _messages[idx] = ChatMessage(
           id: assistantMsgId,
           role: 'assistant',
-          content: accumulated,
+          content: 'Error generating response: $e',
           timestamp: DateTime.now(),
         );
-        notifyListeners();
       }
+    } finally {
+      _isGenerating = false;
+      notifyListeners();
     }
-
-    _isGenerating = false;
-    notifyListeners();
   }
 
   Future<String?> startStopRecording() async {
@@ -157,26 +149,42 @@ class AiChatController extends ChangeNotifier {
       notifyListeners();
       try {
         final path = await _audioRecorder.stop();
-        if (path != null && speechEngine.isLoaded) {
-          final segments = await speechEngine.transcribeAudio(
-            audioPath: path,
-            lessonId: 'voice_input',
-          );
-          if (segments.isNotEmpty) {
-            return segments.map((s) => s.text).join(' ');
+        if (path != null) {
+          try {
+            if (speechEngine.isLoaded) {
+              final segments = await speechEngine.transcribeAudio(
+                audioPath: path,
+                lessonId: 'voice_input',
+              );
+              if (segments.isNotEmpty) {
+                return segments.map((s) => s.text.trim()).join(' ');
+              }
+            }
+          } finally {
+            // Delete temp recording file
+            final tempFile = File(path);
+            if (await tempFile.exists()) {
+              await tempFile.delete();
+            }
           }
         }
       } catch (_) {}
     } else {
       // Start recording
-      if (await _audioRecorder.hasPermission()) {
-        _isRecording = true;
+      try {
+        if (await _audioRecorder.hasPermission()) {
+          final tempDir = await getTemporaryDirectory();
+          final filePath = '${tempDir.path}/voice_input_${DateTime.now().millisecondsSinceEpoch}.wav';
+          await _audioRecorder.start(
+            const RecordConfig(encoder: AudioEncoder.wav, sampleRate: 16000, numChannels: 1),
+            path: filePath,
+          );
+          _isRecording = true;
+          notifyListeners();
+        }
+      } catch (_) {
+        _isRecording = false;
         notifyListeners();
-        // Record to temp audio
-        await _audioRecorder.start(
-          const RecordConfig(encoder: AudioEncoder.wav, sampleRate: 16000, numChannels: 1),
-          path: '',
-        );
       }
     }
     return null;

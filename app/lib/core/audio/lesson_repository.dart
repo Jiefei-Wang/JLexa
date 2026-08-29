@@ -1,7 +1,9 @@
+import 'dart:io';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 import '../database/app_database.dart';
 import 'audio_models.dart';
+import 'waveform_service.dart';
 
 abstract class ILessonRepository {
   Future<List<AudioLesson>> getAllLessons();
@@ -25,44 +27,7 @@ class LessonRepository implements ILessonRepository {
       orderBy: 'last_opened_at DESC',
     );
 
-    if (results.isEmpty) {
-      // Create demo sample lessons from mockup if none exist
-      final defaultLessons = _createSeedLessons();
-      for (final l in defaultLessons) {
-        await saveLesson(l);
-      }
-      return defaultLessons;
-    }
-
     return results.map((e) => AudioLesson.fromMap(e)).toList();
-  }
-
-  List<AudioLesson> _createSeedLessons() {
-    final now = DateTime.now();
-    return [
-      AudioLesson(
-        id: 'lesson_ted_power_of_habit',
-        title: 'TED Talk: The power of habit',
-        originalFileName: 'ted_power_of_habit.mp3',
-        localPath: 'asset:sample_audio/ted_power_of_habit.mp3',
-        durationMs: 868000, // 14:28
-        currentPositionMs: 504000, // 08:24
-        createdAt: now.subtract(const Duration(days: 2)),
-        lastOpenedAt: now.subtract(const Duration(hours: 2)),
-        transcriptStatus: 'completed',
-      ),
-      AudioLesson(
-        id: 'lesson_bbc_6min',
-        title: 'BBC 6 Minute English',
-        originalFileName: 'bbc_6min_english.mp3',
-        localPath: 'asset:sample_audio/bbc_6min_english.mp3',
-        durationMs: 315000, // 05:15
-        currentPositionMs: 132000, // 02:12
-        createdAt: now.subtract(const Duration(days: 1)),
-        lastOpenedAt: now.subtract(const Duration(days: 1)),
-        transcriptStatus: 'completed',
-      ),
-    ];
   }
 
   @override
@@ -109,6 +74,8 @@ class LessonRepository implements ILessonRepository {
   @override
   Future<void> deleteLesson(String id) async {
     final db = await AppDatabase.instance.database;
+    final lesson = await getLesson(id);
+
     await db.delete(
       'audio_lessons',
       where: 'id = ?',
@@ -119,6 +86,22 @@ class LessonRepository implements ILessonRepository {
       where: 'lesson_id = ?',
       whereArgs: [id],
     );
+
+    // Clean up local audio file if it is an app-owned file
+    if (lesson != null && !lesson.localPath.startsWith('asset:')) {
+      try {
+        final audioFile = File(lesson.localPath);
+        if (await audioFile.exists()) {
+          await audioFile.delete();
+        }
+      } catch (_) {}
+    }
+
+    // Clean up waveform cache
+    try {
+      final waveformService = WaveformService();
+      await waveformService.deleteCachedWaveform(id);
+    } catch (_) {}
   }
 
   @override
@@ -127,6 +110,7 @@ class LessonRepository implements ILessonRepository {
     final results = await db.query(
       'audio_segments',
       where: 'lesson_id = ?',
+      whereArgs: [lessonId],
       orderBy: 'start_ms ASC',
     );
 

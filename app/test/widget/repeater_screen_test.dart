@@ -50,6 +50,7 @@ void main() {
     );
 
     await tester.runAsync(() async {
+      await lessonRepo.saveLesson(testLesson);
       await lessonRepo.saveSegments('test_lesson_1', [testSegment]);
       await tester.pumpWidget(
         MaterialApp(

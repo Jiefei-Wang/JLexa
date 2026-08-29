@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/ai/ai_service.dart';
+import '../../core/ai/native_ai_bridge.dart';
 import '../../core/audio/audio_models.dart';
 import '../../core/audio/audio_service.dart';
 import '../../core/audio/lesson_repository.dart';
@@ -110,15 +111,27 @@ class MainScaffoldState extends State<MainScaffold> {
           await lessonsDir.create(recursive: true);
         }
 
+        final lessonId = const Uuid().v4();
         final targetPath = p.join(lessonsDir.path, '${DateTime.now().millisecondsSinceEpoch}_$fileName');
         await File(originalPath).copy(targetPath);
 
+        // Extract genuine audio duration & waveform peaks via native decoder
+        int durationMs = 0;
+        try {
+          if (Platform.isAndroid && widget.aiService.speechEngine is NativeWhisperEngine) {
+            final info = await (widget.aiService.speechEngine as NativeWhisperEngine).extractAudioInfo(targetPath);
+            if (info != null && info['durationMs'] != null) {
+              durationMs = (info['durationMs'] as num).toInt();
+            }
+          }
+        } catch (_) {}
+
         final newLesson = AudioLesson(
-          id: const Uuid().v4(),
+          id: lessonId,
           title: fileName.replaceAll(RegExp(r'\.[a-zA-Z0-9]+$'), ''),
           originalFileName: fileName,
           localPath: targetPath,
-          durationMs: 60000, // Will be updated on load
+          durationMs: durationMs,
           createdAt: DateTime.now(),
           lastOpenedAt: DateTime.now(),
           transcriptStatus: widget.aiService.speechEngine.isLoaded ? 'none' : 'pending_model',

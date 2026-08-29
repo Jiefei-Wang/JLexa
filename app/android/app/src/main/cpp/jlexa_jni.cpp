@@ -45,7 +45,8 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeTranscribe(
     jobject /* this */,
     jfloatArray samples,
     jint n_threads,
-    jstring language
+    jstring language,
+    jobject progress_callback
 ) {
     if (!samples) return nullptr;
 
@@ -59,12 +60,27 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeTranscribe(
         env->ReleaseStringUTFChars(language, lang_cstr);
     }
 
+    std::function<void(int)> progress_fn = nullptr;
+    jclass progressClass = nullptr;
+    jmethodID onProgressMethod = nullptr;
+    if (progress_callback) {
+        progressClass = env->GetObjectClass(progress_callback);
+        if (progressClass) {
+            onProgressMethod = env->GetMethodID(progressClass, "onProgress", "(I)V");
+            if (onProgressMethod) {
+                progress_fn = [env, progress_callback, onProgressMethod](int prog) {
+                    env->CallVoidMethod(progress_callback, onProgressMethod, static_cast<jint>(prog));
+                };
+            }
+        }
+    }
+
     auto segments = JLexaWhisperBridge::instance().transcribe(
         pcm_data,
         n_samples,
         n_threads,
         lang,
-        nullptr
+        progress_fn
     );
 
     env->ReleaseFloatArrayElements(samples, pcm_data, JNI_ABORT);
@@ -87,31 +103,59 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeTranscribe(
     jobject resultList = env->NewObject(arrayListClass, arrayListInit);
 
     for (const auto& seg : segments) {
+        if (env->PushLocalFrame(32) < 0) {
+            continue; // Out of memory
+        }
+
         jobject segMap = env->NewObject(hashMapClass, hashMapInit);
 
-        env->CallObjectMethod(segMap, hashMapPut, env->NewStringUTF("start_ms"), env->CallStaticObjectMethod(longClass, longValueOf, (jlong)seg.start_ms));
-        env->CallObjectMethod(segMap, hashMapPut, env->NewStringUTF("end_ms"), env->CallStaticObjectMethod(longClass, longValueOf, (jlong)seg.end_ms));
-        env->CallObjectMethod(segMap, hashMapPut, env->NewStringUTF("text"), env->NewStringUTF(seg.text.c_str()));
-        env->CallObjectMethod(segMap, hashMapPut, env->NewStringUTF("confidence"), env->CallStaticObjectMethod(doubleClass, doubleValueOf, (jdouble)seg.confidence));
+        jstring kStart = env->NewStringUTF("start_ms");
+        jobject vStart = env->CallStaticObjectMethod(longClass, longValueOf, (jlong)seg.start_ms);
+        env->CallObjectMethod(segMap, hashMapPut, kStart, vStart);
+
+        jstring kEnd = env->NewStringUTF("end_ms");
+        jobject vEnd = env->CallStaticObjectMethod(longClass, longValueOf, (jlong)seg.end_ms);
+        env->CallObjectMethod(segMap, hashMapPut, kEnd, vEnd);
+
+        jstring kText = env->NewStringUTF("text");
+        jstring vText = env->NewStringUTF(seg.text.c_str());
+        env->CallObjectMethod(segMap, hashMapPut, kText, vText);
+
+        jstring kConf = env->NewStringUTF("confidence");
+        jobject vConf = env->CallStaticObjectMethod(doubleClass, doubleValueOf, (jdouble)seg.confidence);
+        env->CallObjectMethod(segMap, hashMapPut, kConf, vConf);
 
         // Tokens
         jobject tokenList = env->NewObject(arrayListClass, arrayListInit);
         for (const auto& tok : seg.tokens) {
+            if (env->PushLocalFrame(16) < 0) continue;
+
             jobject tokMap = env->NewObject(hashMapClass, hashMapInit);
-            env->CallObjectMethod(tokMap, hashMapPut, env->NewStringUTF("text"), env->NewStringUTF(tok.text.c_str()));
-            env->CallObjectMethod(tokMap, hashMapPut, env->NewStringUTF("start_ms"), env->CallStaticObjectMethod(longClass, longValueOf, (jlong)tok.start_ms));
-            env->CallObjectMethod(tokMap, hashMapPut, env->NewStringUTF("end_ms"), env->CallStaticObjectMethod(longClass, longValueOf, (jlong)tok.end_ms));
-            env->CallObjectMethod(tokMap, hashMapPut, env->NewStringUTF("confidence"), env->CallStaticObjectMethod(doubleClass, doubleValueOf, (jdouble)tok.confidence));
+            jstring tkText = env->NewStringUTF("text");
+            jstring tvText = env->NewStringUTF(tok.text.c_str());
+            env->CallObjectMethod(tokMap, hashMapPut, tkText, tvText);
+
+            jstring tkStart = env->NewStringUTF("start_ms");
+            jobject tvStart = env->CallStaticObjectMethod(longClass, longValueOf, (jlong)tok.start_ms);
+            env->CallObjectMethod(tokMap, hashMapPut, tkStart, tvStart);
+
+            jstring tkEnd = env->NewStringUTF("end_ms");
+            jobject tvEnd = env->CallStaticObjectMethod(longClass, longValueOf, (jlong)tok.end_ms);
+            env->CallObjectMethod(tokMap, hashMapPut, tkEnd, tvEnd);
+
+            jstring tkConf = env->NewStringUTF("confidence");
+            jobject tvConf = env->CallStaticObjectMethod(doubleClass, doubleValueOf, (jdouble)tok.confidence);
+            env->CallObjectMethod(tokMap, hashMapPut, tkConf, tvConf);
 
             env->CallBooleanMethod(tokenList, arrayListAdd, tokMap);
-            env->DeleteLocalRef(tokMap);
+            env->PopLocalFrame(nullptr);
         }
 
-        env->CallObjectMethod(segMap, hashMapPut, env->NewStringUTF("tokens"), tokenList);
-        env->CallBooleanMethod(resultList, arrayListAdd, segMap);
+        jstring kTokens = env->NewStringUTF("tokens");
+        env->CallObjectMethod(segMap, hashMapPut, kTokens, tokenList);
 
-        env->DeleteLocalRef(tokenList);
-        env->DeleteLocalRef(segMap);
+        env->CallBooleanMethod(resultList, arrayListAdd, segMap);
+        env->PopLocalFrame(nullptr);
     }
 
     return resultList;
@@ -168,25 +212,35 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGenerate(
     jint max_tokens,
     jfloat temperature,
     jfloat top_p,
-    jobject token_callback
+    jobject callback
 ) {
-    if (!prompt) return;
+    if (!prompt || !callback) return;
     const char* prompt_cstr = env->GetStringUTFChars(prompt, nullptr);
     std::string prompt_str = prompt_cstr;
     env->ReleaseStringUTFChars(prompt, prompt_cstr);
 
-    jclass callbackClass = env->GetObjectClass(token_callback);
+    jclass callbackClass = env->GetObjectClass(callback);
     jmethodID onTokenMethod = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
+    jmethodID onCompleteMethod = env->GetMethodID(callbackClass, "onComplete", "(ZLjava/lang/String;)V");
 
     JLexaLlamaBridge::instance().generate(
         prompt_str,
         max_tokens,
         temperature,
         top_p,
-        [env, token_callback, onTokenMethod](const std::string& token) {
+        [env, callback, onTokenMethod](const std::string& token) {
+            if (env->PushLocalFrame(8) < 0) return;
             jstring jtoken = env->NewStringUTF(token.c_str());
-            env->CallVoidMethod(token_callback, onTokenMethod, jtoken);
-            env->DeleteLocalRef(jtoken);
+            env->CallVoidMethod(callback, onTokenMethod, jtoken);
+            env->PopLocalFrame(nullptr);
+        },
+        [env, callback, onCompleteMethod](bool cancelled, const std::string& errorMsg) {
+            if (onCompleteMethod) {
+                if (env->PushLocalFrame(8) < 0) return;
+                jstring jerr = env->NewStringUTF(errorMsg.c_str());
+                env->CallVoidMethod(callback, onCompleteMethod, (jboolean)(cancelled ? JNI_TRUE : JNI_FALSE), jerr);
+                env->PopLocalFrame(nullptr);
+            }
         }
     );
 }

@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../../core/ai/ai_service.dart';
 import '../../core/dictionary/dictionary_models.dart';
 import '../../core/dictionary/dictionary_repository.dart';
+import '../../core/utils/text_normalization.dart';
 import '../../core/vocabulary/vocabulary_models.dart';
 import '../../core/vocabulary/vocabulary_repository.dart';
 
@@ -12,6 +13,10 @@ class DictionaryController extends ChangeNotifier {
   final VocabularyRepository vocabularyRepo;
   final AiService aiService;
   final FlutterTts _tts = FlutterTts();
+
+  int _queryGeneration = 0;
+  int _searchGeneration = 0;
+  bool _isSaving = false;
 
   String _currentQuery = '';
   DictionaryEntry? _currentEntry;
@@ -28,6 +33,7 @@ class DictionaryController extends ChangeNotifier {
   DictionaryEntry? get currentEntry => _currentEntry;
   bool get isSaved => _isSaved;
   bool get isLoading => _isLoading;
+  bool get isSaving => _isSaving;
   List<String> get suggestions => _suggestions;
   int get selectedTab => _selectedTab;
   String get aiTranslationText => _aiTranslationText;
@@ -69,14 +75,19 @@ class DictionaryController extends ChangeNotifier {
       return;
     }
 
-    _suggestions = await dictionaryRepo.searchSuggestions(query);
+    final gen = ++_queryGeneration;
+    final results = await dictionaryRepo.searchSuggestions(query.trim());
+    if (gen != _queryGeneration) return;
+
+    _suggestions = results;
     notifyListeners();
   }
 
   Future<void> search(String word) async {
-    final clean = word.trim();
+    final clean = TextNormalization.normalizeWord(word);
     if (clean.isEmpty) return;
 
+    final gen = ++_searchGeneration;
     _isLoading = true;
     _currentQuery = clean;
     _suggestions = [];
@@ -84,7 +95,10 @@ class DictionaryController extends ChangeNotifier {
     _aiExplanationText = '';
     notifyListeners();
 
-    _currentEntry = await dictionaryRepo.lookupWord(clean);
+    final entry = await dictionaryRepo.lookupWord(clean);
+    if (gen != _searchGeneration) return;
+
+    _currentEntry = entry;
     if (_currentEntry != null) {
       _isSaved = await vocabularyRepo.isWordSaved(_currentEntry!.word);
     } else {
@@ -105,31 +119,35 @@ class DictionaryController extends ChangeNotifier {
   }
 
   Future<void> toggleSaveToVocabulary() async {
-    if (_currentEntry == null) return;
+    if (_currentEntry == null || _isSaving) return;
+    _isSaving = true;
 
-    if (_isSaved) {
-      final existing = await vocabularyRepo.getWord(_currentEntry!.word);
-      if (existing != null) {
-        await vocabularyRepo.deleteWord(existing.id);
-        _isSaved = false;
+    try {
+      if (_isSaved) {
+        final existing = await vocabularyRepo.getWord(_currentEntry!.word);
+        if (existing != null) {
+          await vocabularyRepo.deleteWord(existing.id);
+          _isSaved = false;
+        }
+      } else {
+        final newWord = VocabularyWord(
+          id: const Uuid().v4(),
+          word: _currentEntry!.word,
+          phonetic: _currentEntry!.phonetic,
+          partOfSpeech: _currentEntry!.partOfSpeech,
+          definitionSnapshot: _currentEntry!.definitions.isNotEmpty ? _currentEntry!.definitions.first : '',
+          translationSnapshot: _currentEntry!.chineseDefinitions.isNotEmpty ? _currentEntry!.chineseDefinitions.first : '',
+          source: 'Dictionary',
+          sourceSentence: _currentEntry!.examples.isNotEmpty ? _currentEntry!.examples.first.english : null,
+          dateAdded: DateTime.now(),
+        );
+        await vocabularyRepo.saveWord(newWord);
+        _isSaved = true;
       }
-    } else {
-      final newWord = VocabularyWord(
-        id: const Uuid().v4(),
-        word: _currentEntry!.word,
-        phonetic: _currentEntry!.phonetic,
-        partOfSpeech: _currentEntry!.partOfSpeech,
-        definitionSnapshot: _currentEntry!.definitions.isNotEmpty ? _currentEntry!.definitions.first : '',
-        translationSnapshot: _currentEntry!.chineseDefinitions.isNotEmpty ? _currentEntry!.chineseDefinitions.first : '',
-        source: 'Dictionary',
-        sourceSentence: _currentEntry!.examples.isNotEmpty ? _currentEntry!.examples.first.english : null,
-        dateAdded: DateTime.now(),
-      );
-      await vocabularyRepo.saveWord(newWord);
-      _isSaved = true;
+    } finally {
+      _isSaving = false;
+      notifyListeners();
     }
-
-    notifyListeners();
   }
 
   Future<void> _fetchAiTranslation() async {

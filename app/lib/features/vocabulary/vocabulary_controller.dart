@@ -20,6 +20,11 @@ class VocabularyController extends ChangeNotifier {
   bool get isLoading => _isLoading;
 
   VocabularyController({required this.vocabularyRepo}) {
+    vocabularyRepo.addListener(_onRepoChanged);
+    loadWords();
+  }
+
+  void _onRepoChanged() {
     loadWords();
   }
 
@@ -92,6 +97,7 @@ class VocabularyController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    vocabularyRepo.removeListener(_onRepoChanged);
     super.dispose();
   }
 }

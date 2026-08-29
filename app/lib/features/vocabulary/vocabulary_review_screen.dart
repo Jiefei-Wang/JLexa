@@ -22,18 +22,32 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
   int _currentIndex = 0;
   bool _showAnswer = false;
   int _reviewedCount = 0;
+  bool _isSubmittingReview = false;
 
   void _handleRating(ReviewRating rating) async {
-    if (_currentIndex >= widget.dueWords.length) return;
-
-    final word = widget.dueWords[_currentIndex];
-    await widget.vocabularyRepo.reviewWord(word.id, rating);
-
+    if (_isSubmittingReview || _currentIndex >= widget.dueWords.length) return;
     setState(() {
-      _reviewedCount++;
-      _showAnswer = false;
-      _currentIndex++;
+      _isSubmittingReview = true;
     });
+
+    try {
+      final word = widget.dueWords[_currentIndex];
+      await widget.vocabularyRepo.reviewWord(word.id, rating);
+
+      if (mounted) {
+        setState(() {
+          _reviewedCount++;
+          _showAnswer = false;
+          _currentIndex++;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmittingReview = false;
+        });
+      }
+    }
   }
 
   @override
@@ -215,11 +229,11 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
     return Expanded(
       child: OutlinedButton(
         style: OutlinedButton.styleFrom(
-          side: BorderSide(color: color),
+          side: BorderSide(color: _isSubmittingReview ? color.withAlpha(80) : color),
           padding: const EdgeInsets.symmetric(vertical: 12),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
-        onPressed: () => _handleRating(rating),
+        onPressed: _isSubmittingReview ? null : () => _handleRating(rating),
         child: Column(
           children: [
             Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),

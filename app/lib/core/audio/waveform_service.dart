@@ -1,11 +1,13 @@
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 abstract class IWaveformService {
   Future<List<double>> extractAndCacheWaveform(String audioPath, String lessonId, int durationMs);
   Future<List<double>?> loadCachedWaveform(String lessonId);
+  Future<void> deleteCachedWaveform(String lessonId);
   List<double> getWindowSlice({
     required List<double> fullPeaks,
     required int totalDurationMs,
@@ -16,6 +18,7 @@ abstract class IWaveformService {
 }
 
 class WaveformService implements IWaveformService {
+  static const MethodChannel _whisperChannel = MethodChannel('com.jlexa.app/whisper');
   final Map<String, List<double>> _memoryCache = {};
 
   @override
@@ -42,27 +45,28 @@ class WaveformService implements IWaveformService {
 
     if (await file.exists()) {
       try {
-        final length = await file.length();
-        if (audioPath.toLowerCase().endsWith('.wav') && length > 44) {
-          // Fast WAV PCM amplitude extraction
+        if (Platform.isAndroid) {
+          // Native Android MediaCodec / WAV PCM peak extraction
+          final dynamic raw = await _whisperChannel.invokeMethod('extractAudioInfo', {
+            'audioPath': audioPath,
+            'numPeaks': max(100, (durationMs / 50).round()),
+          });
+          if (raw is Map && raw['peaks'] is List) {
+            peaks = (raw['peaks'] as List).map((e) => (e as num).toDouble()).toList();
+          }
+        } else if (audioPath.toLowerCase().endsWith('.wav')) {
           peaks = await _extractFromWav(file, durationMs);
-        } else {
-          // Generalized audio byte energy estimation
-          peaks = await _extractFromAudioBytes(file, durationMs);
         }
       } catch (_) {
-        peaks = _generateRealisticEnvelope(durationMs);
+        peaks = [];
       }
-    } else {
-      peaks = _generateRealisticEnvelope(durationMs);
     }
 
-    if (peaks.isEmpty) {
-      peaks = _generateRealisticEnvelope(durationMs);
+    if (peaks.isNotEmpty) {
+      _memoryCache[lessonId] = peaks;
+      await _saveCachedWaveform(lessonId, peaks);
     }
 
-    _memoryCache[lessonId] = peaks;
-    await _saveCachedWaveform(lessonId, peaks);
     return peaks;
   }
 
@@ -70,7 +74,7 @@ class WaveformService implements IWaveformService {
   Future<List<double>?> loadCachedWaveform(String lessonId) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/waveforms/$lessonId.peaks');
+      final file = File('${dir.path}/waveforms/v2_$lessonId.peaks');
       if (await file.exists()) {
         final bytes = await file.readAsBytes();
         final floatList = Float32List.view(bytes.buffer);
@@ -80,6 +84,23 @@ class WaveformService implements IWaveformService {
     return null;
   }
 
+  @override
+  Future<void> deleteCachedWaveform(String lessonId) async {
+    try {
+      _memoryCache.remove(lessonId);
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/waveforms/v2_$lessonId.peaks');
+      if (await file.exists()) {
+        await file.delete();
+      }
+      // Also delete any legacy cache file
+      final legacyFile = File('${dir.path}/waveforms/$lessonId.peaks');
+      if (await legacyFile.exists()) {
+        await legacyFile.delete();
+      }
+    } catch (_) {}
+  }
+
   Future<void> _saveCachedWaveform(String lessonId, List<double> peaks) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
@@ -87,7 +108,7 @@ class WaveformService implements IWaveformService {
       if (!await waveformsDir.exists()) {
         await waveformsDir.create(recursive: true);
       }
-      final file = File('${waveformsDir.path}/$lessonId.peaks');
+      final file = File('${waveformsDir.path}/v2_$lessonId.peaks');
       final float32 = Float32List.fromList(peaks);
       await file.writeAsBytes(float32.buffer.asUint8List());
     } catch (_) {}
@@ -95,75 +116,63 @@ class WaveformService implements IWaveformService {
 
   Future<List<double>> _extractFromWav(File file, int durationMs) async {
     final bytes = await file.readAsBytes();
-    if (bytes.length <= 44) return [];
+    if (bytes.length < 44) return [];
 
-    // WAV header usually has 44 bytes
-    final pcmBytes = Uint8List.sublistView(bytes, 44);
-    final totalSamples = pcmBytes.length ~/ 2; // 16-bit PCM
-    if (totalSamples == 0) return [];
+    // Parse RIFF chunks
+    final byteData = ByteData.sublistView(bytes);
+    if (byteData.getUint32(0, Endian.big) != 0x52494646) return []; // "RIFF"
 
-    // We want ~50 points per second of audio
-    final int pointsCount = max(100, (durationMs / 20).round());
-    final int blockSize = max(1, totalSamples ~/ pointsCount);
+    int offset = 12;
+    int dataOffset = -1;
+    int dataSize = 0;
+    int channels = 1;
+    int sampleRate = 16000;
+    int bitsPerSample = 16;
+
+    while (offset + 8 <= bytes.length) {
+      final chunkId = String.fromCharCodes(bytes.sublist(offset, offset + 4));
+      final chunkSize = byteData.getUint32(offset + 4, Endian.little);
+
+      if (chunkId == 'fmt ') {
+        if (offset + 8 + 16 <= bytes.length) {
+          channels = byteData.getUint16(offset + 10, Endian.little);
+          sampleRate = byteData.getUint32(offset + 12, Endian.little);
+          bitsPerSample = byteData.getUint16(offset + 22, Endian.little);
+        }
+      } else if (chunkId == 'data') {
+        dataOffset = offset + 8;
+        dataSize = min(chunkSize, bytes.length - dataOffset);
+        break;
+      }
+
+      offset += 8 + chunkSize;
+      if (chunkSize % 2 != 0) offset++;
+    }
+
+    if (dataOffset == -1 || dataSize <= 0 || channels <= 0 || bitsPerSample != 16) {
+      return [];
+    }
+
+    final totalSamples = dataSize ~/ 2;
+    final totalFrames = totalSamples ~/ channels;
+    final int pointsCount = max(100, (durationMs > 0 ? durationMs : (totalFrames * 1000 ~/ sampleRate)) ~/ 50);
+    final int blockSize = max(1, totalFrames ~/ pointsCount);
     final List<double> peaks = [];
 
-    final ByteData byteData = ByteData.sublistView(pcmBytes);
-
-    for (int i = 0; i < totalSamples; i += blockSize) {
-      double maxAmp = 0;
-      final int end = min(i + blockSize, totalSamples);
-      for (int j = i; j < end; j += 4) {
-        if (j * 2 + 1 < pcmBytes.length) {
-          final int sample = byteData.getInt16(j * 2, Endian.little);
-          final double normalized = (sample.abs() / 32768.0).clamp(0.0, 1.0);
-          if (normalized > maxAmp) maxAmp = normalized;
+    for (int frame = 0; frame < totalFrames; frame += blockSize) {
+      double maxAmp = 0.0;
+      final endFrame = min(frame + blockSize, totalFrames);
+      for (int f = frame; f < endFrame; f += 2) {
+        final samplePos = dataOffset + f * channels * 2;
+        if (samplePos + 1 < bytes.length) {
+          final sample = byteData.getInt16(samplePos, Endian.little);
+          final norm = (sample.abs() / 32768.0).clamp(0.0, 1.0);
+          if (norm > maxAmp) maxAmp = norm;
         }
       }
-      peaks.add(maxAmp);
+      peaks.add(maxAmp.clamp(0.02, 1.0));
     }
-    return peaks;
-  }
 
-  Future<List<double>> _extractFromAudioBytes(File file, int durationMs) async {
-    final bytes = await file.readAsBytes();
-    final totalBytes = bytes.length;
-    if (totalBytes < 100) return [];
-
-    final int pointsCount = max(200, (durationMs / 20).round());
-    final int step = max(1, totalBytes ~/ pointsCount);
-    final List<double> peaks = [];
-
-    for (int i = 0; i < totalBytes; i += step) {
-      double sum = 0;
-      int count = 0;
-      final int end = min(i + step, totalBytes);
-      for (int j = i; j < end; j += 8) {
-        final byteVal = (bytes[j] - 128).abs() / 128.0;
-        sum += byteVal;
-        count++;
-      }
-      final double avg = count > 0 ? (sum / count) * 1.8 : 0.1;
-      peaks.add(avg.clamp(0.05, 1.0));
-    }
-    return peaks;
-  }
-
-  List<double> _generateRealisticEnvelope(int durationMs) {
-    final int count = max(150, (durationMs / 50).round());
-    final Random random = Random(42);
-    final List<double> peaks = [];
-
-    double current = 0.5;
-    for (int i = 0; i < count; i++) {
-      // Natural speech-like burst modulation
-      final bool isSilence = (i % 30) < 5;
-      if (isSilence) {
-        peaks.add(random.nextDouble() * 0.1);
-      } else {
-        current = (current + (random.nextDouble() - 0.5) * 0.4).clamp(0.2, 0.95);
-        peaks.add(current);
-      }
-    }
     return peaks;
   }
 
