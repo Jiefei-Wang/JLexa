@@ -37,6 +37,7 @@ class RepeaterController extends ChangeNotifier {
   String? _transcriptionError;
   int _transcriptionGeneration = 0;
   String? _activeTranscriptionRequestId;
+  String? _transcribingLessonId;
 
   int _loadGeneration = 0;
   String? _activeSegmentId;
@@ -57,21 +58,37 @@ class RepeaterController extends ChangeNotifier {
   bool get isAiGenerating => _isAiGenerating;
   bool get isLoading => _isLoading;
   bool get isWaveformLoading => _isWaveformLoading;
-  TranscriptionState get transcriptionState => _transcriptionState;
+  TranscriptionState get transcriptionState =>
+      (_lesson?.id == _transcribingLessonId)
+      ? _transcriptionState
+      : TranscriptionState.idle;
   bool get isTranscribing =>
+      (_lesson?.id == _transcribingLessonId) &&
       _transcriptionState == TranscriptionState.transcribing;
-  double get transcriptionProgress => _transcriptionProgress;
-  String? get transcriptionError => _transcriptionError;
+  double get transcriptionProgress =>
+      (_lesson?.id == _transcribingLessonId) ? _transcriptionProgress : 0.0;
+  String? get transcriptionError =>
+      (_lesson?.id == _transcribingLessonId) ? _transcriptionError : null;
   String? get audioLoadError => _audioLoadError;
   bool get hasAudioLoadError => _audioLoadError != null;
 
-  int get positionMs => audioService.positionMs;
-  int get durationMs => audioService.durationMs > 0
+  int get positionMs => (audioService.currentLesson?.id == _lesson?.id)
+      ? audioService.positionMs
+      : (_lesson?.currentPositionMs ?? 0);
+  int get durationMs =>
+      (audioService.currentLesson?.id == _lesson?.id &&
+          audioService.durationMs > 0)
       ? audioService.durationMs
       : (_lesson?.durationMs ?? 0);
-  bool get isPlaying => audioService.isPlaying;
-  bool get isRepeatOne => audioService.isRepeatOne;
-  AudioSegment? get currentSegment => audioService.currentSegment;
+  bool get isPlaying =>
+      (audioService.currentLesson?.id == _lesson?.id) && audioService.isPlaying;
+  bool get isRepeatOne =>
+      (audioService.currentLesson?.id == _lesson?.id) &&
+      audioService.isRepeatOne;
+  AudioSegment? get currentSegment =>
+      (audioService.currentLesson?.id == _lesson?.id)
+      ? audioService.currentSegment
+      : null;
 
   RepeaterController({
     required this.lessonRepo,
@@ -102,7 +119,9 @@ class RepeaterController extends ChangeNotifier {
 
   // Item 14: Simplified position persistence — throttle to every 5s during playback
   void _checkPersistPosition() {
-    if (_lesson == null) return;
+    if (_lesson == null || audioService.currentLesson?.id != _lesson?.id) {
+      return;
+    }
     final now = DateTime.now();
     if (!audioService.isPlaying) {
       // Always persist on pause/stop
@@ -113,7 +132,11 @@ class RepeaterController extends ChangeNotifier {
   }
 
   void _persistPositionNow() {
-    if (_lesson == null || _isDisposed) return;
+    if (_lesson == null ||
+        _isDisposed ||
+        audioService.currentLesson?.id != _lesson!.id) {
+      return;
+    }
     final currentPos = positionMs;
     if (currentPos == _lastPersistedPositionMs) return;
     _lastPersistedPositionMs = currentPos;
@@ -123,7 +146,11 @@ class RepeaterController extends ChangeNotifier {
 
   // Item 17: Persist actual player-reported duration when metadata had zero/wrong value
   void _checkPersistDuration() {
-    if (_lesson == null || _durationPersisted) return;
+    if (_lesson == null ||
+        _durationPersisted ||
+        audioService.currentLesson?.id != _lesson?.id) {
+      return;
+    }
     final playerDurationMs = audioService.durationMs;
     if (playerDurationMs > 0 &&
         (_lesson!.durationMs == 0 ||
@@ -134,11 +161,39 @@ class RepeaterController extends ChangeNotifier {
     }
   }
 
+  Future<void> clearLesson() async {
+    _loadGeneration++;
+    _lesson = null;
+    _segments = [];
+    _fullWaveformPeaks = [];
+    _activeSegmentId = null;
+    _transcriptionError = null;
+    _audioLoadError = null;
+    _durationPersisted = false;
+    _lastPersistedPositionMs = -1;
+    _isLoading = false;
+    _isWaveformLoading = false;
+
+    _activeAiHandle?.cancel();
+    _activeAiHandle = null;
+    _aiExplanation = '';
+    _isAiGenerating = false;
+
+    await audioService.clearLesson();
+    notifyListeners();
+  }
+
   // Non-blocking atomic lesson load
   Future<void> loadLesson(AudioLesson lesson) async {
-    // 1. Persist previous lesson position before switching
-    if (_lesson != null) {
-      _persistPositionNow();
+    // 1. Persist previous lesson position before switching only if audio matched
+    final oldLesson = _lesson;
+    if (oldLesson != null && audioService.currentLesson?.id == oldLesson.id) {
+      final currentPos = positionMs;
+      if (currentPos != _lastPersistedPositionMs) {
+        _lastPersistedPositionMs = currentPos;
+        _lastPersistTime = DateTime.now();
+        lessonRepo.updateLessonPosition(oldLesson.id, currentPos);
+      }
     }
 
     final currentGen = ++_loadGeneration;
@@ -152,14 +207,11 @@ class RepeaterController extends ChangeNotifier {
     _durationPersisted = false;
     _lastPersistedPositionMs = -1;
 
-    // Cancel active AI explanation & reset transcription state for old lesson
+    // Cancel active AI explanation for old lesson
     _activeAiHandle?.cancel();
     _activeAiHandle = null;
     _aiExplanation = '';
     _isAiGenerating = false;
-    if (_transcriptionState == TranscriptionState.transcribing) {
-      unawaited(cancelTranscription());
-    }
 
     notifyListeners();
 
@@ -226,6 +278,7 @@ class RepeaterController extends ChangeNotifier {
     final operationId = ++_transcriptionGeneration;
     final reqId = const Uuid().v4();
     _activeTranscriptionRequestId = reqId;
+    _transcribingLessonId = targetLessonId;
 
     _transcriptionState = TranscriptionState.transcribing;
     _transcriptionProgress = 0.0;
@@ -302,6 +355,7 @@ class RepeaterController extends ChangeNotifier {
     } finally {
       if (operationId == _transcriptionGeneration) {
         _activeTranscriptionRequestId = null;
+        _transcribingLessonId = null;
         _transcriptionState = TranscriptionState.idle;
         notifyListeners();
       }
@@ -367,8 +421,8 @@ class RepeaterController extends ChangeNotifier {
         : totalDur;
 
     // Step 2: Clamp proposed values to legal range
-    int finalStart = newStartMs.clamp(minimumStart, maximumEnd);
-    int finalEnd = newEndMs.clamp(minimumStart, maximumEnd);
+    int finalStart = newStartMs.clamp(minimumStart, maximumEnd).toInt();
+    int finalEnd = newEndMs.clamp(minimumStart, maximumEnd).toInt();
 
     // Step 3: Apply snap-to-speech if enabled
     if (_snapToSpeechEnabled) {
@@ -378,14 +432,16 @@ class RepeaterController extends ChangeNotifier {
             waveformPeaks: _fullWaveformPeaks,
             totalDurationMs: totalDur,
           )
-          .clamp(minimumStart, maximumEnd);
+          .clamp(minimumStart, maximumEnd)
+          .toInt();
       finalEnd = snapToSpeechService
           .snapBoundary(
             proposedPositionMs: finalEnd,
             waveformPeaks: _fullWaveformPeaks,
             totalDurationMs: totalDur,
           )
-          .clamp(minimumStart, maximumEnd);
+          .clamp(minimumStart, maximumEnd)
+          .toInt();
     }
 
     // Step 4: Enforce minimum duration (500ms) only if range allows

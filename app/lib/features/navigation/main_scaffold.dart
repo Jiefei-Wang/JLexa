@@ -62,7 +62,7 @@ class MainScaffoldState extends State<MainScaffold> {
   void handleLessonDeleted(String lessonId) {
     if (_activeLesson?.id == lessonId ||
         widget.audioService.currentLesson?.id == lessonId) {
-      widget.audioService.stop();
+      widget.audioService.clearLesson();
       setState(() {
         if (_activeLesson?.id == lessonId) {
           _activeLesson = null;

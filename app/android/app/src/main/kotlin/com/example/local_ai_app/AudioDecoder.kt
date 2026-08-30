@@ -14,9 +14,14 @@ import kotlin.math.min
 
 object AudioDecoder {
 
+    data class DecodedPcmBuffer(
+        val samples: FloatArray,
+        val validSampleCount: Int
+    )
+
     data class DecodedAudioResult(
         val durationMs: Long,
-        val samples16kMono: FloatArray,
+        val pcm: DecodedPcmBuffer,
         val waveformPeaks: List<Double>
     )
 
@@ -85,12 +90,8 @@ object AudioDecoder {
             srcOffset += sampleCount
         }
 
-        fun finish(): FloatArray {
-            return if (count == buffer.size) {
-                buffer
-            } else {
-                buffer.copyOf(count)
-            }
+        fun finish(): DecodedPcmBuffer {
+            return DecodedPcmBuffer(buffer, count)
         }
     }
 
@@ -336,9 +337,9 @@ object AudioDecoder {
     /**
      * Decodes an audio file to a 16kHz mono float array with optional cancellation check.
      */
-    fun decodeTo16kHzMonoPcm(filePath: String, isCancelled: (() -> Boolean)? = null): FloatArray {
+    fun decodeTo16kHzMonoPcm(filePath: String, isCancelled: (() -> Boolean)? = null): DecodedPcmBuffer {
         val result = decodeAudioFull(filePath, numPeaks = 0, isCancelled = isCancelled)
-        return result?.samples16kMono ?: FloatArray(0)
+        return result?.pcm ?: DecodedPcmBuffer(FloatArray(0), 0)
     }
 
     /**
@@ -494,11 +495,11 @@ object AudioDecoder {
                     }
                 }
 
-                val resampled16k = resampler.finish()
+                val pcm = resampler.finish()
                 val durationMs = (totalFrames.toDouble() * 1000.0 / sampleRate.toDouble()).toLong()
-                val peaks = computeWaveformPeaks(resampled16k, if (numPeaks > 0) numPeaks else 200)
+                val peaks = computeWaveformPeaks(pcm.samples, pcm.validSampleCount, if (numPeaks > 0) numPeaks else 200)
 
-                return DecodedAudioResult(durationMs, resampled16k, peaks)
+                return DecodedAudioResult(durationMs, pcm, peaks)
             }
         } catch (_: Exception) {
             return null
@@ -659,11 +660,11 @@ object AudioDecoder {
                 }
             }
 
-            val resampled16k = resampler.finish()
+            val pcm = resampler.finish()
             val durationMs = if (durationUs > 0) (durationUs / 1000L) else (totalMonoSamples.toDouble() * 1000.0 / sampleRate.toDouble()).toLong()
-            val peaks = computeWaveformPeaks(resampled16k, if (numPeaks > 0) numPeaks else 200)
+            val peaks = computeWaveformPeaks(pcm.samples, pcm.validSampleCount, if (numPeaks > 0) numPeaks else 200)
 
-            return DecodedAudioResult(durationMs, resampled16k, peaks)
+            return DecodedAudioResult(durationMs, pcm, peaks)
         } catch (e: Throwable) {
             return null
         } finally {
@@ -673,16 +674,16 @@ object AudioDecoder {
         }
     }
 
-    private fun computeWaveformPeaks(samples16k: FloatArray, targetPoints: Int): List<Double> {
-        if (samples16k.isEmpty()) return emptyList()
+    private fun computeWaveformPeaks(samples16k: FloatArray, validCount: Int, targetPoints: Int): List<Double> {
+        if (validCount <= 0 || samples16k.isEmpty()) return emptyList()
         val points = max(50, targetPoints)
-        val blockSize = max(1, samples16k.size / points)
+        val blockSize = max(1, validCount / points)
         val peaks = mutableListOf<Double>()
 
         var i = 0
-        while (i < samples16k.size) {
+        while (i < validCount) {
             var maxAmp = 0.0f
-            val end = min(i + blockSize, samples16k.size)
+            val end = min(i + blockSize, validCount)
             for (j in i until end step 2) {
                 val amp = abs(samples16k[j])
                 if (amp > maxAmp) maxAmp = amp

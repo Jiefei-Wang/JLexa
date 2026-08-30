@@ -54,6 +54,7 @@ class AudioService extends ChangeNotifier {
   bool _hasLoadError = false;
   String? _loadErrorMessage;
   int _loadGeneration = 0;
+  Future<void> _loadChain = Future.value();
 
   bool get isPlaying => _isPlaying;
   int get positionMs => _positionMs;
@@ -116,49 +117,107 @@ class AudioService extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> loadLesson(
-    AudioLesson lesson,
-    List<AudioSegment> segments,
-  ) async {
+  Future<void> clearLesson() {
+    final gen = ++_loadGeneration;
+    final completer = Completer<void>();
+
+    _loadChain = _loadChain.then((_) async {
+      if (gen != _loadGeneration) {
+        completer.complete();
+        return;
+      }
+      try {
+        await _player.stop();
+      } catch (_) {}
+      _currentLesson = null;
+      _segments = [];
+      _currentSegmentIndex = -1;
+      _positionMs = 0;
+      _durationMs = 0;
+      _isPlaying = false;
+      _hasLoadError = false;
+      _loadErrorMessage = null;
+      notifyListeners();
+      completer.complete();
+    });
+
+    return completer.future;
+  }
+
+  Future<void> loadLesson(AudioLesson lesson, List<AudioSegment> segments) {
     final loadId = ++_loadGeneration;
     _hasLoadError = false;
     _loadErrorMessage = null;
 
-    try {
-      await _player.stop();
-      if (loadId != _loadGeneration) return;
+    final completer = Completer<void>();
 
-      if (lesson.localPath.startsWith('asset:')) {
-        await _player.setSource(
-          AssetSource(lesson.localPath.replaceFirst('asset:', '')),
-        );
-      } else {
-        final file = File(lesson.localPath);
-        if (!await file.exists()) {
-          throw Exception('Audio file does not exist at ${lesson.localPath}');
+    _loadChain = _loadChain.then((_) async {
+      if (loadId != _loadGeneration) {
+        // Skip stale requested load entirely before doing native player work
+        completer.complete();
+        return;
+      }
+
+      try {
+        // Clear current lesson state when beginning a new load to avoid exposing stale audio
+        _currentLesson = null;
+        _segments = [];
+        _currentSegmentIndex = -1;
+        _positionMs = 0;
+        _durationMs = 0;
+        _isPlaying = false;
+        notifyListeners();
+
+        await _player.stop();
+        if (loadId != _loadGeneration) {
+          completer.complete();
+          return;
         }
-        await _player.setSource(DeviceFileSource(lesson.localPath));
-      }
-      if (loadId != _loadGeneration) return;
 
-      if (lesson.currentPositionMs > 0) {
-        await _player.seek(Duration(milliseconds: lesson.currentPositionMs));
-      }
-      if (loadId != _loadGeneration) return;
+        if (lesson.localPath.startsWith('asset:')) {
+          await _player.setSource(
+            AssetSource(lesson.localPath.replaceFirst('asset:', '')),
+          );
+        } else {
+          final file = File(lesson.localPath);
+          if (!await file.exists()) {
+            throw Exception('Audio file does not exist at ${lesson.localPath}');
+          }
+          await _player.setSource(DeviceFileSource(lesson.localPath));
+        }
+        if (loadId != _loadGeneration) {
+          completer.complete();
+          return;
+        }
 
-      _currentLesson = lesson;
-      _segments = List.from(segments);
-      _positionMs = lesson.currentPositionMs;
-      _durationMs = lesson.durationMs;
-      _updateActiveSegment();
-      notifyListeners();
-    } catch (e) {
-      if (loadId != _loadGeneration) return;
-      _hasLoadError = true;
-      _loadErrorMessage = 'Failed to load audio: $e';
-      notifyListeners();
-      rethrow;
-    }
+        if (lesson.currentPositionMs > 0) {
+          await _player.seek(Duration(milliseconds: lesson.currentPositionMs));
+        }
+        if (loadId != _loadGeneration) {
+          completer.complete();
+          return;
+        }
+
+        _currentLesson = lesson;
+        _segments = List.from(segments);
+        _positionMs = lesson.currentPositionMs;
+        _durationMs = lesson.durationMs;
+        _updateActiveSegment();
+        notifyListeners();
+        completer.complete();
+      } catch (e) {
+        if (loadId == _loadGeneration) {
+          _hasLoadError = true;
+          _loadErrorMessage = 'Failed to load audio: $e';
+          notifyListeners();
+          completer.completeError(e);
+        } else {
+          completer.complete();
+        }
+      }
+    });
+
+    return completer.future;
   }
 
   void updateSegments(List<AudioSegment> newSegments) {

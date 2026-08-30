@@ -37,6 +37,7 @@ class WhisperBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandle
     private external fun nativeIsModelLoaded(): Boolean
     private external fun nativeTranscribe(
         samples: FloatArray,
+        sampleCount: Int,
         nThreads: Int,
         language: String,
         progressCallback: NativeProgressCallback?
@@ -197,7 +198,7 @@ class WhisperBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandle
                             return@launch
                         }
 
-                        if (pcm.isEmpty()) {
+                        if (pcm.validSampleCount == 0 || pcm.samples.isEmpty()) {
                             withContext(Dispatchers.Main) {
                                 result.error("DECODE_ERROR", "Could not decode audio file: $audioPath", null)
                             }
@@ -205,7 +206,8 @@ class WhisperBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandle
                         }
 
                         val rawSegments = nativeTranscribe(
-                            pcm,
+                            pcm.samples,
+                            pcm.validSampleCount,
                             threads,
                             "en",
                             object : NativeProgressCallback {

@@ -128,16 +128,9 @@ class WaveformService implements IWaveformService {
   }) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
-      // Try exact versioned name first
+      // Only exact fingerprint match allowed
       final targetFileName = _buildFileName(lessonId, fileSize, lastModified);
-      var file = File('${dir.path}/waveforms/$targetFileName');
-      if (!await file.exists() && fileSize != null && fileSize > 0) {
-        // Fallback to file size only legacy name
-        file = File('${dir.path}/waveforms/v3_${lessonId}_$fileSize.peaks');
-      }
-      if (!await file.exists()) {
-        file = File('${dir.path}/waveforms/v3_$lessonId.peaks');
-      }
+      final file = File('${dir.path}/waveforms/$targetFileName');
       if (await file.exists()) {
         final bytes = await file.readAsBytes();
         final floatList = Float32List.view(bytes.buffer);

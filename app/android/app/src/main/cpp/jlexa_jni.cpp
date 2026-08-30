@@ -87,14 +87,17 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeTranscribe(
     JNIEnv* env,
     jobject /* this */,
     jfloatArray samples,
+    jint sample_count,
     jint n_threads,
     jstring language,
     jobject progress_callback
 ) {
     if (!samples) return nullptr;
 
-    jsize n_samples = env->GetArrayLength(samples);
+    jsize array_len = env->GetArrayLength(samples);
+    jsize n_samples = (sample_count > 0 && sample_count <= array_len) ? static_cast<jsize>(sample_count) : array_len;
     jfloat* pcm_data = env->GetFloatArrayElements(samples, nullptr);
+    if (!pcm_data) return nullptr;
 
     std::string lang = "en";
     if (language) {

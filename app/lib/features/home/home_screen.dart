@@ -277,8 +277,8 @@ class HomeScreenState extends State<HomeScreen> {
                         onTap: () => widget.onOpenLesson(lesson),
                         onDelete: () async {
                           final id = lesson.id;
-                          await _controller.deleteLesson(id);
                           widget.onDeleteLesson?.call(id);
+                          await _controller.deleteLesson(id);
                         },
                       ),
                     ),

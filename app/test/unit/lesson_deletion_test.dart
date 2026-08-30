@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jlexa/core/audio/audio_models.dart';
 import 'package:jlexa/core/audio/lesson_repository.dart';
+import 'package:jlexa/core/database/app_database.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -24,6 +25,7 @@ class FakePathProviderPlatform extends PathProviderPlatform {
 
 void main() {
   late Directory tempDir;
+  Database? db;
 
   setUpAll(() {
     sqfliteFfiInit();
@@ -34,9 +36,47 @@ void main() {
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('jlexa_test_');
     PathProviderPlatform.instance = FakePathProviderPlatform(tempDir.path);
+    final dbPath =
+        '${tempDir.path}/test_${DateTime.now().microsecondsSinceEpoch}.db';
+    db = await openDatabase(
+      dbPath,
+      version: 1,
+      onCreate: (d, v) async {
+        await d.execute('''
+          CREATE TABLE audio_lessons (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            original_file_name TEXT NOT NULL,
+            local_path TEXT NOT NULL,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            current_position_ms INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            last_opened_at INTEGER NOT NULL,
+            transcript_status TEXT NOT NULL DEFAULT 'none',
+            waveform_cache_path TEXT
+          )
+        ''');
+        await d.execute('''
+          CREATE TABLE audio_segments (
+            id TEXT PRIMARY KEY,
+            lesson_id TEXT NOT NULL,
+            start_ms INTEGER NOT NULL,
+            end_ms INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            confidence REAL NOT NULL DEFAULT 1.0,
+            is_user_edited INTEGER NOT NULL DEFAULT 0,
+            tokens_json TEXT,
+            FOREIGN KEY (lesson_id) REFERENCES audio_lessons (id) ON DELETE CASCADE
+          )
+        ''');
+      },
+    );
+    AppDatabase.setDatabaseForTesting(db);
   });
 
   tearDown(() async {
+    await db?.close();
+    AppDatabase.setDatabaseForTesting(null);
     if (await tempDir.exists()) {
       await tempDir.delete(recursive: true);
     }

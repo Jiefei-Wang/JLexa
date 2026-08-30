@@ -358,9 +358,9 @@ void main() {
           isFalse,
         );
 
-        // In Fourth Pass, switching lessons cancels Lesson A transcription and cleans up state
+        // In Fifth Pass, background transcription completes and saves to DB without UI bleed
         final dbLessonA = await lessonRepo.getLesson('lesson_A');
-        expect(dbLessonA?.transcriptStatus, equals(TranscriptStatus.none));
+        expect(dbLessonA?.transcriptStatus, equals(TranscriptStatus.completed));
 
         controller.dispose();
       },

@@ -75,6 +75,8 @@ class _RepeaterScreenState extends State<RepeaterScreen> {
     if (widget.activeLesson != null &&
         widget.activeLesson?.id != oldWidget.activeLesson?.id) {
       _controller.loadLesson(widget.activeLesson!);
+    } else if (widget.activeLesson == null && oldWidget.activeLesson != null) {
+      _controller.clearLesson();
     }
   }
 
