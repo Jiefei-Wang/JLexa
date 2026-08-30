@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/vocabulary/vocabulary_repository.dart';
@@ -70,7 +71,10 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
           appBar: AppBar(
             backgroundColor: AppColors.surface,
             elevation: 0,
-            title: const Text('Vocabulary Study', style: AppTypography.titleMedium),
+            title: const Text(
+              'Vocabulary Study',
+              style: AppTypography.titleMedium,
+            ),
             actions: [
               if (_controller.dueCount > 0)
                 Padding(
@@ -82,7 +86,10 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                     ),
                   ),
                 ),
@@ -93,14 +100,23 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
               // Search field
               Container(
                 color: AppColors.surface,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 child: TextField(
                   controller: _searchController,
                   onChanged: _controller.setSearchQuery,
                   decoration: const InputDecoration(
                     hintText: 'Filter saved words...',
-                    prefixIcon: Icon(Icons.search, color: AppColors.textSecondary),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    prefixIcon: Icon(
+                      Icons.search,
+                      color: AppColors.textSecondary,
+                    ),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
                   ),
                 ),
               ),
@@ -108,15 +124,24 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
               // Filter Chips
               Container(
                 color: AppColors.surface,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
                       _buildFilterChip(0, 'All (${_controller.allCount})'),
                       _buildFilterChip(1, 'Due (${_controller.dueCount})'),
-                      _buildFilterChip(2, 'Learning (${_controller.learningCount})'),
-                      _buildFilterChip(3, 'Mastered (${_controller.masteredCount})'),
+                      _buildFilterChip(
+                        2,
+                        'Learning (${_controller.learningCount})',
+                      ),
+                      _buildFilterChip(
+                        3,
+                        'Mastered (${_controller.masteredCount})',
+                      ),
                     ],
                   ),
                 ),
@@ -129,37 +154,45 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
                 child: _controller.isLoading
                     ? const Center(child: CircularProgressIndicator())
                     : _controller.words.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(Icons.style_outlined, size: 54, color: AppColors.textTertiary),
-                                const SizedBox(height: 12),
-                                const Text('No words in this list', style: AppTypography.titleSmall),
-                                const SizedBox(height: 6),
-                                const Text(
-                                  'Look up words in the Dictionary or tap any word in the Repeater transcript to save it here.',
-                                  style: AppTypography.bodySmall,
-                                  textAlign: TextAlign.center,
-                                ),
-                              ],
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.style_outlined,
+                              size: 54,
+                              color: AppColors.textTertiary,
                             ),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.all(16),
-                            itemCount: _controller.words.length,
-                            itemBuilder: (context, index) {
-                              final word = _controller.words[index];
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 10.0),
-                                child: VocabularyCard(
-                                  word: word,
-                                  onTap: () => widget.onOpenWordInDictionary(word.word),
-                                  onDelete: () => _controller.deleteWord(word.id),
-                                ),
-                              );
-                            },
-                          ),
+                            const SizedBox(height: 12),
+                            const Text(
+                              'No words in this list',
+                              style: AppTypography.titleSmall,
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Look up words in the Dictionary or tap any word in the Repeater transcript to save it here.',
+                              style: AppTypography.bodySmall,
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _controller.words.length,
+                        itemBuilder: (context, index) {
+                          final word = _controller.words[index];
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10.0),
+                            child: VocabularyCard(
+                              word: word,
+                              onTap: () =>
+                                  widget.onOpenWordInDictionary(word.word),
+                              onDelete: () => _controller.deleteWord(word.id),
+                            ),
+                          );
+                        },
+                      ),
               ),
             ],
           ),
@@ -173,11 +206,20 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
     return Padding(
       padding: const EdgeInsets.only(right: 8.0),
       child: ChoiceChip(
-        label: Text(label, style: TextStyle(fontSize: 12, color: isSelected ? AppColors.primary : AppColors.textSecondary, fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500)),
+        label: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: isSelected ? AppColors.primary : AppColors.textSecondary,
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+          ),
+        ),
         selected: isSelected,
         selectedColor: AppColors.primaryLight,
         backgroundColor: AppColors.background,
-        side: BorderSide(color: isSelected ? AppColors.primary : AppColors.border),
+        side: BorderSide(
+          color: isSelected ? AppColors.primary : AppColors.border,
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         onSelected: (_) => _controller.setFilterTab(index),
       ),

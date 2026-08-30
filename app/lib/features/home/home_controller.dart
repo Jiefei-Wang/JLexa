@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+
 import '../../core/audio/audio_models.dart';
 import '../../core/audio/lesson_repository.dart';
 import '../../core/dictionary/dictionary_repository.dart';
@@ -16,10 +17,7 @@ class HomeController extends ChangeNotifier {
   List<AudioLesson> get lessons => _lessons;
   bool get isLoading => _isLoading;
 
-  HomeController({
-    required this.dictionaryRepo,
-    required this.lessonRepo,
-  }) {
+  HomeController({required this.dictionaryRepo, required this.lessonRepo}) {
     lessonRepo.addListener(_onLessonRepoChanged);
     loadData();
   }

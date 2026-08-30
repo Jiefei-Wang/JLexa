@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:uuid/uuid.dart';
+
 import '../../../core/ai/ai_models.dart';
 import '../../../core/ai/ai_service.dart';
 import '../../../core/dictionary/dictionary_models.dart';
@@ -101,8 +102,12 @@ class _WordExplanationSheetState extends State<WordExplanationSheet> {
         word: clean,
         phonetic: _entry?.phonetic,
         partOfSpeech: _entry?.partOfSpeech,
-        definitionSnapshot: _entry?.definitions.isNotEmpty == true ? _entry!.definitions.first : 'Word from audio transcript',
-        translationSnapshot: _entry?.chineseDefinitions.isNotEmpty == true ? _entry!.chineseDefinitions.first : _aiTranslation,
+        definitionSnapshot: _entry?.definitions.isNotEmpty == true
+            ? _entry!.definitions.first
+            : 'Word from audio transcript',
+        translationSnapshot: _entry?.chineseDefinitions.isNotEmpty == true
+            ? _entry!.chineseDefinitions.first
+            : _aiTranslation,
         source: 'Audio Transcript',
         sourceSentence: widget.sentenceText,
         dateAdded: DateTime.now(),
@@ -182,7 +187,12 @@ class _WordExplanationSheetState extends State<WordExplanationSheet> {
           const SizedBox(height: 14),
 
           if (_isLoading)
-            const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: CircularProgressIndicator(),
+              ),
+            )
           else if (_entry != null) ...[
             // Offline Definition
             Text(
@@ -193,11 +203,16 @@ class _WordExplanationSheetState extends State<WordExplanationSheet> {
               const SizedBox(height: 4),
               Text(
                 _entry!.chineseDefinitions.first,
-                style: AppTypography.bodyMedium.copyWith(color: AppColors.textSecondary),
+                style: AppTypography.bodyMedium.copyWith(
+                  color: AppColors.textSecondary,
+                ),
               ),
             ],
           ] else ...[
-            Text('No offline dictionary entry for "$cleanWord".', style: AppTypography.bodySmall),
+            Text(
+              'No offline dictionary entry for "$cleanWord".',
+              style: AppTypography.bodySmall,
+            ),
           ],
 
           // AI Translation / Explanation snippet if available
@@ -211,9 +226,20 @@ class _WordExplanationSheetState extends State<WordExplanationSheet> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.translate, size: 16, color: AppColors.primary),
+                  const Icon(
+                    Icons.translate,
+                    size: 16,
+                    color: AppColors.primary,
+                  ),
                   const SizedBox(width: 8),
-                  Expanded(child: Text(_aiTranslation, style: AppTypography.bodySmall.copyWith(color: AppColors.primary))),
+                  Expanded(
+                    child: Text(
+                      _aiTranslation,
+                      style: AppTypography.bodySmall.copyWith(
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -225,7 +251,9 @@ class _WordExplanationSheetState extends State<WordExplanationSheet> {
             child: ElevatedButton.icon(
               onPressed: _toggleSave,
               icon: Icon(_isSaved ? Icons.check : Icons.add),
-              label: Text(_isSaved ? 'Saved in Vocabulary' : 'Save to Vocabulary'),
+              label: Text(
+                _isSaved ? 'Saved in Vocabulary' : 'Save to Vocabulary',
+              ),
             ),
           ),
           const SizedBox(height: 8),

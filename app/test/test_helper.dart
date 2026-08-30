@@ -4,7 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 void setupMockPlatformChannels() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  final messenger =
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
 
   // Mock flutter_tts
   messenger.setMockMethodCallHandler(
@@ -16,7 +17,8 @@ void setupMockPlatformChannels() {
   messenger.setMockMethodCallHandler(
     const MethodChannel('xyz.luan/audioplayers'),
     (MethodCall call) async {
-      if (call.arguments is Map && (call.arguments as Map)['playerId'] != null) {
+      if (call.arguments is Map &&
+          (call.arguments as Map)['playerId'] != null) {
         final playerId = (call.arguments as Map)['playerId'] as String;
         messenger.setMockMessageHandler(
           'xyz.luan/audioplayers/events/$playerId',
@@ -25,11 +27,25 @@ void setupMockPlatformChannels() {
           },
         );
 
-        if (call.method == 'setSource') {
+        if (call.method.startsWith('setSource')) {
           Future.microtask(() {
             messenger.handlePlatformMessage(
               'xyz.luan/audioplayers/events/$playerId',
-              const StandardMethodCodec().encodeSuccessEnvelope({'event': 'audio.onPrepared', 'value': true}),
+              const StandardMethodCodec().encodeSuccessEnvelope({
+                'event': 'audio.onPrepared',
+                'value': true,
+              }),
+              (data) {},
+            );
+          });
+        } else if (call.method == 'seek') {
+          Future.microtask(() {
+            messenger.handlePlatformMessage(
+              'xyz.luan/audioplayers/events/$playerId',
+              const StandardMethodCodec().encodeSuccessEnvelope({
+                'event': 'audio.onSeekComplete',
+                'value': true,
+              }),
               (data) {},
             );
           });
@@ -44,13 +60,19 @@ void setupMockPlatformChannels() {
   );
 
   // Mock all audioplayer and native binary messages to prevent MissingPluginException
-  messenger.setMockMessageHandler('xyz.luan/audioplayers.global/events', (ByteData? message) async {
+  messenger.setMockMessageHandler('xyz.luan/audioplayers.global/events', (
+    ByteData? message,
+  ) async {
     return const StandardMethodCodec().encodeSuccessEnvelope(null);
   });
-  messenger.setMockMessageHandler('com.jlexa.app/llama_stream', (ByteData? message) async {
+  messenger.setMockMessageHandler('com.jlexa.app/llama_stream', (
+    ByteData? message,
+  ) async {
     return const StandardMethodCodec().encodeSuccessEnvelope(null);
   });
-  messenger.setMockMessageHandler('com.jlexa.app/whisper_stream', (ByteData? message) async {
+  messenger.setMockMessageHandler('com.jlexa.app/whisper_stream', (
+    ByteData? message,
+  ) async {
     return const StandardMethodCodec().encodeSuccessEnvelope(null);
   });
 

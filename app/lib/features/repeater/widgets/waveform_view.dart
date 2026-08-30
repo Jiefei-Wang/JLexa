@@ -1,5 +1,7 @@
 import 'dart:math';
+
 import 'package:flutter/material.dart';
+
 import '../../../core/audio/audio_models.dart';
 import '../../../core/audio/waveform_service.dart';
 import '../../../core/theme/app_colors.dart';
@@ -33,7 +35,7 @@ class _WaveformViewState extends State<WaveformView> {
   int? _draggingEndMs;
 
   String _formatTime(int ms) {
-    final totalSec = (ms / 1000).floor().clamp(0, 86400);
+    final int totalSec = (ms / 1000).floor().clamp(0, 86400).toInt();
     final min = totalSec ~/ 60;
     final sec = totalSec % 60;
     return '${min.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}';
@@ -54,8 +56,10 @@ class _WaveformViewState extends State<WaveformView> {
       targetSamples: 80,
     );
 
-    final activeStart = _draggingStartMs ?? widget.currentSegment?.startMs ?? (centerMs - 2000);
-    final activeEnd = _draggingEndMs ?? widget.currentSegment?.endMs ?? (centerMs + 2000);
+    final activeStart =
+        _draggingStartMs ?? widget.currentSegment?.startMs ?? (centerMs - 2000);
+    final activeEnd =
+        _draggingEndMs ?? widget.currentSegment?.endMs ?? (centerMs + 2000);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -66,9 +70,16 @@ class _WaveformViewState extends State<WaveformView> {
           children: [
             const Row(
               children: [
-                Text('Local Window (10 seconds)', style: AppTypography.labelLarge),
+                Text(
+                  'Local Window (10 seconds)',
+                  style: AppTypography.labelLarge,
+                ),
                 SizedBox(width: 4),
-                Icon(Icons.info_outline, size: 14, color: AppColors.textTertiary),
+                Icon(
+                  Icons.info_outline,
+                  size: 14,
+                  color: AppColors.textTertiary,
+                ),
               ],
             ),
             Row(
@@ -82,7 +93,13 @@ class _WaveformViewState extends State<WaveformView> {
                   ),
                 ),
                 const SizedBox(width: 4),
-                const Text('Speech', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                const Text(
+                  'Speech',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
               ],
             ),
           ],
@@ -93,9 +110,21 @@ class _WaveformViewState extends State<WaveformView> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(_formatTime(max(0, windowStartMs)), style: AppTypography.labelSmall),
-            Text(_formatTime(centerMs), style: AppTypography.labelSmall.copyWith(fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
-            Text(_formatTime(min(widget.totalDurationMs, windowEndMs)), style: AppTypography.labelSmall),
+            Text(
+              _formatTime(max(0, windowStartMs)),
+              style: AppTypography.labelSmall,
+            ),
+            Text(
+              _formatTime(centerMs),
+              style: AppTypography.labelSmall.copyWith(
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            Text(
+              _formatTime(min(widget.totalDurationMs, windowEndMs)),
+              style: AppTypography.labelSmall,
+            ),
           ],
         ),
         const SizedBox(height: 6),
@@ -120,12 +149,14 @@ class _WaveformViewState extends State<WaveformView> {
               }
 
               int xToMs(double x) {
-                final ratio = (x / width).clamp(0.0, 1.0);
+                final ratio = (x / width).clamp(0.0, 1.0).toDouble();
                 return (windowStartMs + ratio * windowDurationMs).round();
               }
 
-              final double startX = msToX(activeStart).clamp(0.0, width);
-              final double endX = msToX(activeEnd).clamp(0.0, width);
+              final double startX = msToX(activeStart)
+                  .clamp(0.0, width)
+                  .toDouble();
+              final double endX = msToX(activeEnd).clamp(0.0, width).toDouble();
               final double centerX = width / 2;
 
               return Stack(
@@ -151,7 +182,10 @@ class _WaveformViewState extends State<WaveformView> {
                         decoration: BoxDecoration(
                           color: AppColors.segmentHighlight,
                           border: Border.symmetric(
-                            horizontal: BorderSide(color: AppColors.segmentBorder.withAlpha(120), width: 1.5),
+                            horizontal: BorderSide(
+                              color: AppColors.segmentBorder.withAlpha(120),
+                              width: 1.5,
+                            ),
                           ),
                         ),
                       ),
@@ -162,10 +196,7 @@ class _WaveformViewState extends State<WaveformView> {
                     left: centerX - 1,
                     top: 0,
                     bottom: 0,
-                    child: Container(
-                      width: 2,
-                      color: AppColors.playhead,
-                    ),
+                    child: Container(width: 2, color: AppColors.playhead),
                   ),
 
                   // 4. Start Handle (Draggable)
@@ -191,8 +222,12 @@ class _WaveformViewState extends State<WaveformView> {
                         }
                       },
                       onHorizontalDragEnd: (_) {
-                        if (_draggingStartMs != null && widget.onSegmentBoundsChanged != null) {
-                          widget.onSegmentBoundsChanged!(_draggingStartMs!, activeEnd);
+                        if (_draggingStartMs != null &&
+                            widget.onSegmentBoundsChanged != null) {
+                          widget.onSegmentBoundsChanged!(
+                            _draggingStartMs!,
+                            activeEnd,
+                          );
                         }
                         setState(() {
                           _draggingStartMs = null;
@@ -244,8 +279,12 @@ class _WaveformViewState extends State<WaveformView> {
                         }
                       },
                       onHorizontalDragEnd: (_) {
-                        if (_draggingEndMs != null && widget.onSegmentBoundsChanged != null) {
-                          widget.onSegmentBoundsChanged!(activeStart, _draggingEndMs!);
+                        if (_draggingEndMs != null &&
+                            widget.onSegmentBoundsChanged != null) {
+                          widget.onSegmentBoundsChanged!(
+                            activeStart,
+                            _draggingEndMs!,
+                          );
                         }
                         setState(() {
                           _draggingStartMs = null;
@@ -284,9 +323,22 @@ class _WaveformViewState extends State<WaveformView> {
         const Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('-5s', style: TextStyle(fontSize: 11, color: AppColors.textTertiary)),
-            Text('0s (Current)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-            Text('+5s', style: TextStyle(fontSize: 11, color: AppColors.textTertiary)),
+            Text(
+              '-5s',
+              style: TextStyle(fontSize: 11, color: AppColors.textTertiary),
+            ),
+            Text(
+              '0s (Current)',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            Text(
+              '+5s',
+              style: TextStyle(fontSize: 11, color: AppColors.textTertiary),
+            ),
           ],
         ),
       ],
@@ -317,7 +369,7 @@ class _WaveformPainter extends CustomPainter {
     final double midY = size.height / 2;
 
     for (int i = 0; i < peaks.length; i++) {
-      final double peak = peaks[i].clamp(0.05, 1.0);
+      final double peak = peaks[i].clamp(0.05, 1.0).toDouble();
       final double barHeight = max(4.0, peak * (size.height * 0.78));
 
       final double x = i * step + step / 2;

@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:uuid/uuid.dart';
+
+import '../../core/ai/ai_models.dart';
 import '../../core/ai/ai_service.dart';
 import '../../core/ai/prompt_builder.dart';
 import '../../core/dictionary/dictionary_models.dart';
@@ -30,6 +32,8 @@ class DictionaryController extends ChangeNotifier {
   String _aiTranslationText = '';
   String _aiExplanationText = '';
   bool _isAiGenerating = false;
+  AiGenerationHandle? _activeAiHandle;
+  bool _isDisposed = false;
 
   String get currentQuery => _currentQuery;
   DictionaryEntry? get currentEntry => _currentEntry;
@@ -60,10 +64,18 @@ class DictionaryController extends ChangeNotifier {
   }
 
   void setSelectedTab(int index) {
+    if (_selectedTab != index) {
+      _activeAiHandle?.cancel();
+      _activeAiHandle = null;
+    }
     _selectedTab = index;
-    if (_selectedTab == 1 && _aiTranslationText.isEmpty && _currentEntry != null) {
+    if (_selectedTab == 1 &&
+        _aiTranslationText.isEmpty &&
+        _currentEntry != null) {
       _fetchAiTranslation();
-    } else if (_selectedTab == 2 && _aiExplanationText.isEmpty && _currentEntry != null) {
+    } else if (_selectedTab == 2 &&
+        _aiExplanationText.isEmpty &&
+        _currentEntry != null) {
       _fetchAiExplanation();
     }
     notifyListeners();
@@ -90,13 +102,18 @@ class DictionaryController extends ChangeNotifier {
     final clean = TextNormalization.normalizeWord(word);
     if (clean.isEmpty) return;
 
+    ++_queryGeneration; // Invalidate any pending suggestion queries
     final gen = ++_searchGeneration;
-    ++_aiGeneration; // Invalidate any running AI requests immediately
+    ++_aiGeneration; // Invalidate any running AI requests
+    _activeAiHandle?.cancel();
+    _activeAiHandle = null;
+
     _isLoading = true;
     _currentQuery = clean;
     _suggestions = [];
     _aiTranslationText = '';
     _aiExplanationText = '';
+    _isAiGenerating = false;
     notifyListeners();
 
     final entry = await dictionaryRepo.lookupWord(clean);
@@ -124,34 +141,47 @@ class DictionaryController extends ChangeNotifier {
   }
 
   Future<void> toggleSaveToVocabulary() async {
-    if (_currentEntry == null || _isSaving) return;
+    final targetEntry = _currentEntry;
+    if (targetEntry == null || _isSaving || _isDisposed) return;
     _isSaving = true;
 
     try {
       if (_isSaved) {
-        final existing = await vocabularyRepo.getWord(_currentEntry!.word);
+        final existing = await vocabularyRepo.getWord(targetEntry.word);
         if (existing != null) {
           await vocabularyRepo.deleteWord(existing.id);
-          _isSaved = false;
+          if (_currentEntry?.word == targetEntry.word && !_isDisposed) {
+            _isSaved = false;
+          }
         }
       } else {
         final newWord = VocabularyWord(
           id: const Uuid().v4(),
-          word: _currentEntry!.word,
-          phonetic: _currentEntry!.phonetic,
-          partOfSpeech: _currentEntry!.partOfSpeech,
-          definitionSnapshot: _currentEntry!.definitions.isNotEmpty ? _currentEntry!.definitions.first : '',
-          translationSnapshot: _currentEntry!.chineseDefinitions.isNotEmpty ? _currentEntry!.chineseDefinitions.first : '',
+          word: targetEntry.word,
+          phonetic: targetEntry.phonetic,
+          partOfSpeech: targetEntry.partOfSpeech,
+          definitionSnapshot: targetEntry.definitions.isNotEmpty
+              ? targetEntry.definitions.first
+              : '',
+          translationSnapshot: targetEntry.chineseDefinitions.isNotEmpty
+              ? targetEntry.chineseDefinitions.first
+              : '',
           source: 'Dictionary',
-          sourceSentence: _currentEntry!.examples.isNotEmpty ? _currentEntry!.examples.first.english : null,
+          sourceSentence: targetEntry.examples.isNotEmpty
+              ? targetEntry.examples.first.english
+              : null,
           dateAdded: DateTime.now(),
         );
         await vocabularyRepo.saveWord(newWord);
-        _isSaved = true;
+        if (_currentEntry?.word == targetEntry.word && !_isDisposed) {
+          _isSaved = true;
+        }
       }
     } finally {
-      _isSaving = false;
-      notifyListeners();
+      if (!_isDisposed) {
+        _isSaving = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -159,9 +189,12 @@ class DictionaryController extends ChangeNotifier {
     if (_currentEntry == null) return;
     final targetWord = _currentEntry!.word;
     final gen = ++_aiGeneration;
+    _activeAiHandle?.cancel();
+    _activeAiHandle = null;
 
     if (!aiService.llmEngine.isLoaded) {
-      _aiTranslationText = 'Load a local AI model in Settings to use AI translation.';
+      _aiTranslationText =
+          'Load a local AI model in Settings to use AI translation.';
       notifyListeners();
       return;
     }
@@ -171,7 +204,10 @@ class DictionaryController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await for (final chunk in aiService.translateText(targetWord)) {
+      final handle = aiService.startTranslateText(targetWord);
+      _activeAiHandle = handle;
+
+      await for (final chunk in handle.stream) {
         if (gen != _aiGeneration || _isDisposed) break;
         _aiTranslationText += chunk;
         notifyListeners();
@@ -183,6 +219,7 @@ class DictionaryController extends ChangeNotifier {
     } finally {
       if (gen == _aiGeneration && !_isDisposed) {
         _isAiGenerating = false;
+        _activeAiHandle = null;
         notifyListeners();
       }
     }
@@ -192,9 +229,12 @@ class DictionaryController extends ChangeNotifier {
     if (_currentEntry == null) return;
     final targetWord = _currentEntry!.word;
     final gen = ++_aiGeneration;
+    _activeAiHandle?.cancel();
+    _activeAiHandle = null;
 
     if (!aiService.llmEngine.isLoaded) {
-      _aiExplanationText = 'Load a local AI model in Settings to use AI explanation.';
+      _aiExplanationText =
+          'Load a local AI model in Settings to use AI explanation.';
       notifyListeners();
       return;
     }
@@ -204,7 +244,10 @@ class DictionaryController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await for (final chunk in aiService.explainWord(targetWord)) {
+      final handle = aiService.startExplainWord(targetWord);
+      _activeAiHandle = handle;
+
+      await for (final chunk in handle.stream) {
         if (gen != _aiGeneration || _isDisposed) break;
         _aiExplanationText += chunk;
         notifyListeners();
@@ -216,6 +259,7 @@ class DictionaryController extends ChangeNotifier {
     } finally {
       if (gen == _aiGeneration && !_isDisposed) {
         _isAiGenerating = false;
+        _activeAiHandle = null;
         notifyListeners();
       }
     }
@@ -225,9 +269,12 @@ class DictionaryController extends ChangeNotifier {
     if (_currentEntry == null) return;
     final targetWord = _currentEntry!.word;
     final gen = ++_aiGeneration;
+    _activeAiHandle?.cancel();
+    _activeAiHandle = null;
 
     if (!aiService.llmEngine.isLoaded) {
-      _aiExplanationText = 'Load a local AI model in Settings to use AI explanation.';
+      _aiExplanationText =
+          'Load a local AI model in Settings to use AI explanation.';
       _selectedTab = 2;
       notifyListeners();
       return;
@@ -240,19 +287,27 @@ class DictionaryController extends ChangeNotifier {
 
     try {
       final msgs = [
-        const ChatMessagePayload(role: 'system', content: PromptBuilder.systemPrefix),
+        const ChatMessagePayload(
+          role: 'system',
+          content: PromptBuilder.systemPrefix,
+        ),
         ChatMessagePayload(
           role: 'user',
-          content: 'Word: "$targetWord"\nRequest: $prompt\nProvide a clear, concise educational explanation.',
+          content:
+              'Word: "$targetWord"\nRequest: $prompt\nProvide a clear, concise educational explanation.',
         ),
       ];
-      final plainPrompt = 'Word: $targetWord\nRequest: $prompt\nProvide a clear, concise educational explanation.';
+      final plainPrompt =
+          'Word: $targetWord\nRequest: $prompt\nProvide a clear, concise educational explanation.';
 
-      await for (final chunk in aiService.llmEngine.generate(
+      final handle = aiService.llmEngine.startGeneration(
         plainPrompt,
         settings: aiService.settings,
         chatMessages: msgs,
-      )) {
+      );
+      _activeAiHandle = handle;
+
+      await for (final chunk in handle.stream) {
         if (gen != _aiGeneration || _isDisposed) break;
         _aiExplanationText += chunk;
         notifyListeners();
@@ -264,12 +319,11 @@ class DictionaryController extends ChangeNotifier {
     } finally {
       if (gen == _aiGeneration && !_isDisposed) {
         _isAiGenerating = false;
+        _activeAiHandle = null;
         notifyListeners();
       }
     }
   }
-
-  bool _isDisposed = false;
 
   @override
   void notifyListeners() {
@@ -281,6 +335,8 @@ class DictionaryController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    _activeAiHandle?.cancel();
+    _activeAiHandle = null;
     _tts.stop();
     super.dispose();
   }

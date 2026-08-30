@@ -1,7 +1,9 @@
 import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
+
 import '../../core/ai/ai_models.dart';
 import '../../core/ai/ai_service.dart';
 
@@ -24,7 +26,8 @@ class SettingsController extends ChangeNotifier {
   }
 
   void _refreshModelInfo() {
-    final llmPath = aiService.llmEngine.loadedModelPath ?? aiService.configuredLlmPath;
+    final llmPath =
+        aiService.llmEngine.loadedModelPath ?? aiService.configuredLlmPath;
     if (llmPath != null && llmPath.isNotEmpty) {
       final file = File(llmPath);
       final size = file.existsSync() ? file.lengthSync() : 0;
@@ -38,7 +41,9 @@ class SettingsController extends ChangeNotifier {
       _llmInfo = null;
     }
 
-    final speechPath = aiService.speechEngine.loadedModelPath ?? aiService.configuredSpeechPath;
+    final speechPath =
+        aiService.speechEngine.loadedModelPath ??
+        aiService.configuredSpeechPath;
     if (speechPath != null && speechPath.isNotEmpty) {
       final file = File(speechPath);
       final size = file.existsSync() ? file.lengthSync() : 0;

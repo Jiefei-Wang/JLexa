@@ -12,8 +12,17 @@ void main() {
     test('Snaps boundary toward local silence valley', () {
       // Create synthetic waveform with a dip at index 10 (which corresponds to 1000ms in a 2000ms / 20 samples file)
       final peaks = [
-        0.8, 0.8, 0.7, 0.8, 0.9, 0.7, 0.8, 0.6, 0.4, 0.1, // index 9 has low energy
-        0.05,                                            // index 10 has silence (0.05)
+        0.8,
+        0.8,
+        0.7,
+        0.8,
+        0.9,
+        0.7,
+        0.8,
+        0.6,
+        0.4,
+        0.1, // index 9 has low energy
+        0.05, // index 10 has silence (0.05)
         0.1, 0.4, 0.7, 0.8, 0.9, 0.8, 0.7, 0.8, 0.8,
       ];
       const totalDurationMs = 2000;

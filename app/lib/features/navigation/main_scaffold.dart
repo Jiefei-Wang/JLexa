@@ -1,9 +1,11 @@
 import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
+
 import '../../core/ai/ai_service.dart';
 import '../../core/ai/native_ai_bridge.dart';
 import '../../core/audio/audio_models.dart';
@@ -43,6 +45,7 @@ class MainScaffold extends StatefulWidget {
 }
 
 class MainScaffoldState extends State<MainScaffold> {
+  final GlobalKey<HomeScreenState> _homeKey = GlobalKey<HomeScreenState>();
   int _currentIndex = 0;
   String? _targetDictionaryWord;
   AudioLesson? _activeLesson;
@@ -51,6 +54,21 @@ class MainScaffoldState extends State<MainScaffold> {
     setState(() {
       _currentIndex = index;
     });
+    if (index == 0) {
+      _homeKey.currentState?.refresh();
+    }
+  }
+
+  void handleLessonDeleted(String lessonId) {
+    if (_activeLesson?.id == lessonId ||
+        widget.audioService.currentLesson?.id == lessonId) {
+      widget.audioService.stop();
+      setState(() {
+        if (_activeLesson?.id == lessonId) {
+          _activeLesson = null;
+        }
+      });
+    }
   }
 
   void openDictionaryForWord(String word) {
@@ -112,13 +130,17 @@ class MainScaffoldState extends State<MainScaffold> {
         }
 
         final lessonId = const Uuid().v4();
-        final targetPath = p.join(lessonsDir.path, '${DateTime.now().millisecondsSinceEpoch}_$fileName');
+        final targetPath = p.join(
+          lessonsDir.path,
+          '${DateTime.now().millisecondsSinceEpoch}_$fileName',
+        );
         await File(originalPath).copy(targetPath);
 
         // Extract genuine audio duration via fast metadata detection, falling back to full audio info
         int durationMs = 0;
         try {
-          if (Platform.isAndroid && widget.aiService.speechEngine is NativeWhisperEngine) {
+          if (Platform.isAndroid &&
+              widget.aiService.speechEngine is NativeWhisperEngine) {
             final engine = widget.aiService.speechEngine as NativeWhisperEngine;
             final meta = await engine.getAudioMetadata(targetPath);
             if (meta != null && meta['durationMs'] != null) {
@@ -141,7 +163,9 @@ class MainScaffoldState extends State<MainScaffold> {
           durationMs: durationMs,
           createdAt: DateTime.now(),
           lastOpenedAt: DateTime.now(),
-          transcriptStatus: widget.aiService.speechEngine.isLoaded ? TranscriptStatus.none : TranscriptStatus.pendingModel,
+          transcriptStatus: widget.aiService.speechEngine.isLoaded
+              ? TranscriptStatus.none
+              : TranscriptStatus.pendingModel,
         );
 
         await widget.lessonRepo.saveLesson(newLesson);
@@ -162,9 +186,8 @@ class MainScaffoldState extends State<MainScaffold> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error importing audio: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error importing audio: $e')));
       }
     }
   }
@@ -176,11 +199,13 @@ class MainScaffoldState extends State<MainScaffold> {
         index: _currentIndex,
         children: [
           HomeScreen(
+            key: _homeKey,
             dictionaryRepo: widget.dictionaryRepo,
             lessonRepo: widget.lessonRepo,
             aiService: widget.aiService,
             onOpenDictionary: openDictionaryForWord,
             onOpenLesson: openRepeaterForLesson,
+            onDeleteLesson: handleLessonDeleted,
             onOpenSettings: () {
               Navigator.of(context).push(
                 MaterialPageRoute(

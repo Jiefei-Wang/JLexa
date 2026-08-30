@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../../core/audio/audio_models.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
@@ -34,9 +35,9 @@ class TranscriptView extends StatelessWidget {
     final List<TranscriptToken> tokens = segment?.tokens.isNotEmpty == true
         ? segment!.tokens
         : text
-            .split(' ')
-            .map((w) => TranscriptToken(text: w, confidence: 1.0))
-            .toList();
+              .split(' ')
+              .map((w) => TranscriptToken(text: w, confidence: 1.0))
+              .toList();
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -56,7 +57,9 @@ class TranscriptView extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: confidence >= 0.85 ? AppColors.successLight : AppColors.warningLight,
+                  color: confidence >= 0.85
+                      ? AppColors.successLight
+                      : AppColors.warningLight,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
@@ -64,7 +67,9 @@ class TranscriptView extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    color: confidence >= 0.85 ? AppColors.success : AppColors.warning,
+                    color: confidence >= 0.85
+                        ? AppColors.success
+                        : AppColors.warning,
                   ),
                 ),
               ),
@@ -84,7 +89,10 @@ class TranscriptView extends StatelessWidget {
                 onTap: () => onWordTap(token.text),
                 borderRadius: BorderRadius.circular(4),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 3,
+                    vertical: 1,
+                  ),
                   decoration: isUncertain
                       ? BoxDecoration(
                           color: color.withAlpha(25),
@@ -95,7 +103,9 @@ class TranscriptView extends StatelessWidget {
                     token.text,
                     style: AppTypography.transcript.copyWith(
                       color: color,
-                      fontWeight: isUncertain ? FontWeight.w600 : FontWeight.w500,
+                      fontWeight: isUncertain
+                          ? FontWeight.w600
+                          : FontWeight.w500,
                     ),
                   ),
                 ),
@@ -110,9 +120,19 @@ class TranscriptView extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.touch_app, size: 14, color: AppColors.textTertiary),
+                  const Icon(
+                    Icons.touch_app,
+                    size: 14,
+                    color: AppColors.textTertiary,
+                  ),
                   const SizedBox(width: 4),
-                  const Text('Tap a word to see explanation', style: TextStyle(fontSize: 12, color: AppColors.textTertiary)),
+                  const Text(
+                    'Tap a word to see explanation',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textTertiary,
+                    ),
+                  ),
                 ],
               ),
               if (onPlaySentence != null)
@@ -123,9 +143,20 @@ class TranscriptView extends StatelessWidget {
                     padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     child: Row(
                       children: [
-                        Icon(Icons.volume_up_outlined, size: 16, color: AppColors.primary),
+                        Icon(
+                          Icons.volume_up_outlined,
+                          size: 16,
+                          color: AppColors.primary,
+                        ),
                         SizedBox(width: 4),
-                        Text('Listen', style: TextStyle(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w500)),
+                        Text(
+                          'Listen',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
                       ],
                     ),
                   ),

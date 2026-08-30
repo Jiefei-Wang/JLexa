@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../core/vocabulary/vocabulary_models.dart';
@@ -71,7 +72,10 @@ class VocabularyCard extends StatelessWidget {
                   ],
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: stateColor.withAlpha(30),
                     borderRadius: BorderRadius.circular(8),
@@ -94,7 +98,8 @@ class VocabularyCard extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
-            if (word.sourceSentence != null && word.sourceSentence!.isNotEmpty) ...[
+            if (word.sourceSentence != null &&
+                word.sourceSentence!.isNotEmpty) ...[
               const SizedBox(height: 6),
               Container(
                 padding: const EdgeInsets.all(8),
@@ -104,7 +109,9 @@ class VocabularyCard extends StatelessWidget {
                 ),
                 child: Text(
                   '"${word.sourceSentence!}"',
-                  style: AppTypography.bodySmall.copyWith(fontStyle: FontStyle.italic),
+                  style: AppTypography.bodySmall.copyWith(
+                    fontStyle: FontStyle.italic,
+                  ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -120,12 +127,22 @@ class VocabularyCard extends StatelessWidget {
                 ),
                 if (word.isDue)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.warningLight,
                       borderRadius: BorderRadius.circular(6),
                     ),
-                    child: const Text('Due for Review', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.warning)),
+                    child: const Text(
+                      'Due for Review',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.warning,
+                      ),
+                    ),
                   ),
               ],
             ),

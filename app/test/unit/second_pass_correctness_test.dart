@@ -4,6 +4,7 @@ import 'package:jlexa/core/ai/prompt_builder.dart';
 import 'package:jlexa/core/audio/audio_models.dart';
 import 'package:jlexa/core/audio/lesson_repository.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
 import '../test_helper.dart';
 
 void main() {
@@ -72,7 +73,9 @@ void main() {
     });
 
     test('PromptBuilder chat message builders structure roles and contents correctly', () {
-      final dictMsgs = PromptBuilder.buildDictionaryExplanationMessages('resilient');
+      final dictMsgs = PromptBuilder.buildDictionaryExplanationMessages(
+        'resilient',
+      );
       expect(dictMsgs.length, equals(2));
       expect(dictMsgs[0].role, equals('system'));
       expect(dictMsgs[1].role, equals('user'));
@@ -89,11 +92,16 @@ void main() {
         sentenceText: 'Focus on high-impact endeavors.',
         previousSentence: 'When you build a resilient mindset.',
       );
-      final sentenceMsgs = PromptBuilder.buildSentenceExplanationMessages(sentenceCtx);
+      final sentenceMsgs = PromptBuilder.buildSentenceExplanationMessages(
+        sentenceCtx,
+      );
       expect(sentenceMsgs.length, equals(2));
       expect(sentenceMsgs[0].role, equals('system'));
       expect(sentenceMsgs[1].content, contains('Lesson 1'));
-      expect(sentenceMsgs[1].content, contains('Focus on high-impact endeavors.'));
+      expect(
+        sentenceMsgs[1].content,
+        contains('Focus on high-impact endeavors.'),
+      );
 
       final qaMsgs = PromptBuilder.buildSentenceQAMessages(
         context: sentenceCtx,
@@ -139,11 +147,17 @@ void main() {
       expect(fetched?.durationMs, equals(45000));
 
       listenerNotified = false;
-      await repo.updateTranscriptStatus('lesson_test_notif', TranscriptStatus.completed);
+      await repo.updateTranscriptStatus(
+        'lesson_test_notif',
+        TranscriptStatus.completed,
+      );
       expect(listenerNotified, isTrue);
 
       final fetchedAfterStatus = await repo.getLesson('lesson_test_notif');
-      expect(fetchedAfterStatus?.transcriptStatus, equals(TranscriptStatus.completed));
+      expect(
+        fetchedAfterStatus?.transcriptStatus,
+        equals(TranscriptStatus.completed),
+      );
 
       await repo.deleteLesson('lesson_test_notif');
     });

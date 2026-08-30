@@ -37,14 +37,28 @@ class DictionaryEntry {
       word: map['word'] as String,
       phonetic: map['phonetic'] as String? ?? '',
       partOfSpeech: map['partOfSpeech'] as String? ?? '',
-      definitions: (map['definitions'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
-      chineseDefinitions: (map['chineseDefinitions'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
-      examples: (map['examples'] as List<dynamic>?)
+      definitions:
+          (map['definitions'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          [],
+      chineseDefinitions:
+          (map['chineseDefinitions'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          [],
+      examples:
+          (map['examples'] as List<dynamic>?)
               ?.map((e) => ExampleSentence.fromMap(e as Map<String, dynamic>))
               .toList() ??
           [],
-      synonyms: (map['synonyms'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
-      isHighFrequency: map['isHighFrequency'] == 1 || map['isHighFrequency'] == true,
+      synonyms:
+          (map['synonyms'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          [],
+      isHighFrequency:
+          map['isHighFrequency'] == 1 || map['isHighFrequency'] == true,
     );
   }
 }
@@ -53,16 +67,10 @@ class ExampleSentence {
   final String english;
   final String? chinese;
 
-  const ExampleSentence({
-    required this.english,
-    this.chinese,
-  });
+  const ExampleSentence({required this.english, this.chinese});
 
   Map<String, dynamic> toMap() {
-    return {
-      'english': english,
-      'chinese': chinese,
-    };
+    return {'english': english, 'chinese': chinese};
   }
 
   factory ExampleSentence.fromMap(Map<String, dynamic> map) {

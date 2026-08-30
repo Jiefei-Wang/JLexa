@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../../core/audio/audio_models.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
@@ -62,7 +63,11 @@ class LessonCard extends StatelessWidget {
                   end: Alignment.bottomRight,
                 ),
               ),
-              child: const Icon(Icons.graphic_eq, color: Colors.white, size: 28),
+              child: const Icon(
+                Icons.graphic_eq,
+                color: Colors.white,
+                size: 28,
+              ),
             ),
             const SizedBox(width: 14),
             // Lesson details
@@ -90,7 +95,9 @@ class LessonCard extends StatelessWidget {
                           child: LinearProgressIndicator(
                             value: progress,
                             backgroundColor: AppColors.border,
-                            valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
+                            valueColor: const AlwaysStoppedAnimation<Color>(
+                              AppColors.primary,
+                            ),
                             minHeight: 5,
                           ),
                         ),
@@ -120,9 +127,16 @@ class LessonCard extends StatelessWidget {
                   value: 'delete',
                   child: Row(
                     children: [
-                      Icon(Icons.delete_outline, color: AppColors.error, size: 20),
+                      Icon(
+                        Icons.delete_outline,
+                        color: AppColors.error,
+                        size: 20,
+                      ),
                       SizedBox(width: 8),
-                      Text('Delete lesson', style: TextStyle(color: AppColors.error)),
+                      Text(
+                        'Delete lesson',
+                        style: TextStyle(color: AppColors.error),
+                      ),
                     ],
                   ),
                 ),

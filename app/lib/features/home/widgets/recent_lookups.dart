@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
 
@@ -25,7 +26,10 @@ class RecentLookupsSection extends StatelessWidget {
             const Text('Recent Lookups', style: AppTypography.titleSmall),
             TextButton(
               onPressed: () {},
-              child: const Text('See all', style: TextStyle(color: AppColors.primary, fontSize: 13)),
+              child: const Text(
+                'See all',
+                style: TextStyle(color: AppColors.primary, fontSize: 13),
+              ),
             ),
           ],
         ),
@@ -37,11 +41,22 @@ class RecentLookupsSection extends StatelessWidget {
               return Padding(
                 padding: const EdgeInsets.only(right: 8.0),
                 child: ActionChip(
-                  avatar: const Icon(Icons.history, size: 16, color: AppColors.textSecondary),
-                  label: Text(word, style: AppTypography.bodySmall.copyWith(color: AppColors.textPrimary)),
+                  avatar: const Icon(
+                    Icons.history,
+                    size: 16,
+                    color: AppColors.textSecondary,
+                  ),
+                  label: Text(
+                    word,
+                    style: AppTypography.bodySmall.copyWith(
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
                   backgroundColor: AppColors.surface,
                   side: const BorderSide(color: AppColors.border),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                   onPressed: () => onWordTap(word),
                 ),
               );

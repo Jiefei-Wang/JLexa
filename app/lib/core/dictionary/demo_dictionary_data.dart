@@ -10,10 +10,7 @@ const List<DictionaryEntry> kDemoDictionaryEntries = [
       'Able to withstand or recover quickly from difficult conditions.',
       'Capable of returning to original form after being bent, compressed, or stretched.',
     ],
-    chineseDefinitions: [
-      '能够迅速恢复，或逆境恢复。',
-      '有弹性的；有韧性的。',
-    ],
+    chineseDefinitions: ['能够迅速恢复，或逆境恢复。', '有弹性的；有韧性的。'],
     synonyms: ['strong', 'tough', 'sturdy', 'robust', 'adaptable', 'flexible'],
     examples: [
       ExampleSentence(
@@ -39,9 +36,7 @@ const List<DictionaryEntry> kDemoDictionaryEntries = [
       'Designate or treat (something) as more important than other things.',
       'Determine the order for dealing with (a series of items or tasks) according to their relative importance.',
     ],
-    chineseDefinitions: [
-      '优先处理；给……确定优先顺序。',
-    ],
+    chineseDefinitions: ['优先处理；给……确定优先顺序。'],
     synonyms: ['rank', 'order', 'highlight', 'give priority to', 'focus on'],
     examples: [
       ExampleSentence(
@@ -63,10 +58,7 @@ const List<DictionaryEntry> kDemoDictionaryEntries = [
       'A plan for carrying out a process or procedure, giving lists of intended events and times.',
       'Arrange or plan (an event) to take place at a particular time.',
     ],
-    chineseDefinitions: [
-      '日程安排；时间表。',
-      '安排；预定。',
-    ],
+    chineseDefinitions: ['日程安排；时间表。', '安排；预定。'],
     synonyms: ['timetable', 'agenda', 'plan', 'calendar', 'program'],
     examples: [
       ExampleSentence(
@@ -88,9 +80,7 @@ const List<DictionaryEntry> kDemoDictionaryEntries = [
       'The fact or condition of being regarded or treated as more important.',
       'A thing that is regarded as more important than another.',
     ],
-    chineseDefinitions: [
-      '优先事项；优先权；当务之急。',
-    ],
+    chineseDefinitions: ['优先事项；优先权；当务之急。'],
     synonyms: ['precedence', 'importance', 'preference', 'urgency'],
     examples: [
       ExampleSentence(
@@ -111,9 +101,7 @@ const List<DictionaryEntry> kDemoDictionaryEntries = [
     definitions: [
       'Showing great attention to detail; very careful and precise.',
     ],
-    chineseDefinitions: [
-      '谨小慎微的；一丝不苟的；非常精细的。',
-    ],
+    chineseDefinitions: ['谨小慎微的；一丝不苟的；非常精细的。'],
     synonyms: ['thorough', 'diligent', 'precise', 'scrupulous', 'exacting'],
     examples: [
       ExampleSentence(
@@ -121,7 +109,8 @@ const List<DictionaryEntry> kDemoDictionaryEntries = [
         chinese: '他把所有交易记录都整理得一丝不苟。',
       ),
       ExampleSentence(
-        english: 'Her meticulous approach to design ensures exceptional quality.',
+        english:
+            'Her meticulous approach to design ensures exceptional quality.',
         chinese: '她精益求精的设计方法确保了卓越的品质。',
       ),
     ],
@@ -135,10 +124,7 @@ const List<DictionaryEntry> kDemoDictionaryEntries = [
       'An attempt to achieve a goal.',
       'Try hard to do or achieve something.',
     ],
-    chineseDefinitions: [
-      '努力；尽力；尝试。',
-      '竭力；致力。',
-    ],
+    chineseDefinitions: ['努力；尽力；尝试。', '竭力；致力。'],
     synonyms: ['attempt', 'effort', 'venture', 'undertaking', 'strive'],
     examples: [
       ExampleSentence(
@@ -160,10 +146,14 @@ const List<DictionaryEntry> kDemoDictionaryEntries = [
       'The circumstances that form the setting for an event, statement, or idea, and in terms of which it can be fully understood and assessed.',
       'The parts of something written or spoken that immediately precede and follow a word or passage and clarify its meaning.',
     ],
-    chineseDefinitions: [
-      '语境；上下文；背景。',
+    chineseDefinitions: ['语境；上下文；背景。'],
+    synonyms: [
+      'circumstances',
+      'environment',
+      'background',
+      'setting',
+      'framework',
     ],
-    synonyms: ['circumstances', 'environment', 'background', 'setting', 'framework'],
     examples: [
       ExampleSentence(
         english: 'You need to understand words in their real context.',
@@ -184,9 +174,7 @@ const List<DictionaryEntry> kDemoDictionaryEntries = [
       'Sufficiently great or important to be worthy of attention; noteworthy.',
       'Having a particular meaning; indicative of something.',
     ],
-    chineseDefinitions: [
-      '显著的；重要的；有重大意义的。',
-    ],
+    chineseDefinitions: ['显著的；重要的；有重大意义的。'],
     synonyms: ['notable', 'important', 'major', 'momentous', 'meaningful'],
     examples: [
       ExampleSentence(
@@ -208,9 +196,7 @@ const List<DictionaryEntry> kDemoDictionaryEntries = [
       'Explain the meaning of (information, words, or actions).',
       'Translate orally or into sign language the words of a person speaking a different language.',
     ],
-    chineseDefinitions: [
-      '解释；解读；口译。',
-    ],
+    chineseDefinitions: ['解释；解读；口译。'],
     synonyms: ['explain', 'clarify', 'translate', 'understand', 'decode'],
     examples: [
       ExampleSentence(
@@ -231,9 +217,7 @@ const List<DictionaryEntry> kDemoDictionaryEntries = [
     definitions: [
       'A settled or regular tendency or practice, especially one that is hard to give up.',
     ],
-    chineseDefinitions: [
-      '习惯；习性。',
-    ],
+    chineseDefinitions: ['习惯；习性。'],
     synonyms: ['custom', 'practice', 'routine', 'pattern', 'manner'],
     examples: [
       ExampleSentence(

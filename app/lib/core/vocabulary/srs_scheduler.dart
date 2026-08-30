@@ -1,12 +1,20 @@
 import 'vocabulary_models.dart';
 
 abstract class ISrsScheduler {
-  VocabularyWord scheduleReview(VocabularyWord word, ReviewRating rating, {DateTime? now});
+  VocabularyWord scheduleReview(
+    VocabularyWord word,
+    ReviewRating rating, {
+    DateTime? now,
+  });
 }
 
 class SimpleSrsScheduler implements ISrsScheduler {
   @override
-  VocabularyWord scheduleReview(VocabularyWord word, ReviewRating rating, {DateTime? now}) {
+  VocabularyWord scheduleReview(
+    VocabularyWord word,
+    ReviewRating rating, {
+    DateTime? now,
+  }) {
     final currentTime = now ?? DateTime.now();
     int newInterval;
     VocabularyState newState;
@@ -17,14 +25,16 @@ class SimpleSrsScheduler implements ISrsScheduler {
       case ReviewRating.again:
         newInterval = 0; // Review again today / within minutes
         newState = VocabularyState.learning;
-        newEase = (newEase - 0.2).clamp(1.3, 3.0);
+        newEase = (newEase - 0.2).clamp(1.3, 3.0).toDouble();
         break;
 
       case ReviewRating.hard:
-        newInterval = word.intervalDays == 0 ? 1 : (word.intervalDays * 1.2).ceil();
+        newInterval = word.intervalDays == 0
+            ? 1
+            : (word.intervalDays * 1.2).ceil();
         if (newInterval < 1) newInterval = 1;
         newState = VocabularyState.learning;
-        newEase = (newEase - 0.15).clamp(1.3, 3.0);
+        newEase = (newEase - 0.15).clamp(1.3, 3.0).toDouble();
         break;
 
       case ReviewRating.good:
@@ -35,7 +45,9 @@ class SimpleSrsScheduler implements ISrsScheduler {
         } else {
           newInterval = (word.intervalDays * word.easeFactor).round();
         }
-        newState = newReviewCount >= 4 ? VocabularyState.mastered : VocabularyState.review;
+        newState = newReviewCount >= 4
+            ? VocabularyState.mastered
+            : VocabularyState.review;
         break;
 
       case ReviewRating.easy:
@@ -45,8 +57,10 @@ class SimpleSrsScheduler implements ISrsScheduler {
           newInterval = (word.intervalDays * word.easeFactor * 1.5).round();
           if (newInterval < 7) newInterval = 7;
         }
-        newEase = (newEase + 0.15).clamp(1.3, 3.0);
-        newState = newReviewCount >= 3 ? VocabularyState.mastered : VocabularyState.review;
+        newEase = (newEase + 0.15).clamp(1.3, 3.0).toDouble();
+        newState = newReviewCount >= 3
+            ? VocabularyState.mastered
+            : VocabularyState.review;
         break;
     }
 

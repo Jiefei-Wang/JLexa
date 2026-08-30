@@ -7,6 +7,7 @@ import 'package:jlexa/core/dictionary/dictionary_repository.dart';
 import 'package:jlexa/core/vocabulary/vocabulary_repository.dart';
 import 'package:jlexa/main.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
 import 'test_helper.dart';
 
 void main() {
@@ -16,7 +17,9 @@ void main() {
     setupMockPlatformChannels();
   });
 
-  testWidgets('JLexaApp launches and displays Home', (WidgetTester tester) async {
+  testWidgets('JLexaApp launches and displays Home', (
+    WidgetTester tester,
+  ) async {
     final dictionaryRepo = DictionaryRepository();
     final vocabularyRepo = VocabularyRepository();
     final lessonRepo = LessonRepository();

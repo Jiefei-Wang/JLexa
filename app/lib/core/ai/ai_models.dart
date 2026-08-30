@@ -1,10 +1,4 @@
-enum AiModelState {
-  noModel,
-  loading,
-  ready,
-  generating,
-  error,
-}
+enum AiModelState { noModel, loading, ready, generating, error }
 
 abstract class AiException implements Exception {
   final String message;
@@ -15,11 +9,15 @@ abstract class AiException implements Exception {
 }
 
 class AiBusyException extends AiException {
-  const AiBusyException([super.message = 'Another generation is already in progress. Please wait.']);
+  const AiBusyException([
+    super.message = 'Another generation is already in progress. Please wait.',
+  ]);
 }
 
 class AiModelNotLoadedException extends AiException {
-  const AiModelNotLoadedException([super.message = 'No AI model loaded. Please load a model in Settings.']);
+  const AiModelNotLoadedException([
+    super.message = 'No AI model loaded. Please load a model in Settings.',
+  ]);
 }
 
 class AiGenerationException extends AiException {
@@ -31,24 +29,25 @@ class AiCancelledException extends AiException {
 }
 
 class AiUnsupportedPlatformException extends AiException {
-  const AiUnsupportedPlatformException([super.message = 'Local AI inference is not supported on this platform.']);
+  const AiUnsupportedPlatformException([
+    super.message = 'Local AI inference is not supported on this platform.',
+  ]);
 }
 
-enum AiRequestPriority {
-  background,
-  user,
-}
+enum AiRequestPriority { background, user }
 
 class AiGenerationHandle {
   final String requestId;
   final Stream<String> stream;
   final Future<void> Function() onCancel;
+  final Future<void> done;
 
-  const AiGenerationHandle({
+  AiGenerationHandle({
     required this.requestId,
     required this.stream,
     required this.onCancel,
-  });
+    Future<void>? done,
+  }) : done = done ?? Future.value();
 
   Future<void> cancel() => onCancel();
 }

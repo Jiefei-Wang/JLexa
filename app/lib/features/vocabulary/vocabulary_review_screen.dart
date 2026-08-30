@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/vocabulary/vocabulary_models.dart';
@@ -61,11 +62,18 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.check_circle_outline, size: 64, color: AppColors.success),
+                const Icon(
+                  Icons.check_circle_outline,
+                  size: 64,
+                  color: AppColors.success,
+                ),
                 const SizedBox(height: 16),
                 const Text('All caught up!', style: AppTypography.titleMedium),
                 const SizedBox(height: 8),
-                Text('You reviewed $_reviewedCount words today.', style: AppTypography.bodyMedium),
+                Text(
+                  'You reviewed $_reviewedCount words today.',
+                  style: AppTypography.bodyMedium,
+                ),
                 const SizedBox(height: 24),
                 ElevatedButton(
                   onPressed: () => Navigator.of(context).pop(),
@@ -93,7 +101,9 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
             LinearProgressIndicator(
               value: (_currentIndex + 1) / widget.dueWords.length,
               backgroundColor: AppColors.border,
-              valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
+              valueColor: const AlwaysStoppedAnimation<Color>(
+                AppColors.primary,
+              ),
               minHeight: 6,
             ),
             const SizedBox(height: 24),
@@ -125,19 +135,29 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(word.word, style: AppTypography.wordDisplay),
-                      if (word.phonetic != null && word.phonetic!.isNotEmpty) ...[
+                      if (word.phonetic != null &&
+                          word.phonetic!.isNotEmpty) ...[
                         const SizedBox(height: 8),
                         Text(word.phonetic!, style: AppTypography.phonetic),
                       ],
                       const SizedBox(height: 24),
                       if (!_showAnswer)
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
                           decoration: BoxDecoration(
                             color: AppColors.primaryLight,
                             borderRadius: BorderRadius.circular(20),
                           ),
-                          child: const Text('Tap card to reveal answer', style: TextStyle(color: AppColors.primary, fontSize: 13)),
+                          child: const Text(
+                            'Tap card to reveal answer',
+                            style: TextStyle(
+                              color: AppColors.primary,
+                              fontSize: 13,
+                            ),
+                          ),
                         )
                       else ...[
                         const Divider(height: 32),
@@ -146,7 +166,8 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
                           style: AppTypography.bodyLarge,
                           textAlign: TextAlign.center,
                         ),
-                        if (word.sourceSentence != null && word.sourceSentence!.isNotEmpty) ...[
+                        if (word.sourceSentence != null &&
+                            word.sourceSentence!.isNotEmpty) ...[
                           const SizedBox(height: 16),
                           Container(
                             padding: const EdgeInsets.all(12),
@@ -156,7 +177,9 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
                             ),
                             child: Text(
                               '"${word.sourceSentence!}"',
-                              style: AppTypography.bodySmall.copyWith(fontStyle: FontStyle.italic),
+                              style: AppTypography.bodySmall.copyWith(
+                                fontStyle: FontStyle.italic,
+                              ),
                               textAlign: TextAlign.center,
                             ),
                           ),
@@ -229,16 +252,30 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
     return Expanded(
       child: OutlinedButton(
         style: OutlinedButton.styleFrom(
-          side: BorderSide(color: _isSubmittingReview ? color.withAlpha(80) : color),
+          side: BorderSide(
+            color: _isSubmittingReview ? color.withAlpha(80) : color,
+          ),
           padding: const EdgeInsets.symmetric(vertical: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
         onPressed: _isSubmittingReview ? null : () => _handleRating(rating),
         child: Column(
           children: [
-            Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
+            ),
             const SizedBox(height: 2),
-            Text(subtext, style: TextStyle(color: color.withAlpha(180), fontSize: 10)),
+            Text(
+              subtext,
+              style: TextStyle(color: color.withAlpha(180), fontSize: 10),
+            ),
           ],
         ),
       ),

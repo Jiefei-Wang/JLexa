@@ -22,11 +22,17 @@ class AmplitudeSnapToSpeechService implements ISnapToSpeechService {
     }
 
     final double msPerSample = totalDurationMs / waveformPeaks.length;
-    final int sampleIndex = (proposedPositionMs / msPerSample).round().clamp(0, waveformPeaks.length - 1);
+    final int sampleIndex = (proposedPositionMs / msPerSample)
+        .round()
+        .clamp(0, waveformPeaks.length - 1)
+        .toInt();
 
     final int searchSamples = (searchWindowMs / msPerSample).round();
     final int startSample = max(0, sampleIndex - searchSamples);
-    final int endSample = min(waveformPeaks.length - 1, sampleIndex + searchSamples);
+    final int endSample = min(
+      waveformPeaks.length - 1,
+      sampleIndex + searchSamples,
+    );
 
     if (startSample >= endSample) {
       return proposedPositionMs;
@@ -45,7 +51,7 @@ class AmplitudeSnapToSpeechService implements ISnapToSpeechService {
     // Only snap if there is a noticeable local dip/valley
     if (minEnergy < 0.3) {
       final int snappedMs = (minEnergyIndex * msPerSample).round();
-      return snappedMs.clamp(0, totalDurationMs);
+      return snappedMs.clamp(0, totalDurationMs).toInt();
     }
 
     return proposedPositionMs;

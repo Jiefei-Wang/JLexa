@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
+
 import '../../core/ai/ai_models.dart';
 import '../../core/ai/ai_service.dart';
 import '../../core/ai/prompt_builder.dart';
@@ -24,6 +26,8 @@ class AiChatController extends ChangeNotifier {
   bool _isSummaryExpanded = true;
   String? _voiceErrorMessage;
   AiGenerationHandle? _activeHandle;
+  String? _activeVoiceRequestId;
+  bool _isDisposed = false;
 
   SentenceContext? get sentenceContext => _context;
   List<ChatMessage> get messages => _messages;
@@ -60,9 +64,9 @@ class AiChatController extends ChangeNotifier {
 
   Future<void> sendMessage(String text) async {
     final clean = text.trim();
-    if (clean.isEmpty) return;
+    if (clean.isEmpty || _isDisposed) return;
 
-    if (_isGenerating || aiService.isGenerating) return;
+    if (_isGenerating) return;
 
     final userMessage = ChatMessage(
       id: _uuid.v4(),
@@ -118,6 +122,7 @@ class AiChatController extends ChangeNotifier {
 
       String accumulated = '';
       await for (final chunk in handle.stream) {
+        if (_isDisposed) break;
         accumulated += chunk;
         final idx = _messages.indexWhere((m) => m.id == assistantMsgId);
         if (idx != -1) {
@@ -131,6 +136,7 @@ class AiChatController extends ChangeNotifier {
         }
       }
     } catch (e) {
+      if (_isDisposed) return;
       final idx = _messages.indexWhere((m) => m.id == assistantMsgId);
       if (idx != -1) {
         _messages[idx] = ChatMessage(
@@ -141,13 +147,16 @@ class AiChatController extends ChangeNotifier {
         );
       }
     } finally {
-      _isGenerating = false;
-      _activeHandle = null;
-      notifyListeners();
+      if (!_isDisposed) {
+        _isGenerating = false;
+        _activeHandle = null;
+        notifyListeners();
+      }
     }
   }
 
   Future<String?> startStopRecording() async {
+    if (_isDisposed) return null;
     _voiceErrorMessage = null;
     if (_isRecording) {
       // Stop recording
@@ -162,17 +171,24 @@ class AiChatController extends ChangeNotifier {
               notifyListeners();
               return null;
             }
+            final reqId = _uuid.v4();
+            _activeVoiceRequestId = reqId;
             final segments = await speechEngine.transcribeAudio(
               audioPath: path,
               lessonId: 'voice_input',
+              requestId: reqId,
             );
+            if (_isDisposed) return null;
             if (segments.isNotEmpty) {
               return segments.map((s) => s.text.trim()).join(' ');
             }
           } catch (e) {
-            _voiceErrorMessage = 'Voice transcription error: $e';
-            notifyListeners();
+            if (!_isDisposed) {
+              _voiceErrorMessage = 'Voice transcription error: $e';
+              notifyListeners();
+            }
           } finally {
+            _activeVoiceRequestId = null;
             // Delete temp recording file
             try {
               final tempFile = File(path);
@@ -183,8 +199,10 @@ class AiChatController extends ChangeNotifier {
           }
         }
       } catch (e) {
-        _voiceErrorMessage = 'Error stopping recording: $e';
-        notifyListeners();
+        if (!_isDisposed) {
+          _voiceErrorMessage = 'Error stopping recording: $e';
+          notifyListeners();
+        }
       }
     } else {
       // Start recording
@@ -197,9 +215,14 @@ class AiChatController extends ChangeNotifier {
         }
 
         final tempDir = await getTemporaryDirectory();
-        final filePath = '${tempDir.path}/voice_input_${DateTime.now().millisecondsSinceEpoch}.wav';
+        final filePath =
+            '${tempDir.path}/voice_input_${DateTime.now().millisecondsSinceEpoch}.wav';
         await _audioRecorder.start(
-          const RecordConfig(encoder: AudioEncoder.wav, sampleRate: 16000, numChannels: 1),
+          const RecordConfig(
+            encoder: AudioEncoder.wav,
+            sampleRate: 16000,
+            numChannels: 1,
+          ),
           path: filePath,
         );
         _isRecording = true;
@@ -214,8 +237,21 @@ class AiChatController extends ChangeNotifier {
   }
 
   @override
+  void notifyListeners() {
+    if (!_isDisposed) {
+      super.notifyListeners();
+    }
+  }
+
+  @override
   void dispose() {
+    _isDisposed = true;
     _activeHandle?.cancel();
+    _activeHandle = null;
+    if (_activeVoiceRequestId != null) {
+      speechEngine.cancelRequest(_activeVoiceRequestId!);
+      _activeVoiceRequestId = null;
+    }
     _tts.stop();
     if (_isRecording) {
       _audioRecorder.stop();

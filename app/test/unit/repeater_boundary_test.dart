@@ -1,4 +1,4 @@
-﻿import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:jlexa/core/ai/ai_service.dart';
 import 'package:jlexa/core/audio/audio_models.dart';
 import 'package:jlexa/core/audio/audio_service.dart';
@@ -6,6 +6,7 @@ import 'package:jlexa/core/audio/lesson_repository.dart';
 import 'package:jlexa/core/audio/waveform_service.dart';
 import 'package:jlexa/features/repeater/repeater_controller.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
 import '../test_helper.dart';
 
 void main() {
@@ -68,7 +69,9 @@ void main() {
       newEndMs: 2100, // < 500ms
     );
 
-    final updatedSeg1 = controller.segments.firstWhere((s) => s.id == 'seg_b_1');
+    final updatedSeg1 = controller.segments.firstWhere(
+      (s) => s.id == 'seg_b_1',
+    );
     expect(updatedSeg1.endMs - updatedSeg1.startMs, greaterThanOrEqualTo(500));
     expect(updatedSeg1.endMs, lessThanOrEqualTo(seg2.startMs));
 

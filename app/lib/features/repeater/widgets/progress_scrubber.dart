@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
 
@@ -15,7 +16,7 @@ class ProgressScrubber extends StatelessWidget {
   });
 
   String _formatTime(int ms) {
-    final totalSec = (ms / 1000).floor().clamp(0, 86400);
+    final int totalSec = (ms / 1000).floor().clamp(0, 86400).toInt();
     final min = totalSec ~/ 60;
     final sec = totalSec % 60;
     return '${min.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}';
@@ -24,7 +25,10 @@ class ProgressScrubber extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final double maxVal = durationMs > 0 ? durationMs.toDouble() : 1.0;
-    final double currentVal = positionMs.toDouble().clamp(0.0, maxVal);
+    final double currentVal = positionMs
+        .toDouble()
+        .clamp(0.0, maxVal)
+        .toDouble();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

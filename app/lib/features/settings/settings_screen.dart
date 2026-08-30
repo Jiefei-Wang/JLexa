@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../core/ai/ai_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
@@ -7,10 +8,7 @@ import 'settings_controller.dart';
 class SettingsScreen extends StatefulWidget {
   final AiService aiService;
 
-  const SettingsScreen({
-    super.key,
-    required this.aiService,
-  });
+  const SettingsScreen({super.key, required this.aiService});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -70,7 +68,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           backgroundColor: AppColors.background,
           appBar: AppBar(
             backgroundColor: AppColors.surface,
-            title: const Text('Settings & Local Models', style: AppTypography.titleMedium),
+            title: const Text(
+              'Settings & Local Models',
+              style: AppTypography.titleMedium,
+            ),
           ),
           body: ListView(
             padding: const EdgeInsets.all(16),
@@ -89,14 +90,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const Icon(Icons.error_outline, color: AppColors.error),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text(_controller.errorMessage!, style: const TextStyle(color: AppColors.error, fontSize: 13)),
+                        child: Text(
+                          _controller.errorMessage!,
+                          style: const TextStyle(
+                            color: AppColors.error,
+                            fontSize: 13,
+                          ),
+                        ),
                       ),
                     ],
                   ),
                 ),
 
               // Section 1: Local LLM Model
-              const Text('Local Language Model (LLM)', style: AppTypography.titleSmall),
+              const Text(
+                'Local Language Model (LLM)',
+                style: AppTypography.titleSmall,
+              ),
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(16),
@@ -110,24 +120,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.psychology, color: AppColors.accentPurple, size: 24),
+                        const Icon(
+                          Icons.psychology,
+                          color: AppColors.accentPurple,
+                          size: 24,
+                        ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(llmInfo?.name ?? 'No LLM Model Loaded', style: AppTypography.labelLarge),
                               Text(
-                                llmInfo != null ? '${llmInfo.formattedSize} • Ready for offline inference' : 'Select a .gguf model file from local storage',
+                                llmInfo?.name ?? 'No LLM Model Loaded',
+                                style: AppTypography.labelLarge,
+                              ),
+                              Text(
+                                llmInfo != null
+                                    ? '${llmInfo.formattedSize} • Ready for offline inference'
+                                    : 'Select a .gguf model file from local storage',
                                 style: AppTypography.bodySmall,
                               ),
                             ],
                           ),
                         ),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
                           decoration: BoxDecoration(
-                            color: llmInfo?.isLoaded == true ? AppColors.successLight : AppColors.warningLight,
+                            color: llmInfo?.isLoaded == true
+                                ? AppColors.successLight
+                                : AppColors.warningLight,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -135,7 +159,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
-                              color: llmInfo?.isLoaded == true ? AppColors.success : AppColors.warning,
+                              color: llmInfo?.isLoaded == true
+                                  ? AppColors.success
+                                  : AppColors.warning,
                             ),
                           ),
                         ),
@@ -146,7 +172,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       children: [
                         Expanded(
                           child: ElevatedButton.icon(
-                            onPressed: _controller.isLoading ? null : _controller.pickAndLoadLlmModel,
+                            onPressed: _controller.isLoading
+                                ? null
+                                : _controller.pickAndLoadLlmModel,
                             icon: const Icon(Icons.file_open, size: 18),
                             label: const Text('Choose GGUF Model'),
                           ),
@@ -154,7 +182,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         if (llmInfo != null && !llmInfo.isLoaded) ...[
                           const SizedBox(width: 8),
                           FilledButton.tonal(
-                            onPressed: _controller.isLoading ? null : _controller.loadConfiguredLlmModel,
+                            onPressed: _controller.isLoading
+                                ? null
+                                : _controller.loadConfiguredLlmModel,
                             child: const Text('Load'),
                           ),
                           const SizedBox(width: 4),
@@ -162,10 +192,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             onPressed: _controller.isLoading
                                 ? null
                                 : () => _confirmForgetModel(
-                                      modelName: llmInfo.name,
-                                      onConfirm: () => _controller.forgetLlmModel(deleteFile: false),
+                                    modelName: llmInfo.name,
+                                    onConfirm: () => _controller.forgetLlmModel(
+                                      deleteFile: false,
                                     ),
-                            icon: const Icon(Icons.delete_outline, color: AppColors.textTertiary, size: 20),
+                                  ),
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: AppColors.textTertiary,
+                              size: 20,
+                            ),
                             tooltip: 'Forget Model',
                           ),
                         ],
@@ -173,7 +209,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           const SizedBox(width: 8),
                           OutlinedButton(
                             onPressed: _controller.unloadLlmModel,
-                            style: OutlinedButton.styleFrom(foregroundColor: AppColors.error),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.error,
+                            ),
                             child: const Text('Unload'),
                           ),
                         ],
@@ -185,7 +223,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 20),
 
               // Section 2: Speech Recognition Model (Whisper)
-              const Text('Speech Recognition Model (Whisper)', style: AppTypography.titleSmall),
+              const Text(
+                'Speech Recognition Model (Whisper)',
+                style: AppTypography.titleSmall,
+              ),
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(16),
@@ -199,32 +240,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.record_voice_over, color: AppColors.primary, size: 24),
+                        const Icon(
+                          Icons.record_voice_over,
+                          color: AppColors.primary,
+                          size: 24,
+                        ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(speechInfo?.name ?? 'No Whisper Model Loaded', style: AppTypography.labelLarge),
                               Text(
-                                speechInfo != null ? '${speechInfo.formattedSize} • Ready for speech-to-text' : 'Select a ggml whisper model (.bin / .ggml) file',
+                                speechInfo?.name ?? 'No Whisper Model Loaded',
+                                style: AppTypography.labelLarge,
+                              ),
+                              Text(
+                                speechInfo != null
+                                    ? '${speechInfo.formattedSize} • Ready for speech-to-text'
+                                    : 'Select a ggml whisper model (.bin / .ggml) file',
                                 style: AppTypography.bodySmall,
                               ),
                             ],
                           ),
                         ),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
                           decoration: BoxDecoration(
-                            color: speechInfo?.isLoaded == true ? AppColors.successLight : AppColors.warningLight,
+                            color: speechInfo?.isLoaded == true
+                                ? AppColors.successLight
+                                : AppColors.warningLight,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            speechInfo?.isLoaded == true ? 'Ready' : (speechInfo != null ? 'Configured' : 'Not Loaded'),
+                            speechInfo?.isLoaded == true
+                                ? 'Ready'
+                                : (speechInfo != null
+                                      ? 'Configured'
+                                      : 'Not Loaded'),
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
-                              color: speechInfo?.isLoaded == true ? AppColors.success : AppColors.warning,
+                              color: speechInfo?.isLoaded == true
+                                  ? AppColors.success
+                                  : AppColors.warning,
                             ),
                           ),
                         ),
@@ -235,7 +296,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       children: [
                         Expanded(
                           child: ElevatedButton.icon(
-                            onPressed: _controller.isLoading ? null : _controller.pickAndLoadSpeechModel,
+                            onPressed: _controller.isLoading
+                                ? null
+                                : _controller.pickAndLoadSpeechModel,
                             icon: const Icon(Icons.file_open, size: 18),
                             label: const Text('Choose Whisper Model'),
                           ),
@@ -243,7 +306,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         if (speechInfo != null && !speechInfo.isLoaded) ...[
                           const SizedBox(width: 8),
                           FilledButton.tonal(
-                            onPressed: _controller.isLoading ? null : _controller.loadConfiguredSpeechModel,
+                            onPressed: _controller.isLoading
+                                ? null
+                                : _controller.loadConfiguredSpeechModel,
                             child: const Text('Load'),
                           ),
                           const SizedBox(width: 4),
@@ -251,10 +316,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             onPressed: _controller.isLoading
                                 ? null
                                 : () => _confirmForgetModel(
-                                      modelName: speechInfo.name,
-                                      onConfirm: () => _controller.forgetSpeechModel(deleteFile: false),
-                                    ),
-                            icon: const Icon(Icons.delete_outline, color: AppColors.textTertiary, size: 20),
+                                    modelName: speechInfo.name,
+                                    onConfirm: () => _controller
+                                        .forgetSpeechModel(deleteFile: false),
+                                  ),
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: AppColors.textTertiary,
+                              size: 20,
+                            ),
                             tooltip: 'Forget Model',
                           ),
                         ],
@@ -262,7 +332,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           const SizedBox(width: 8),
                           OutlinedButton(
                             onPressed: _controller.unloadSpeechModel,
-                            style: OutlinedButton.styleFrom(foregroundColor: AppColors.error),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.error,
+                            ),
                             child: const Text('Unload'),
                           ),
                         ],
@@ -274,7 +346,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 20),
 
               // Section 3: AI Inference Settings
-              const Text('Inference Configuration', style: AppTypography.titleSmall),
+              const Text(
+                'Inference Configuration',
+                style: AppTypography.titleSmall,
+              ),
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(16),
@@ -292,7 +367,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       min: 0.1,
                       max: 1.5,
                       divisions: 14,
-                      displayValue: widget.aiService.settings.temperature.toStringAsFixed(2),
+                      displayValue: widget.aiService.settings.temperature
+                          .toStringAsFixed(2),
                       onChanged: (val) {
                         widget.aiService.updateSettings(
                           widget.aiService.settings.copyWith(temperature: val),
@@ -311,7 +387,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       displayValue: '${widget.aiService.settings.maxTokens}',
                       onChanged: (val) {
                         widget.aiService.updateSettings(
-                          widget.aiService.settings.copyWith(maxTokens: val.round()),
+                          widget.aiService.settings.copyWith(
+                            maxTokens: val.round(),
+                          ),
                         );
                         setState(() {});
                       },
@@ -366,7 +444,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(title, style: AppTypography.labelLarge),
-            Text(displayValue, style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary)),
+            Text(
+              displayValue,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: AppColors.primary,
+              ),
+            ),
           ],
         ),
         Text(subtitle, style: AppTypography.bodySmall),

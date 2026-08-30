@@ -34,12 +34,15 @@ class PromptBuilder {
       'You are JLexa, an expert offline English learning AI assistant. '
       'Explain clearly, accurately, and concisely. When appropriate, provide natural Chinese explanations for English learners.';
 
-  static List<ChatMessagePayload> buildDictionaryExplanationMessages(String word) {
+  static List<ChatMessagePayload> buildDictionaryExplanationMessages(
+    String word,
+  ) {
     return [
       const ChatMessagePayload(role: 'system', content: systemPrefix),
       ChatMessagePayload(
         role: 'user',
-        content: 'Explain the English word "$word" for a language learner.\nProvide:\n1. Core meaning and nuances\n2. Typical collocations and common usage\n3. Natural example sentences\n4. Chinese translation of key points',
+        content:
+            'Explain the English word "$word" for a language learner.\nProvide:\n1. Core meaning and nuances\n2. Typical collocations and common usage\n3. Natural example sentences\n4. Chinese translation of key points',
       ),
     ];
   }
@@ -60,7 +63,8 @@ Provide:
       const ChatMessagePayload(role: 'system', content: systemPrefix),
       ChatMessagePayload(
         role: 'user',
-        content: 'Translate the following English text into natural, fluent Chinese:\n"$text"',
+        content:
+            'Translate the following English text into natural, fluent Chinese:\n"$text"',
       ),
     ];
   }
@@ -72,25 +76,38 @@ Translate the following English text into natural, fluent Chinese:
 "$text"''';
   }
 
-  static List<ChatMessagePayload> buildSentenceExplanationMessages(SentenceContext context) {
+  static List<ChatMessagePayload> buildSentenceExplanationMessages(
+    SentenceContext context,
+  ) {
     final buffer = StringBuffer();
-    buffer.writeln('Explain this sentence from the audio lesson "${context.lessonTitle}":');
+    buffer.writeln(
+      'Explain this sentence from the audio lesson "${context.lessonTitle}":',
+    );
     buffer.writeln('Current sentence: "${context.sentenceText}"');
 
-    if (context.previousSentence != null && context.previousSentence!.isNotEmpty) {
+    if (context.previousSentence != null &&
+        context.previousSentence!.isNotEmpty) {
       buffer.writeln('Previous context: "${context.previousSentence}"');
     }
     if (context.nextSentence != null && context.nextSentence!.isNotEmpty) {
       buffer.writeln('Following context: "${context.nextSentence}"');
     }
     if (context.uncertainWords.isNotEmpty) {
-      buffer.writeln('Note: The speech recognizer was uncertain about words: ${context.uncertainWords.join(', ')}');
+      buffer.writeln(
+        'Note: The speech recognizer was uncertain about words: ${context.uncertainWords.join(', ')}',
+      );
     }
 
     buffer.writeln('\nPlease format your answer with:');
-    buffer.writeln('Summary: Concise 1-sentence explanation of what the speaker means.');
-    buffer.writeln('Meaning: Nuances of key phrases and idioms in this context.');
-    buffer.writeln('Possible correction: If any word seems misrecognized, suggest the intended word; otherwise state "No correction necessary."');
+    buffer.writeln(
+      'Summary: Concise 1-sentence explanation of what the speaker means.',
+    );
+    buffer.writeln(
+      'Meaning: Nuances of key phrases and idioms in this context.',
+    );
+    buffer.writeln(
+      'Possible correction: If any word seems misrecognized, suggest the intended word; otherwise state "No correction necessary."',
+    );
 
     return [
       const ChatMessagePayload(role: 'system', content: systemPrefix),
@@ -101,23 +118,34 @@ Translate the following English text into natural, fluent Chinese:
   static String buildSentenceExplanation(SentenceContext context) {
     final buffer = StringBuffer();
     buffer.writeln(systemPrefix);
-    buffer.writeln('\nExplain this sentence from the audio lesson "${context.lessonTitle}":');
+    buffer.writeln(
+      '\nExplain this sentence from the audio lesson "${context.lessonTitle}":',
+    );
     buffer.writeln('Current sentence: "${context.sentenceText}"');
 
-    if (context.previousSentence != null && context.previousSentence!.isNotEmpty) {
+    if (context.previousSentence != null &&
+        context.previousSentence!.isNotEmpty) {
       buffer.writeln('Previous context: "${context.previousSentence}"');
     }
     if (context.nextSentence != null && context.nextSentence!.isNotEmpty) {
       buffer.writeln('Following context: "${context.nextSentence}"');
     }
     if (context.uncertainWords.isNotEmpty) {
-      buffer.writeln('Note: The speech recognizer was uncertain about words: ${context.uncertainWords.join(', ')}');
+      buffer.writeln(
+        'Note: The speech recognizer was uncertain about words: ${context.uncertainWords.join(', ')}',
+      );
     }
 
     buffer.writeln('\nPlease format your answer with:');
-    buffer.writeln('Summary: Concise 1-sentence explanation of what the speaker means.');
-    buffer.writeln('Meaning: Nuances of key phrases and idioms in this context.');
-    buffer.writeln('Possible correction: If any word seems misrecognized, suggest the intended word; otherwise state "No correction necessary."');
+    buffer.writeln(
+      'Summary: Concise 1-sentence explanation of what the speaker means.',
+    );
+    buffer.writeln(
+      'Meaning: Nuances of key phrases and idioms in this context.',
+    );
+    buffer.writeln(
+      'Possible correction: If any word seems misrecognized, suggest the intended word; otherwise state "No correction necessary."',
+    );
 
     return buffer.toString();
   }
@@ -134,7 +162,8 @@ Translate the following English text into natural, fluent Chinese:
     final contextHeader = StringBuffer();
     contextHeader.writeln('Lesson: "${context.lessonTitle}"');
     contextHeader.writeln('Target sentence: "${context.sentenceText}"');
-    if (context.previousSentence != null && context.previousSentence!.isNotEmpty) {
+    if (context.previousSentence != null &&
+        context.previousSentence!.isNotEmpty) {
       contextHeader.writeln('Context before: "${context.previousSentence}"');
     }
     if (context.nextSentence != null && context.nextSentence!.isNotEmpty) {
@@ -146,14 +175,24 @@ Translate the following English text into natural, fluent Chinese:
       final role = msg['role'] == 'assistant' ? 'assistant' : 'user';
       final content = msg['content'] ?? '';
       if (i == 0 && role == 'user') {
-        msgs.add(ChatMessagePayload(role: 'user', content: '$contextHeader\n\n$content'));
+        msgs.add(
+          ChatMessagePayload(
+            role: 'user',
+            content: '$contextHeader\n\n$content',
+          ),
+        );
       } else {
         msgs.add(ChatMessagePayload(role: role, content: content));
       }
     }
 
     if (chatHistory.isEmpty) {
-      msgs.add(ChatMessagePayload(role: 'user', content: '$contextHeader\n\nQuestion: $userQuestion'));
+      msgs.add(
+        ChatMessagePayload(
+          role: 'user',
+          content: '$contextHeader\n\nQuestion: $userQuestion',
+        ),
+      );
     } else {
       msgs.add(ChatMessagePayload(role: 'user', content: userQuestion));
     }
@@ -171,7 +210,8 @@ Translate the following English text into natural, fluent Chinese:
     buffer.writeln('\nLesson: "${context.lessonTitle}"');
     buffer.writeln('Target sentence: "${context.sentenceText}"');
 
-    if (context.previousSentence != null && context.previousSentence!.isNotEmpty) {
+    if (context.previousSentence != null &&
+        context.previousSentence!.isNotEmpty) {
       buffer.writeln('Context before: "${context.previousSentence}"');
     }
     if (context.nextSentence != null && context.nextSentence!.isNotEmpty) {

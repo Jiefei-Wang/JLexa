@@ -25,76 +25,72 @@ object AudioDecoder {
         val waveformPeaks: List<Double>
     )
 
-    class FloatChunkBuffer(private val chunkSize: Int = 65536) {
-        private val chunks = mutableListOf<FloatArray>()
-        private var currentChunk = FloatArray(chunkSize)
-        private var currentPos = 0
-        var totalSize = 0
+    class DirectStreamingResampler16k(
+        private var sourceSampleRate: Int,
+        estimatedOutputSamples: Int = 16000
+    ) {
+        private var buffer = FloatArray(max(16000, estimatedOutputSamples))
+        var count = 0
             private set
 
-        fun add(value: Float) {
-            if (currentPos >= chunkSize) {
-                chunks.add(currentChunk)
-                currentChunk = FloatArray(chunkSize)
-                currentPos = 0
-            }
-            currentChunk[currentPos++] = value
-            totalSize++
-        }
-
-        fun toFlatArray(): FloatArray {
-            val result = FloatArray(totalSize)
-            var offset = 0
-            for (chunk in chunks) {
-                System.arraycopy(chunk, 0, result, offset, chunkSize)
-                offset += chunkSize
-            }
-            if (currentPos > 0) {
-                System.arraycopy(currentChunk, 0, result, offset, currentPos)
-            }
-            // Release chunk references to allow GC
-            chunks.clear()
-            currentChunk = FloatArray(0)
-            currentPos = 0
-            return result
-        }
-    }
-
-    class StreamingResampler16k(private val sourceSampleRate: Int) {
-        val buffer = FloatChunkBuffer()
         private var hasPrev = false
         private var prevSample = 0.0f
         private var srcPos = 0.0
         private var srcOffset = 0L
 
-        fun feed(samples: FloatArray, count: Int) {
-            if (count <= 0) return
+        fun updateSourceSampleRate(newRate: Int) {
+            if (newRate > 0 && newRate != sourceSampleRate) {
+                sourceSampleRate = newRate
+            }
+        }
+
+        private fun ensureCapacity(needed: Int) {
+            if (needed > buffer.size) {
+                var newCap = buffer.size + (buffer.size shr 1)
+                if (newCap < needed) newCap = needed + 16000
+                buffer = buffer.copyOf(newCap)
+            }
+        }
+
+        private fun addSample(value: Float) {
+            if (count >= buffer.size) {
+                ensureCapacity(count + 16000)
+            }
+            buffer[count++] = value
+        }
+
+        fun feed(samples: FloatArray, sampleCount: Int) {
+            if (sampleCount <= 0) return
             if (sourceSampleRate == 16000) {
-                for (i in 0 until count) {
-                    buffer.add(samples[i])
-                }
+                ensureCapacity(count + sampleCount)
+                System.arraycopy(samples, 0, buffer, count, sampleCount)
+                count += sampleCount
                 return
             }
 
             val ratio = sourceSampleRate.toDouble() / 16000.0
-            while (srcPos < srcOffset + count) {
+            while (srcPos < srcOffset + sampleCount) {
                 val localPos = srcPos - srcOffset
                 val idx0 = localPos.toInt()
                 val frac = (localPos - idx0).toFloat()
                 val s0 = if (idx0 >= 0) samples[idx0] else if (hasPrev) prevSample else samples[0]
-                val s1 = if (idx0 + 1 < count) samples[idx0 + 1] else samples[count - 1]
+                val s1 = if (idx0 + 1 < sampleCount) samples[idx0 + 1] else samples[sampleCount - 1]
                 val interpolated = s0 * (1.0f - frac) + s1 * frac
-                buffer.add(interpolated)
+                addSample(interpolated)
                 srcPos += ratio
             }
 
-            prevSample = samples[count - 1]
+            prevSample = samples[sampleCount - 1]
             hasPrev = true
-            srcOffset += count
+            srcOffset += sampleCount
         }
 
         fun finish(): FloatArray {
-            return buffer.toFlatArray()
+            return if (count == buffer.size) {
+                buffer
+            } else {
+                buffer.copyOf(count)
+            }
         }
     }
 
@@ -130,6 +126,9 @@ object AudioDecoder {
                                         channels = fmtBuf.getShort(2).toInt() and 0xFFFF
                                         sampleRate = fmtBuf.getInt(4)
                                         bitsPerSample = fmtBuf.getShort(14).toInt() and 0xFFFF
+                                    }
+                                    if (chunkSize % 2L != 0L) {
+                                        fis.skip(1)
                                     }
                                 } else if (chunkId == "data") {
                                     dataLength = chunkSize
@@ -395,10 +394,13 @@ object AudioDecoder {
                         sampleRate = fmtBuf.getInt(4)
                         bitsPerSample = fmtBuf.getShort(14).toInt() and 0xFFFF
 
-                        // For WAVE_FORMAT_EXTENSIBLE (0xFFFE), check subformat GUID
-                        if (audioFormat == 0xFFFE && fmtData.size >= 24) {
+                        // For WAVE_FORMAT_EXTENSIBLE (0xFFFE), check subformat GUID (need >= 26 bytes for short at offset 24)
+                        if (audioFormat == 0xFFFE && fmtData.size >= 26) {
                             val subFormatCode = fmtBuf.getShort(24).toInt() and 0xFFFF
                             audioFormat = subFormatCode // 1 for PCM, 3 for IEEE Float
+                        }
+                        if (chunkSize % 2L != 0L) {
+                            fis.skip(1)
                         }
                     } else if (chunkId == "data") {
                         dataChunkSize = chunkSize
@@ -421,23 +423,32 @@ object AudioDecoder {
                 val bytesPerFrame = channels * (bitsPerSample / 8)
                 if (bytesPerFrame <= 0) return null
 
-                val resampler = StreamingResampler16k(sampleRate)
-                val readBuffer = ByteArray(16384)
-                val monoFloatChunk = FloatArray(readBuffer.size / bytesPerFrame)
-                var remainingData = dataChunkSize
+                val totalFrames = dataChunkSize / bytesPerFrame
+                val estimated16kSamples = ((totalFrames.toDouble() * 16000.0) / sampleRate.toDouble()).toInt() + 1000
+                val resampler = DirectStreamingResampler16k(sampleRate, estimated16kSamples)
 
-                while (remainingData > 0) {
+                val readBuffer = ByteArray(16384)
+                val monoFloatChunk = FloatArray(readBuffer.size / bytesPerFrame + 4)
+                var remainingData = dataChunkSize
+                var remainderBytes = 0
+
+                while (remainingData > 0 || remainderBytes > 0) {
                     if (isCancelled?.invoke() == true) return null
 
-                    val toRead = min(readBuffer.size.toLong(), remainingData).toInt()
-                    val bytesRead = fis.read(readBuffer, 0, toRead)
-                    if (bytesRead <= 0) break
-                    remainingData -= bytesRead
+                    val toRead = min((readBuffer.size - remainderBytes).toLong(), remainingData).toInt()
+                    val bytesRead = if (toRead > 0) fis.read(readBuffer, remainderBytes, toRead) else 0
+                    if (bytesRead <= 0 && remainderBytes == 0) break
+                    val actualBytesRead = if (bytesRead > 0) bytesRead else 0
+                    remainingData -= actualBytesRead
 
-                    val framesInChunk = bytesRead / bytesPerFrame
-                    if (framesInChunk <= 0) continue
+                    val totalValidBytes = remainderBytes + actualBytesRead
+                    val framesInChunk = totalValidBytes / bytesPerFrame
+                    if (framesInChunk <= 0) {
+                        remainderBytes = totalValidBytes
+                        break
+                    }
 
-                    val bb = ByteBuffer.wrap(readBuffer, 0, bytesRead).order(ByteOrder.LITTLE_ENDIAN)
+                    val bb = ByteBuffer.wrap(readBuffer, 0, framesInChunk * bytesPerFrame).order(ByteOrder.LITTLE_ENDIAN)
 
                     if (bitsPerSample == 16 && (audioFormat == 1 || audioFormat == 0xFFFE)) {
                         val sb = bb.asShortBuffer()
@@ -475,10 +486,15 @@ object AudioDecoder {
                     }
 
                     resampler.feed(monoFloatChunk, framesInChunk)
+
+                    val consumedBytes = framesInChunk * bytesPerFrame
+                    remainderBytes = totalValidBytes - consumedBytes
+                    if (remainderBytes > 0) {
+                        System.arraycopy(readBuffer, consumedBytes, readBuffer, 0, remainderBytes)
+                    }
                 }
 
                 val resampled16k = resampler.finish()
-                val totalFrames = dataChunkSize / bytesPerFrame
                 val durationMs = (totalFrames.toDouble() * 1000.0 / sampleRate.toDouble()).toLong()
                 val peaks = computeWaveformPeaks(resampled16k, if (numPeaks > 0) numPeaks else 200)
 
@@ -529,7 +545,13 @@ object AudioDecoder {
                 android.media.AudioFormat.ENCODING_PCM_16BIT
             }
 
-            val resampler = StreamingResampler16k(sampleRate)
+            val estimated16kSamples = if (durationUs > 0) {
+                ((durationUs / 1000000.0) * 16000.0).toInt() + 16000
+            } else {
+                16000 * 60
+            }
+
+            val resampler = DirectStreamingResampler16k(sampleRate, estimated16kSamples)
             val bufferInfo = MediaCodec.BufferInfo()
             var inputDone = false
             var outputDone = false
@@ -626,6 +648,7 @@ object AudioDecoder {
                     val newFormat = codec.outputFormat
                     if (newFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
                         sampleRate = newFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                        resampler.updateSourceSampleRate(sampleRate)
                     }
                     if (newFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
                         channelCount = newFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)

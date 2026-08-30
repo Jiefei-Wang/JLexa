@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
+
 import '../database/app_database.dart';
 import '../utils/text_normalization.dart';
 import 'srs_scheduler.dart';
@@ -16,20 +17,18 @@ abstract class IVocabularyRepository {
   Future<void> deleteWord(String id);
 }
 
-class VocabularyRepository extends ChangeNotifier implements IVocabularyRepository {
+class VocabularyRepository extends ChangeNotifier
+    implements IVocabularyRepository {
   final ISrsScheduler _scheduler;
   final _uuid = const Uuid();
 
   VocabularyRepository({ISrsScheduler? scheduler})
-      : _scheduler = scheduler ?? SimpleSrsScheduler();
+    : _scheduler = scheduler ?? SimpleSrsScheduler();
 
   @override
   Future<List<VocabularyWord>> getAllWords() async {
     final db = await AppDatabase.instance.database;
-    final results = await db.query(
-      'vocabulary',
-      orderBy: 'date_added DESC',
-    );
+    final results = await db.query('vocabulary', orderBy: 'date_added DESC');
     return results.map((e) => VocabularyWord.fromMap(e)).toList();
   }
 
@@ -68,7 +67,9 @@ class VocabularyRepository extends ChangeNotifier implements IVocabularyReposito
     final existing = await getWord(clean);
 
     final finalWord = word.copyWith(
-      id: word.id.isEmpty ? (existing?.id ?? _uuid.v4()) : (existing?.id ?? word.id),
+      id: word.id.isEmpty
+          ? (existing?.id ?? _uuid.v4())
+          : (existing?.id ?? word.id),
       word: clean,
     );
 
@@ -106,11 +107,7 @@ class VocabularyRepository extends ChangeNotifier implements IVocabularyReposito
   @override
   Future<void> deleteWord(String id) async {
     final db = await AppDatabase.instance.database;
-    await db.delete(
-      'vocabulary',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    await db.delete('vocabulary', where: 'id = ?', whereArgs: [id]);
     notifyListeners();
   }
 }

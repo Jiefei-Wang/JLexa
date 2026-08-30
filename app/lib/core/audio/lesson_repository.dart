@@ -1,7 +1,9 @@
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
+
 import '../database/app_database.dart';
 import 'audio_models.dart';
 import 'waveform_service.dart';
@@ -91,7 +93,10 @@ class LessonRepository extends ChangeNotifier implements ILessonRepository {
   }
 
   @override
-  Future<void> updateTranscriptStatus(String id, TranscriptStatus status) async {
+  Future<void> updateTranscriptStatus(
+    String id,
+    TranscriptStatus status,
+  ) async {
     final db = await AppDatabase.instance.database;
     await db.update(
       'audio_lessons',
@@ -107,16 +112,8 @@ class LessonRepository extends ChangeNotifier implements ILessonRepository {
     final db = await AppDatabase.instance.database;
     final lesson = await getLesson(id);
 
-    await db.delete(
-      'audio_lessons',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-    await db.delete(
-      'audio_segments',
-      where: 'lesson_id = ?',
-      whereArgs: [id],
-    );
+    await db.delete('audio_lessons', where: 'id = ?', whereArgs: [id]);
+    await db.delete('audio_segments', where: 'lesson_id = ?', whereArgs: [id]);
 
     // Clean up local audio file if it is an app-owned file
     if (lesson != null && !lesson.localPath.startsWith('asset:')) {
@@ -163,7 +160,7 @@ class LessonRepository extends ChangeNotifier implements ILessonRepository {
         id: 'seg_1',
         lessonId: lessonId,
         startMs: 490000, // 08:10.000
-        endMs: 501300,   // 08:21.300
+        endMs: 501300, // 08:21.300
         text: 'Most people think they never have enough time to finish their daily work.',
         confidence: 0.95,
         tokens: const [
@@ -186,7 +183,7 @@ class LessonRepository extends ChangeNotifier implements ILessonRepository {
         id: 'seg_2',
         lessonId: lessonId,
         startMs: 501300, // 08:21.300
-        endMs: 511300,   // 08:31.300 (10s)
+        endMs: 511300, // 08:31.300 (10s)
         text: 'The key is not to prioritize what\'s on your schedule , but to schedule your priorities .',
         confidence: 0.78,
         tokens: const [
@@ -213,7 +210,7 @@ class LessonRepository extends ChangeNotifier implements ILessonRepository {
         id: 'seg_3',
         lessonId: lessonId,
         startMs: 511300, // 08:31.300
-        endMs: 524000,   // 08:44.000
+        endMs: 524000, // 08:44.000
         text: 'When you build a resilient mindset, you focus completely on high-impact endeavors.',
         confidence: 0.92,
         tokens: const [
@@ -235,7 +232,10 @@ class LessonRepository extends ChangeNotifier implements ILessonRepository {
   }
 
   @override
-  Future<void> saveSegments(String lessonId, List<AudioSegment> segments) async {
+  Future<void> saveSegments(
+    String lessonId,
+    List<AudioSegment> segments,
+  ) async {
     final db = await AppDatabase.instance.database;
     final batch = db.batch();
 

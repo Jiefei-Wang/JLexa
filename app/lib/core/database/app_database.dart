@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -29,6 +30,13 @@ class AppDatabase {
         await db.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: _createDB,
+      onOpen: (db) async {
+        try {
+          await db.execute(
+            "UPDATE audio_lessons SET transcript_status = 'none' WHERE transcript_status = 'processing'",
+          );
+        } catch (_) {}
+      },
     );
   }
 

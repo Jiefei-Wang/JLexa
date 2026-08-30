@@ -28,45 +28,106 @@ struct JLexaLlamaBridge::Impl {
     }
 };
 
-static size_t get_valid_utf8_length(const std::string& str) {
+static void process_utf8_accumulator(std::string& accum, std::string& out_valid, bool flush_all = false) {
     size_t i = 0;
-    const size_t len = str.length();
+    const size_t len = accum.length();
+
     while (i < len) {
-        unsigned char c = static_cast<unsigned char>(str[i]);
-        size_t char_len = 0;
+        unsigned char c = static_cast<unsigned char>(accum[i]);
+
         if (c <= 0x7F) {
-            char_len = 1;
-        } else if (c >= 0xC2 && c <= 0xDF) {
+            out_valid.push_back(static_cast<char>(c));
+            i += 1;
+            continue;
+        }
+
+        size_t char_len = 0;
+        if (c >= 0xC2 && c <= 0xDF) {
             char_len = 2;
         } else if (c >= 0xE0 && c <= 0xEF) {
             char_len = 3;
         } else if (c >= 0xF0 && c <= 0xF4) {
             char_len = 4;
         } else {
-            // Invalid leading byte — stop here
-            break;
+            // Invalid leading byte (0x80..0xC1, 0xF5..0xFF)
+            // Emit U+FFFD and consume this invalid byte
+            out_valid += "\xEF\xBF\xBD";
+            i += 1;
+            continue;
         }
 
         if (i + char_len > len) {
-            // Incomplete multi-byte sequence at end — stop here
-            break;
-        }
+            if (!flush_all) {
+                // Incomplete multi-byte sequence at end of chunk.
+                // Check if the prefix bytes we currently have are valid.
+                bool prefix_valid = true;
+                if (char_len == 3 && (i + 1 < len)) {
+                    unsigned char c1 = static_cast<unsigned char>(accum[i + 1]);
+                    if ((c1 & 0xC0) != 0x80) prefix_valid = false;
+                    if (c == 0xE0 && (c1 < 0xA0 || c1 > 0xBF)) prefix_valid = false;
+                    if (c == 0xED && (c1 < 0x80 || c1 > 0x9F)) prefix_valid = false;
+                } else if (char_len == 4) {
+                    if (i + 1 < len) {
+                        unsigned char c1 = static_cast<unsigned char>(accum[i + 1]);
+                        if ((c1 & 0xC0) != 0x80) prefix_valid = false;
+                        if (c == 0xF0 && (c1 < 0x90 || c1 > 0xBF)) prefix_valid = false;
+                        if (c == 0xF4 && (c1 < 0x80 || c1 > 0x8F)) prefix_valid = false;
+                    }
+                    if (i + 2 < len) {
+                        unsigned char c2 = static_cast<unsigned char>(accum[i + 2]);
+                        if ((c2 & 0xC0) != 0x80) prefix_valid = false;
+                    }
+                }
 
-        bool valid = true;
-        for (size_t k = 1; k < char_len; ++k) {
-            if ((static_cast<unsigned char>(str[i + k]) & 0xC0) != 0x80) {
-                valid = false;
-                break;
+                if (prefix_valid) {
+                    // Retain valid incomplete prefix in accumulator for future tokens
+                    break;
+                }
             }
-        }
-        if (!valid) {
-            // Invalid continuation byte — stop here
-            break;
+            // If flush_all or prefix was invalid, consume byte as U+FFFD
+            out_valid += "\xEF\xBF\xBD";
+            i += 1;
+            continue;
         }
 
-        i += char_len;
+        // Full sequence available: validate all continuation bytes and constraints
+        bool valid = true;
+        if (char_len == 2) {
+            unsigned char c1 = static_cast<unsigned char>(accum[i + 1]);
+            if ((c1 & 0xC0) != 0x80) valid = false;
+        } else if (char_len == 3) {
+            unsigned char c1 = static_cast<unsigned char>(accum[i + 1]);
+            unsigned char c2 = static_cast<unsigned char>(accum[i + 2]);
+            if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80) valid = false;
+            // Overlong check (E0 80..9F)
+            if (c == 0xE0 && (c1 < 0xA0 || c1 > 0xBF)) valid = false;
+            // UTF-16 surrogate check (ED A0..BF)
+            if (c == 0xED && (c1 < 0x80 || c1 > 0x9F)) valid = false;
+        } else if (char_len == 4) {
+            unsigned char c1 = static_cast<unsigned char>(accum[i + 1]);
+            unsigned char c2 = static_cast<unsigned char>(accum[i + 2]);
+            unsigned char c3 = static_cast<unsigned char>(accum[i + 3]);
+            if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80) valid = false;
+            // Overlong check (F0 80..8F)
+            if (c == 0xF0 && (c1 < 0x90 || c1 > 0xBF)) valid = false;
+            // Codepoints > U+10FFFF (F4 90..BF)
+            if (c == 0xF4 && (c1 < 0x80 || c1 > 0x8F)) valid = false;
+        }
+
+        if (valid) {
+            out_valid.append(accum, i, char_len);
+            i += char_len;
+        } else {
+            out_valid += "\xEF\xBF\xBD";
+            i += 1;
+        }
     }
-    return i;
+
+    if (i < len) {
+        accum = accum.substr(i);
+    } else {
+        accum.clear();
+    }
 }
 
 JLexaLlamaBridge& JLexaLlamaBridge::instance() {
@@ -126,6 +187,10 @@ void JLexaLlamaBridge::cancel() {
     pImpl->isCancelled = true;
 }
 
+void JLexaLlamaBridge::resetCancellation() {
+    pImpl->isCancelled = false;
+}
+
 void JLexaLlamaBridge::generate(
     const std::string& prompt,
     int maxTokens,
@@ -137,6 +202,11 @@ void JLexaLlamaBridge::generate(
     std::function<void(bool cancelled, const std::string& errorMsg)> completionCallback
 ) {
     std::lock_guard<std::mutex> lock(pImpl->mtx);
+    if (pImpl->isCancelled.load()) {
+        if (completionCallback) completionCallback(true, "");
+        return;
+    }
+
     if (!pImpl->ctx || !pImpl->model || !pImpl->vocab) {
         if (completionCallback) completionCallback(false, "Model not loaded");
         return;
@@ -175,8 +245,6 @@ void JLexaLlamaBridge::generate(
         return;
     }
 
-    pImpl->isCancelled = false;
-
     // Clear KV cache / sequence memory before generation
     llama_memory_t mem = llama_get_memory(pImpl->ctx);
     if (mem) {
@@ -214,6 +282,11 @@ void JLexaLlamaBridge::generate(
         return;
     }
     prompt_tokens.resize(n_prompt);
+
+    if (pImpl->isCancelled.load()) {
+        if (completionCallback) completionCallback(true, "");
+        return;
+    }
 
     // Context capacity validation
     const uint32_t n_ctx = llama_n_ctx(pImpl->ctx);
@@ -312,13 +385,10 @@ void JLexaLlamaBridge::generate(
 
         if (n_piece > 0) {
             utf8_accum.append(piece_ptr, n_piece);
-            size_t valid_len = get_valid_utf8_length(utf8_accum);
-            if (valid_len > 0) {
-                std::string token_to_emit = utf8_accum.substr(0, valid_len);
-                utf8_accum.erase(0, valid_len);
-                if (tokenCallback) {
-                    tokenCallback(token_to_emit);
-                }
+            std::string token_to_emit;
+            process_utf8_accumulator(utf8_accum, token_to_emit, false);
+            if (!token_to_emit.empty() && tokenCallback) {
+                tokenCallback(token_to_emit);
             }
         }
 
@@ -338,11 +408,12 @@ void JLexaLlamaBridge::generate(
         }
     }
 
-    // Flush any remaining accumulated bytes if valid UTF-8
+    // Flush any remaining accumulated bytes
     if (!utf8_accum.empty()) {
-        size_t valid_len = get_valid_utf8_length(utf8_accum);
-        if (valid_len > 0 && tokenCallback) {
-            tokenCallback(utf8_accum.substr(0, valid_len));
+        std::string token_to_emit;
+        process_utf8_accumulator(utf8_accum, token_to_emit, true);
+        if (!token_to_emit.empty() && tokenCallback) {
+            tokenCallback(token_to_emit);
         }
     }
 

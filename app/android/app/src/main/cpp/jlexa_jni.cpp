@@ -328,4 +328,12 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeCancel(
     JLexaLlamaBridge::instance().cancel();
 }
 
+JNIEXPORT void JNICALL
+Java_com_example_local_1ai_1app_LlamaBridge_nativeResetCancellation(
+    JNIEnv* /* env */,
+    jobject /* this */
+) {
+    JLexaLlamaBridge::instance().resetCancellation();
+}
+
 } // extern "C"

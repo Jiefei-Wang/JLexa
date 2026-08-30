@@ -1,4 +1,4 @@
-﻿class TextNormalization {
+class TextNormalization {
   /// Normalizes a word token for dictionary lookup and vocabulary saving while
   /// preserving internal apostrophes (e.g. "what's") and hyphens (e.g. "high-impact").
   static String normalizeWord(String raw) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
 
@@ -19,7 +20,8 @@ class AiWordActionsSection extends StatefulWidget {
 }
 
 class _AiWordActionsSectionState extends State<AiWordActionsSection> {
-  final TextEditingController _customQuestionController = TextEditingController();
+  final TextEditingController _customQuestionController =
+      TextEditingController();
 
   @override
   void dispose() {
@@ -49,7 +51,10 @@ class _AiWordActionsSectionState extends State<AiWordActionsSection> {
         children: [
           Row(
             children: [
-              Text('Ask AI about "${widget.word}"', style: AppTypography.titleSmall),
+              Text(
+                'Ask AI about "${widget.word}"',
+                style: AppTypography.titleSmall,
+              ),
               const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -57,7 +62,14 @@ class _AiWordActionsSectionState extends State<AiWordActionsSection> {
                   color: AppColors.primaryLight,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Text('Beta', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                child: const Text(
+                  'Beta',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primary,
+                  ),
+                ),
               ),
             ],
           ),
@@ -66,9 +78,18 @@ class _AiWordActionsSectionState extends State<AiWordActionsSection> {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                _buildPromptChip('Use in a sentence', 'Generate 3 natural example sentences with collocations'),
-                _buildPromptChip('Similar words', 'Compare synonyms and explain subtle nuance differences'),
-                _buildPromptChip('Collocations', 'Show common collocations and idioms with this word'),
+                _buildPromptChip(
+                  'Use in a sentence',
+                  'Generate 3 natural example sentences with collocations',
+                ),
+                _buildPromptChip(
+                  'Similar words',
+                  'Compare synonyms and explain subtle nuance differences',
+                ),
+                _buildPromptChip(
+                  'Collocations',
+                  'Show common collocations and idioms with this word',
+                ),
               ],
             ),
           ),
@@ -85,7 +106,10 @@ class _AiWordActionsSectionState extends State<AiWordActionsSection> {
                       borderRadius: BorderRadius.circular(12),
                       borderSide: const BorderSide(color: AppColors.border),
                     ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
                   ),
                 ),
               ),
@@ -96,13 +120,18 @@ class _AiWordActionsSectionState extends State<AiWordActionsSection> {
                     ? const SizedBox(
                         width: 18,
                         height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
                     : const Icon(Icons.send, size: 18),
                 style: IconButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
             ],
@@ -116,7 +145,14 @@ class _AiWordActionsSectionState extends State<AiWordActionsSection> {
     return Padding(
       padding: const EdgeInsets.only(right: 8.0),
       child: ActionChip(
-        label: Text(label, style: const TextStyle(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w500)),
+        label: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            color: AppColors.primary,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
         backgroundColor: AppColors.primaryLight,
         side: BorderSide.none,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),

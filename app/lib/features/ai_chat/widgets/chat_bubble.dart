@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../../core/ai/ai_models.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
@@ -7,11 +8,7 @@ class ChatBubble extends StatelessWidget {
   final ChatMessage message;
   final ValueChanged<String> onSpeak;
 
-  const ChatBubble({
-    super.key,
-    required this.message,
-    required this.onSpeak,
-  });
+  const ChatBubble({super.key, required this.message, required this.onSpeak});
 
   @override
   Widget build(BuildContext context) {
@@ -20,7 +17,9 @@ class ChatBubble extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(
-        mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: isUser
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (!isUser) ...[
@@ -30,7 +29,11 @@ class ChatBubble extends StatelessWidget {
                 shape: BoxShape.circle,
                 color: AppColors.primaryLight,
               ),
-              child: const Icon(Icons.psychology, size: 20, color: AppColors.primary),
+              child: const Icon(
+                Icons.psychology,
+                size: 20,
+                color: AppColors.primary,
+              ),
             ),
             const SizedBox(width: 8),
           ],
@@ -73,7 +76,9 @@ class ChatBubble extends StatelessWidget {
                             message.audioTimestampLabel!,
                             style: TextStyle(
                               fontSize: 10,
-                              color: isUser ? Colors.white70 : AppColors.textTertiary,
+                              color: isUser
+                                  ? Colors.white70
+                                  : AppColors.textTertiary,
                             ),
                           ),
                         const SizedBox(width: 6),

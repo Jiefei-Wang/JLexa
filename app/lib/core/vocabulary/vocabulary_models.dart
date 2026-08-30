@@ -1,16 +1,11 @@
 enum ReviewRating {
   again, // Failed / need reset
-  hard,  // Difficult / short interval
-  good,  // Normal / standard interval
-  easy,  // Very easy / longest interval
+  hard, // Difficult / short interval
+  good, // Normal / standard interval
+  easy, // Very easy / longest interval
 }
 
-enum VocabularyState {
-  newWord,
-  learning,
-  review,
-  mastered,
-}
+enum VocabularyState { newWord, learning, review, mastered }
 
 class VocabularyWord {
   final String id;

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../core/ai/ai_service.dart';
 import '../../core/ai/prompt_builder.dart';
 import '../../core/ai/speech_engine.dart';
@@ -42,7 +43,11 @@ class _AiChatScreenState extends State<AiChatScreen> {
         nextSentence: map['nextSentence'] as String?,
         startMs: map['startMs'] as int? ?? 0,
         endMs: map['endMs'] as int? ?? 0,
-        uncertainWords: (map['uncertainWords'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
+        uncertainWords:
+            (map['uncertainWords'] as List<dynamic>?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            [],
       );
     } else {
       sentenceCtx = null;
@@ -137,22 +142,29 @@ class _AiChatScreenState extends State<AiChatScreen> {
                     ],
 
                     // Example Questions
-                    const Text('Example Questions', style: AppTypography.titleSmall),
+                    const Text(
+                      'Example Questions',
+                      style: AppTypography.titleSmall,
+                    ),
                     const SizedBox(height: 8),
                     _buildExampleQuestionTile('Why is this phrase used?'),
-                    _buildExampleQuestionTile('Explain this sentence in Chinese.'),
-                    _buildExampleQuestionTile('What does "prioritize" mean here?'),
-                    _buildExampleQuestionTile('Give me another example sentence.'),
+                    _buildExampleQuestionTile(
+                      'Explain this sentence in Chinese.',
+                    ),
+                    _buildExampleQuestionTile(
+                      'What does "prioritize" mean here?',
+                    ),
+                    _buildExampleQuestionTile(
+                      'Give me another example sentence.',
+                    ),
                     _buildExampleQuestionTile('Is the transcription correct?'),
                     const SizedBox(height: 16),
 
                     // Chat messages list
                     const Divider(height: 24),
                     ..._controller.messages.map(
-                      (msg) => ChatBubble(
-                        message: msg,
-                        onSpeak: _controller.speak,
-                      ),
+                      (msg) =>
+                          ChatBubble(message: msg, onSpeak: _controller.speak),
                     ),
 
                     if (_controller.isGenerating)
@@ -174,7 +186,10 @@ class _AiChatScreenState extends State<AiChatScreen> {
               if (_controller.isRecording)
                 Container(
                   color: AppColors.primaryLight,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -182,12 +197,24 @@ class _AiChatScreenState extends State<AiChatScreen> {
                         children: [
                           Icon(Icons.mic, color: AppColors.primary, size: 20),
                           SizedBox(width: 8),
-                          Text('Listening...', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
+                          Text(
+                            'Listening...',
+                            style: TextStyle(
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ],
                       ),
                       TextButton(
                         onPressed: _toggleVoiceRecording,
-                        child: const Text('Tap to stop', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
+                        child: const Text(
+                          'Tap to stop',
+                          style: TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -195,7 +222,10 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
               // Bottom Input Bar
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
                 decoration: const BoxDecoration(
                   color: AppColors.surface,
                   border: Border(top: BorderSide(color: AppColors.border)),
@@ -207,8 +237,12 @@ class _AiChatScreenState extends State<AiChatScreen> {
                       children: [
                         IconButton(
                           icon: Icon(
-                            _controller.isRecording ? Icons.stop : Icons.mic_none,
-                            color: _controller.isRecording ? AppColors.error : AppColors.textSecondary,
+                            _controller.isRecording
+                                ? Icons.stop
+                                : Icons.mic_none,
+                            color: _controller.isRecording
+                                ? AppColors.error
+                                : AppColors.textSecondary,
                           ),
                           onPressed: _toggleVoiceRecording,
                           tooltip: 'Voice Input',
@@ -222,7 +256,10 @@ class _AiChatScreenState extends State<AiChatScreen> {
                               border: InputBorder.none,
                               enabledBorder: InputBorder.none,
                               focusedBorder: InputBorder.none,
-                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
                             ),
                           ),
                         ),
@@ -239,7 +276,10 @@ class _AiChatScreenState extends State<AiChatScreen> {
                     const SizedBox(height: 4),
                     const Text(
                       'AI responses may be imperfect. Please verify important information.',
-                      style: TextStyle(fontSize: 10, color: AppColors.textTertiary),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppColors.textTertiary,
+                      ),
                     ),
                   ],
                 ),
@@ -272,9 +312,17 @@ class _AiChatScreenState extends State<AiChatScreen> {
             children: [
               Text(
                 question,
-                style: const TextStyle(fontSize: 13, color: AppColors.primary, fontWeight: FontWeight.w500),
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
-              const Icon(Icons.chevron_right, size: 16, color: AppColors.primary),
+              const Icon(
+                Icons.chevron_right,
+                size: 16,
+                color: AppColors.primary,
+              ),
             ],
           ),
         ),

@@ -270,11 +270,13 @@ class WhisperBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandle
             }
 
             "cancelTranscription" -> {
-                val reqId = call.argument<String>("requestId") ?: activeRequestId
-                isCancelled.set(true)
-                try {
-                    nativeCancel()
-                } catch (_: Throwable) {}
+                val reqId = call.argument<String>("requestId")
+                if (reqId == null || reqId == activeRequestId) {
+                    isCancelled.set(true)
+                    try {
+                        nativeCancel()
+                    } catch (_: Throwable) {}
+                }
                 result.success(null)
             }
 

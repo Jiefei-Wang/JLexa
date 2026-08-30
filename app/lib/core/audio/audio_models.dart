@@ -31,11 +31,7 @@ enum TranscriptStatus {
 }
 
 /// State machine for an active transcription operation.
-enum TranscriptionState {
-  idle,
-  transcribing,
-  cancelling,
-}
+enum TranscriptionState { idle, transcribing, cancelling }
 
 class AudioLesson {
   final String id;
@@ -64,7 +60,9 @@ class AudioLesson {
 
   double get progressPercentage {
     if (durationMs <= 0) return 0.0;
-    final progress = (currentPositionMs / durationMs).clamp(0.0, 1.0);
+    final double progress = (currentPositionMs / durationMs)
+        .clamp(0.0, 1.0)
+        .toDouble();
     return progress;
   }
 
@@ -118,8 +116,12 @@ class AudioLesson {
       durationMs: map['duration_ms'] as int? ?? 0,
       currentPositionMs: map['current_position_ms'] as int? ?? 0,
       createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int),
-      lastOpenedAt: DateTime.fromMillisecondsSinceEpoch(map['last_opened_at'] as int),
-      transcriptStatus: TranscriptStatus.fromDbString(map['transcript_status'] as String?),
+      lastOpenedAt: DateTime.fromMillisecondsSinceEpoch(
+        map['last_opened_at'] as int,
+      ),
+      transcriptStatus: TranscriptStatus.fromDbString(
+        map['transcript_status'] as String?,
+      ),
       waveformCachePath: map['waveform_cache_path'] as String?,
     );
   }
@@ -227,10 +229,14 @@ class AudioSegment {
 
   factory AudioSegment.fromMap(Map<String, dynamic> map) {
     List<TranscriptToken> parsedTokens = [];
-    if (map['tokens_json'] != null && (map['tokens_json'] as String).isNotEmpty) {
+    if (map['tokens_json'] != null &&
+        (map['tokens_json'] as String).isNotEmpty) {
       try {
-        final decoded = jsonDecode(map['tokens_json'] as String) as List<dynamic>;
-        parsedTokens = decoded.map((e) => TranscriptToken.fromMap(e as Map<String, dynamic>)).toList();
+        final decoded =
+            jsonDecode(map['tokens_json'] as String) as List<dynamic>;
+        parsedTokens = decoded
+            .map((e) => TranscriptToken.fromMap(e as Map<String, dynamic>))
+            .toList();
       } catch (_) {}
     }
 

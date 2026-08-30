@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../../core/ai/prompt_builder.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
@@ -33,7 +34,11 @@ class SentenceSummaryCard extends StatelessWidget {
               children: [
                 const Row(
                   children: [
-                    Icon(Icons.lightbulb_outline, size: 20, color: AppColors.primary),
+                    Icon(
+                      Icons.lightbulb_outline,
+                      size: 20,
+                      color: AppColors.primary,
+                    ),
                     SizedBox(width: 8),
                     Text('Context Summary', style: AppTypography.titleSmall),
                   ],
@@ -42,7 +47,11 @@ class SentenceSummaryCard extends StatelessWidget {
                   onPressed: onToggleExpand,
                   child: Text(
                     isExpanded ? 'Hide' : 'Show',
-                    style: const TextStyle(color: AppColors.primary, fontSize: 13, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      color: AppColors.primary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -61,7 +70,9 @@ class SentenceSummaryCard extends StatelessWidget {
                       children: [
                         Text(
                           '"${contextData.sentenceText}"',
-                          style: AppTypography.bodyMedium.copyWith(fontWeight: FontWeight.w600),
+                          style: AppTypography.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         const SizedBox(height: 8),
                         Text(
@@ -79,7 +90,11 @@ class SentenceSummaryCard extends StatelessWidget {
                       color: AppColors.secondaryLight,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.track_changes, color: AppColors.secondary, size: 26),
+                    child: const Icon(
+                      Icons.track_changes,
+                      color: AppColors.secondary,
+                      size: 26,
+                    ),
                   ),
                 ],
               ),

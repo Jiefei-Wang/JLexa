@@ -87,8 +87,8 @@ void main() {
       int proposedStart = -500;
       int proposedEnd = 12000;
 
-      int validStart = proposedStart.clamp(0, totalDuration);
-      int validEnd = proposedEnd.clamp(0, totalDuration);
+      int validStart = proposedStart.clamp(0, totalDuration).toInt();
+      int validEnd = proposedEnd.clamp(0, totalDuration).toInt();
 
       expect(validStart, greaterThanOrEqualTo(0));
       expect(validEnd, lessThanOrEqualTo(totalDuration));

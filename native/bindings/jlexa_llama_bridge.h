@@ -31,6 +31,7 @@ public:
     );
 
     void cancel();
+    void resetCancellation();
 
 private:
     JLexaLlamaBridge();

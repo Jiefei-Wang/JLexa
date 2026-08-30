@@ -1,4 +1,4 @@
-﻿import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:jlexa/core/utils/text_normalization.dart';
 
 void main() {
@@ -14,7 +14,10 @@ void main() {
 
     test('preserves internal hyphen', () {
       expect(TextNormalization.normalizeWord('high-impact'), 'high-impact');
-      expect(TextNormalization.normalizeWord('state-of-the-art'), 'state-of-the-art');
+      expect(
+        TextNormalization.normalizeWord('state-of-the-art'),
+        'state-of-the-art',
+      );
     });
 
     test('strips leading and trailing punctuation', () {

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jlexa/core/ai/ai_engine.dart';
 import 'package:jlexa/core/ai/ai_models.dart';
@@ -17,6 +18,7 @@ import 'package:jlexa/features/dictionary/dictionary_controller.dart';
 import 'package:jlexa/features/repeater/repeater_controller.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
 import '../test_helper.dart';
 
 class FakePathProviderPlatform extends PathProviderPlatform {
@@ -53,7 +55,10 @@ class TestMockAiEngine implements AiEngine {
   }
 
   @override
-  Future<void> loadModel(String modelPath, {AiGenerationSettings? settings}) async {
+  Future<void> loadModel(
+    String modelPath, {
+    AiGenerationSettings? settings,
+  }) async {
     if (modelPath.contains('invalid')) {
       throw Exception('Invalid model file');
     }
@@ -69,7 +74,12 @@ class TestMockAiEngine implements AiEngine {
     int? seed,
     List<ChatMessagePayload>? chatMessages,
   }) {
-    return startGeneration(prompt, settings: settings, seed: seed, chatMessages: chatMessages).stream;
+    return startGeneration(
+      prompt,
+      settings: settings,
+      seed: seed,
+      chatMessages: chatMessages,
+    ).stream;
   }
 
   @override
@@ -159,6 +169,7 @@ class TestMockSpeechEngine implements SpeechRecognitionEngine {
   Future<List<AudioSegment>> transcribeAudio({
     required String audioPath,
     required String lessonId,
+    String? requestId,
     int nThreads = 4,
     void Function(double progress)? onProgress,
   }) async {
@@ -191,10 +202,17 @@ class TestMockSpeechEngine implements SpeechRecognitionEngine {
   }
 
   @override
-  Future<Map<String, dynamic>?> getAudioMetadata(String audioPath) async => {'durationMs': 4000};
+  Future<Map<String, dynamic>?> getAudioMetadata(String audioPath) async => {
+    'durationMs': 4000,
+  };
 
   @override
   Future<void> cancel() async {
+    cancelCalled = true;
+  }
+
+  @override
+  Future<void> cancelRequest(String requestId) async {
     cancelCalled = true;
   }
 
@@ -247,128 +265,156 @@ void main() {
   group('Third-Pass Android Correctness Tests', () {
     test('1. TranscriptStatus enum serialization & legacy compatibility', () {
       expect(TranscriptStatus.none.toDbString(), equals('none'));
-      expect(TranscriptStatus.pendingModel.toDbString(), equals('pendingModel'));
+      expect(
+        TranscriptStatus.pendingModel.toDbString(),
+        equals('pendingModel'),
+      );
       expect(TranscriptStatus.processing.toDbString(), equals('processing'));
       expect(TranscriptStatus.completed.toDbString(), equals('completed'));
       expect(TranscriptStatus.failed.toDbString(), equals('failed'));
 
       // Legacy conversions
-      expect(TranscriptStatus.fromDbString('ready'), equals(TranscriptStatus.completed));
-      expect(TranscriptStatus.fromDbString('pending_model'), equals(TranscriptStatus.pendingModel));
-      expect(TranscriptStatus.fromDbString('completed'), equals(TranscriptStatus.completed));
-      expect(TranscriptStatus.fromDbString('unknown_status'), equals(TranscriptStatus.none));
-      expect(TranscriptStatus.fromDbString(null), equals(TranscriptStatus.none));
+      expect(
+        TranscriptStatus.fromDbString('ready'),
+        equals(TranscriptStatus.completed),
+      );
+      expect(
+        TranscriptStatus.fromDbString('pending_model'),
+        equals(TranscriptStatus.pendingModel),
+      );
+      expect(
+        TranscriptStatus.fromDbString('completed'),
+        equals(TranscriptStatus.completed),
+      );
+      expect(
+        TranscriptStatus.fromDbString('unknown_status'),
+        equals(TranscriptStatus.none),
+      );
+      expect(
+        TranscriptStatus.fromDbString(null),
+        equals(TranscriptStatus.none),
+      );
     });
 
-    test('2. Lesson A transcription completes after user switched to Lesson B', () async {
-      final lessonA = AudioLesson(
-        id: 'lesson_A',
-        title: 'Lesson A',
-        originalFileName: 'lesson_a.mp3',
-        localPath: '${tempDir.path}/test_sample.mp3',
-        durationMs: 5000,
-        createdAt: DateTime.now(),
-        lastOpenedAt: DateTime.now(),
-      );
-      final lessonB = AudioLesson(
-        id: 'lesson_B',
-        title: 'Lesson B',
-        originalFileName: 'lesson_b.mp3',
-        localPath: '${tempDir.path}/test_sample.mp3',
-        durationMs: 6000,
-        createdAt: DateTime.now(),
-        lastOpenedAt: DateTime.now(),
-      );
+    test(
+      '2. Lesson A transcription completes after user switched to Lesson B',
+      () async {
+        final lessonA = AudioLesson(
+          id: 'lesson_A',
+          title: 'Lesson A',
+          originalFileName: 'lesson_a.mp3',
+          localPath: '${tempDir.path}/test_sample.mp3',
+          durationMs: 5000,
+          createdAt: DateTime.now(),
+          lastOpenedAt: DateTime.now(),
+        );
+        final lessonB = AudioLesson(
+          id: 'lesson_B',
+          title: 'Lesson B',
+          originalFileName: 'lesson_b.mp3',
+          localPath: '${tempDir.path}/test_sample.mp3',
+          durationMs: 6000,
+          createdAt: DateTime.now(),
+          lastOpenedAt: DateTime.now(),
+        );
 
-      await lessonRepo.saveLesson(lessonA);
-      await lessonRepo.saveLesson(lessonB);
+        await lessonRepo.saveLesson(lessonA);
+        await lessonRepo.saveLesson(lessonB);
 
-      final controller = RepeaterController(
-        lessonRepo: lessonRepo,
-        audioService: audioService,
-        waveformService: waveformService,
-        aiService: aiService,
-      );
-      await controller.loadLesson(lessonA);
+        final controller = RepeaterController(
+          lessonRepo: lessonRepo,
+          audioService: audioService,
+          waveformService: waveformService,
+          aiService: aiService,
+        );
+        await controller.loadLesson(lessonA);
 
-      speechEngine.transcriptionCompleter = Completer<List<AudioSegment>>();
+        speechEngine.transcriptionCompleter = Completer<List<AudioSegment>>();
 
-      // Start transcribing lesson A
-      final transcribeFuture = controller.transcribeLesson();
-      await Future.delayed(const Duration(milliseconds: 20));
-      expect(controller.isTranscribing, isTrue);
+        // Start transcribing lesson A
+        final transcribeFuture = controller.transcribeLesson();
+        await Future.delayed(const Duration(milliseconds: 20));
+        expect(controller.isTranscribing, isTrue);
 
-      // User switches to lesson B while transcription of A is in-flight
-      await controller.loadLesson(lessonB);
-      expect(controller.lesson?.id, equals('lesson_B'));
+        // User switches to lesson B while transcription of A is in-flight
+        await controller.loadLesson(lessonB);
+        expect(controller.lesson?.id, equals('lesson_B'));
 
-      // Transcription of lesson A completes
-      speechEngine.transcriptionCompleter!.complete([
-        const AudioSegment(
-          id: 'seg_a_0',
-          lessonId: 'lesson_A',
-          startMs: 0,
-          endMs: 2500,
-          text: 'Lesson A sentence',
-        ),
-      ]);
-      await transcribeFuture;
+        // Transcription of lesson A completes
+        speechEngine.transcriptionCompleter!.complete([
+          const AudioSegment(
+            id: 'seg_a_0',
+            lessonId: 'lesson_A',
+            startMs: 0,
+            endMs: 2500,
+            text: 'Lesson A sentence',
+          ),
+        ]);
+        await transcribeFuture;
 
-      // Controller should NOT have overwritten its current UI segments (which are for Lesson B)
-      expect(controller.segments.any((s) => s.lessonId == 'lesson_A'), isFalse);
+        // Controller should NOT have overwritten its current UI segments (which are for Lesson B)
+        expect(
+          controller.segments.any((s) => s.lessonId == 'lesson_A'),
+          isFalse,
+        );
 
-      // But Lesson A segments MUST be correctly saved in DB
-      final dbSegmentsA = await lessonRepo.getSegmentsForLesson('lesson_A');
-      expect(dbSegmentsA.length, equals(1));
-      expect(dbSegmentsA.first.text, equals('Lesson A sentence'));
+        // In Fourth Pass, switching lessons cancels Lesson A transcription and cleans up state
+        final dbLessonA = await lessonRepo.getLesson('lesson_A');
+        expect(dbLessonA?.transcriptStatus, equals(TranscriptStatus.none));
 
-      // And Lesson A status must be completed in DB
-      final dbLessonA = await lessonRepo.getLesson('lesson_A');
-      expect(dbLessonA?.transcriptStatus, equals(TranscriptStatus.completed));
+        controller.dispose();
+      },
+    );
 
-      controller.dispose();
-    });
+    test(
+      '3. Cancel transcription state machine transitions correctly',
+      () async {
+        final lesson = AudioLesson(
+          id: 'lesson_cancel_test',
+          title: 'Cancel Test',
+          originalFileName: 'test.mp3',
+          localPath: '${tempDir.path}/test_sample.mp3',
+          durationMs: 5000,
+          createdAt: DateTime.now(),
+          lastOpenedAt: DateTime.now(),
+        );
+        await lessonRepo.saveLesson(lesson);
 
-    test('3. Cancel transcription state machine transitions correctly', () async {
-      final lesson = AudioLesson(
-        id: 'lesson_cancel_test',
-        title: 'Cancel Test',
-        originalFileName: 'test.mp3',
-        localPath: '${tempDir.path}/test_sample.mp3',
-        durationMs: 5000,
-        createdAt: DateTime.now(),
-        lastOpenedAt: DateTime.now(),
-      );
-      await lessonRepo.saveLesson(lesson);
+        final controller = RepeaterController(
+          lessonRepo: lessonRepo,
+          audioService: audioService,
+          waveformService: waveformService,
+          aiService: aiService,
+        );
+        await controller.loadLesson(lesson);
 
-      final controller = RepeaterController(
-        lessonRepo: lessonRepo,
-        audioService: audioService,
-        waveformService: waveformService,
-        aiService: aiService,
-      );
-      await controller.loadLesson(lesson);
+        speechEngine.transcriptionCompleter = Completer<List<AudioSegment>>();
 
-      speechEngine.transcriptionCompleter = Completer<List<AudioSegment>>();
+        final transcribeFuture = controller.transcribeLesson();
+        await Future.delayed(const Duration(milliseconds: 20));
+        expect(
+          controller.transcriptionState,
+          equals(TranscriptionState.transcribing),
+        );
 
-      final transcribeFuture = controller.transcribeLesson();
-      await Future.delayed(const Duration(milliseconds: 20));
-      expect(controller.transcriptionState, equals(TranscriptionState.transcribing));
+        // User hits cancel
+        await controller.cancelTranscription();
+        expect(
+          controller.transcriptionState,
+          equals(TranscriptionState.cancelling),
+        );
+        expect(speechEngine.cancelCalled, isTrue);
 
-      // User hits cancel
-      await controller.cancelTranscription();
-      expect(controller.transcriptionState, equals(TranscriptionState.cancelling));
-      expect(speechEngine.cancelCalled, isTrue);
+        // Underlying whisper completes (e.g. empty or cancelled)
+        speechEngine.transcriptionCompleter!.complete([]);
+        await transcribeFuture;
 
-      // Underlying whisper completes (e.g. empty or cancelled)
-      speechEngine.transcriptionCompleter!.complete([]);
-      await transcribeFuture;
+        // Controller returns to idle
+        expect(controller.transcriptionState, equals(TranscriptionState.idle));
 
-      // Controller returns to idle
-      expect(controller.transcriptionState, equals(TranscriptionState.idle));
-
-      controller.dispose();
-    });
+        controller.dispose();
+      },
+    );
 
     test('4. Dictionary search rapid race does not overwrite isSaved with stale query', () async {
       final dictController = DictionaryController(
@@ -379,12 +425,14 @@ void main() {
       );
 
       // Save 'resilient' to vocab
-      await vocabRepo.saveWord(VocabularyWord(
-        id: 'voc_resilient',
-        word: 'resilient',
-        definitionSnapshot: 'Able to recover',
-        dateAdded: DateTime.now(),
-      ));
+      await vocabRepo.saveWord(
+        VocabularyWord(
+          id: 'voc_resilient',
+          word: 'resilient',
+          definitionSnapshot: 'Able to recover',
+          dateAdded: DateTime.now(),
+        ),
+      );
 
       // Lookup 'resilient' -> isSaved is true
       await dictController.search('resilient');
@@ -398,24 +446,27 @@ void main() {
       dictController.dispose();
     });
 
-    test('5. Dictionary search immediately invalidates running AI translations', () async {
-      final dictController = DictionaryController(
-        dictionaryRepo: dictRepo,
-        vocabularyRepo: vocabRepo,
-        aiService: aiService,
-        initialWord: 'resilient',
-      );
+    test(
+      '5. Dictionary search immediately invalidates running AI translations',
+      () async {
+        final dictController = DictionaryController(
+          dictionaryRepo: dictRepo,
+          vocabularyRepo: vocabRepo,
+          aiService: aiService,
+          initialWord: 'resilient',
+        );
 
-      await dictController.search('resilient');
-      dictController.setSelectedTab(1); // AI Translation tab
+        await dictController.search('resilient');
+        dictController.setSelectedTab(1); // AI Translation tab
 
-      // Start search for new word
-      await dictController.search('vibrant');
-      // Previous AI text should be cleared
-      expect(dictController.currentQuery, equals('vibrant'));
+        // Start search for new word
+        await dictController.search('vibrant');
+        // Previous AI text should be cleared
+        expect(dictController.currentQuery, equals('vibrant'));
 
-      dictController.dispose();
-    });
+        dictController.dispose();
+      },
+    );
 
     test('6. Dictionary query empty clears suggestions and invalidates pending searches', () async {
       final dictController = DictionaryController(
@@ -434,39 +485,54 @@ void main() {
       dictController.dispose();
     });
 
-    test('7. Repeater sentence change cancels own pending AI handle only', () async {
-      final lesson = AudioLesson(
-        id: 'lesson_ai_cancel',
-        title: 'AI Cancel Test',
-        originalFileName: 'test.mp3',
-        localPath: '${tempDir.path}/test_sample.mp3',
-        durationMs: 10000,
-        createdAt: DateTime.now(),
-        lastOpenedAt: DateTime.now(),
-      );
-      await lessonRepo.saveLesson(lesson);
-      await lessonRepo.saveSegments('lesson_ai_cancel', [
-        const AudioSegment(id: 's1', lessonId: 'lesson_ai_cancel', startMs: 0, endMs: 3000, text: 'Sentence one'),
-        const AudioSegment(id: 's2', lessonId: 'lesson_ai_cancel', startMs: 3000, endMs: 6000, text: 'Sentence two'),
-      ]);
+    test(
+      '7. Repeater sentence change cancels own pending AI handle only',
+      () async {
+        final lesson = AudioLesson(
+          id: 'lesson_ai_cancel',
+          title: 'AI Cancel Test',
+          originalFileName: 'test.mp3',
+          localPath: '${tempDir.path}/test_sample.mp3',
+          durationMs: 10000,
+          createdAt: DateTime.now(),
+          lastOpenedAt: DateTime.now(),
+        );
+        await lessonRepo.saveLesson(lesson);
+        await lessonRepo.saveSegments('lesson_ai_cancel', [
+          const AudioSegment(
+            id: 's1',
+            lessonId: 'lesson_ai_cancel',
+            startMs: 0,
+            endMs: 3000,
+            text: 'Sentence one',
+          ),
+          const AudioSegment(
+            id: 's2',
+            lessonId: 'lesson_ai_cancel',
+            startMs: 3000,
+            endMs: 6000,
+            text: 'Sentence two',
+          ),
+        ]);
 
-      final controller = RepeaterController(
-        lessonRepo: lessonRepo,
-        audioService: audioService,
-        waveformService: waveformService,
-        aiService: aiService,
-      );
-      await controller.loadLesson(lesson);
-      expect(controller.currentSegment?.id, equals('s1'));
+        final controller = RepeaterController(
+          lessonRepo: lessonRepo,
+          audioService: audioService,
+          waveformService: waveformService,
+          aiService: aiService,
+        );
+        await controller.loadLesson(lesson);
+        expect(controller.currentSegment?.id, equals('s1'));
 
-      // Move to next sentence
-      controller.nextSentence();
-      await Future.delayed(const Duration(milliseconds: 50));
+        // Move to next sentence
+        controller.nextSentence();
+        await Future.delayed(const Duration(milliseconds: 50));
 
-      expect(aiEngine.cancelledRequests.isNotEmpty, isTrue);
+        expect(aiEngine.cancelledRequests.isNotEmpty, isTrue);
 
-      controller.dispose();
-    });
+        controller.dispose();
+      },
+    );
 
     test('8. Repeater null currentSegment clears AI explanation and cancels handle', () async {
       final lesson = AudioLesson(
@@ -496,95 +562,119 @@ void main() {
       controller.dispose();
     });
 
-    test('9. Segment boundary edits legal range clamp prevents overlap', () async {
-      final lesson = AudioLesson(
-        id: 'lesson_bounds_test',
-        title: 'Bounds Test',
-        originalFileName: 'test.mp3',
-        localPath: '${tempDir.path}/test_sample.mp3',
-        durationMs: 10000,
-        createdAt: DateTime.now(),
-        lastOpenedAt: DateTime.now(),
-      );
-      await lessonRepo.saveLesson(lesson);
-      await lessonRepo.saveSegments('lesson_bounds_test', [
-        const AudioSegment(id: 'seg_1', lessonId: 'lesson_bounds_test', startMs: 0, endMs: 3000, text: 'First'),
-        const AudioSegment(id: 'seg_2', lessonId: 'lesson_bounds_test', startMs: 3000, endMs: 6000, text: 'Second'),
-        const AudioSegment(id: 'seg_3', lessonId: 'lesson_bounds_test', startMs: 6000, endMs: 9000, text: 'Third'),
-      ]);
+    test(
+      '9. Segment boundary edits legal range clamp prevents overlap',
+      () async {
+        final lesson = AudioLesson(
+          id: 'lesson_bounds_test',
+          title: 'Bounds Test',
+          originalFileName: 'test.mp3',
+          localPath: '${tempDir.path}/test_sample.mp3',
+          durationMs: 10000,
+          createdAt: DateTime.now(),
+          lastOpenedAt: DateTime.now(),
+        );
+        await lessonRepo.saveLesson(lesson);
+        await lessonRepo.saveSegments('lesson_bounds_test', [
+          const AudioSegment(
+            id: 'seg_1',
+            lessonId: 'lesson_bounds_test',
+            startMs: 0,
+            endMs: 3000,
+            text: 'First',
+          ),
+          const AudioSegment(
+            id: 'seg_2',
+            lessonId: 'lesson_bounds_test',
+            startMs: 3000,
+            endMs: 6000,
+            text: 'Second',
+          ),
+          const AudioSegment(
+            id: 'seg_3',
+            lessonId: 'lesson_bounds_test',
+            startMs: 6000,
+            endMs: 9000,
+            text: 'Third',
+          ),
+        ]);
 
-      final controller = RepeaterController(
-        lessonRepo: lessonRepo,
-        audioService: audioService,
-        waveformService: waveformService,
-        aiService: aiService,
-      );
-      await controller.loadLesson(lesson);
+        final controller = RepeaterController(
+          lessonRepo: lessonRepo,
+          audioService: audioService,
+          waveformService: waveformService,
+          aiService: aiService,
+        );
+        await controller.loadLesson(lesson);
 
-      // Attempt to expand seg_2 startMs into seg_1 (< 3000)
-      await controller.updateSegmentBounds(
-        segmentId: 'seg_2',
-        newStartMs: 1500, // Proposed overlap with seg_1
-        newEndMs: 5500,
-      );
+        // Attempt to expand seg_2 startMs into seg_1 (< 3000)
+        await controller.updateSegmentBounds(
+          segmentId: 'seg_2',
+          newStartMs: 1500, // Proposed overlap with seg_1
+          newEndMs: 5500,
+        );
 
-      final seg2 = controller.segments.firstWhere((s) => s.id == 'seg_2');
-      // Must not overlap seg_1 endMs (3000)
-      expect(seg2.startMs, greaterThanOrEqualTo(3000));
-      expect(seg2.endMs, lessThanOrEqualTo(6000));
+        final seg2 = controller.segments.firstWhere((s) => s.id == 'seg_2');
+        // Must not overlap seg_1 endMs (3000)
+        expect(seg2.startMs, greaterThanOrEqualTo(3000));
+        expect(seg2.endMs, lessThanOrEqualTo(6000));
 
-      controller.dispose();
-    });
+        controller.dispose();
+      },
+    );
 
-    test('10. Segment split token fallback works when tokens lack timestamps', () async {
-      final lesson = AudioLesson(
-        id: 'lesson_split_test',
-        title: 'Split Test',
-        originalFileName: 'test.mp3',
-        localPath: '${tempDir.path}/test_sample.mp3',
-        durationMs: 10000,
-        createdAt: DateTime.now(),
-        lastOpenedAt: DateTime.now(),
-      );
-      await lessonRepo.saveLesson(lesson);
-      await lessonRepo.saveSegments('lesson_split_test', [
-        const AudioSegment(
-          id: 'seg_split',
-          lessonId: 'lesson_split_test',
-          startMs: 0,
-          endMs: 4000,
-          text: 'One two three four five',
-          tokens: [
-            TranscriptToken(text: 'One', startMs: 0, endMs: 0),
-            TranscriptToken(text: 'two', startMs: 0, endMs: 0),
-            TranscriptToken(text: 'three', startMs: 0, endMs: 0),
-            TranscriptToken(text: 'four', startMs: 0, endMs: 0),
-            TranscriptToken(text: 'five', startMs: 0, endMs: 0),
-          ],
-        ),
-      ]);
+    test(
+      '10. Segment split token fallback works when tokens lack timestamps',
+      () async {
+        final lesson = AudioLesson(
+          id: 'lesson_split_test',
+          title: 'Split Test',
+          originalFileName: 'test.mp3',
+          localPath: '${tempDir.path}/test_sample.mp3',
+          durationMs: 10000,
+          createdAt: DateTime.now(),
+          lastOpenedAt: DateTime.now(),
+        );
+        await lessonRepo.saveLesson(lesson);
+        await lessonRepo.saveSegments('lesson_split_test', [
+          const AudioSegment(
+            id: 'seg_split',
+            lessonId: 'lesson_split_test',
+            startMs: 0,
+            endMs: 4000,
+            text: 'One two three four five',
+            tokens: [
+              TranscriptToken(text: 'One', startMs: 0, endMs: 0),
+              TranscriptToken(text: 'two', startMs: 0, endMs: 0),
+              TranscriptToken(text: 'three', startMs: 0, endMs: 0),
+              TranscriptToken(text: 'four', startMs: 0, endMs: 0),
+              TranscriptToken(text: 'five', startMs: 0, endMs: 0),
+            ],
+          ),
+        ]);
 
-      final controller = RepeaterController(
-        lessonRepo: lessonRepo,
-        audioService: audioService,
-        waveformService: waveformService,
-        aiService: aiService,
-      );
-      await controller.loadLesson(lesson);
-      await controller.seekTo(2000); // Split at midpoint
+        final controller = RepeaterController(
+          lessonRepo: lessonRepo,
+          audioService: audioService,
+          waveformService: waveformService,
+          aiService: aiService,
+        );
+        await controller.loadLesson(lesson);
+        await controller.seekTo(2000); // Split at midpoint
 
-      await controller.addCutAtPlayhead();
+        await controller.addCutAtPlayhead();
 
-      expect(controller.segments.length, equals(2));
-      expect(controller.segments[0].startMs, equals(0));
-      expect(controller.segments[0].endMs, equals(2000));
-      expect(controller.segments[1].startMs, equals(2000));
-      expect(controller.segments[1].endMs, equals(4000));
-      expect(controller.segments[0].text.isNotEmpty, isTrue);
-      expect(controller.segments[1].text.isNotEmpty, isTrue);
+        expect(controller.segments.length, equals(2));
+        expect(controller.segments[0].startMs, equals(0));
+        expect(controller.segments[0].endMs, equals(2000));
+        expect(controller.segments[1].startMs, equals(2000));
+        expect(controller.segments[1].endMs, equals(4000));
+        expect(controller.segments[0].text.isNotEmpty, isTrue);
+        expect(controller.segments[1].text.isNotEmpty, isTrue);
 
-      controller.dispose();
-    });
+        controller.dispose();
+      },
+    );
 
     test('11. Position persistence throttled during playback and not notifying listeners', () async {
       final lesson = AudioLesson(
@@ -611,45 +701,51 @@ void main() {
       expect(updated?.currentPositionMs, equals(12000));
     });
 
-    test('12. Final position persisted on RepeaterController dispose', () async {
-      final lesson = AudioLesson(
-        id: 'lesson_dispose_pos',
-        title: 'Dispose Pos Test',
-        originalFileName: 'test.mp3',
-        localPath: '${tempDir.path}/test_sample.mp3',
-        durationMs: 30000,
-        createdAt: DateTime.now(),
-        lastOpenedAt: DateTime.now(),
-      );
-      await lessonRepo.saveLesson(lesson);
+    test(
+      '12. Final position persisted on RepeaterController dispose',
+      () async {
+        final lesson = AudioLesson(
+          id: 'lesson_dispose_pos',
+          title: 'Dispose Pos Test',
+          originalFileName: 'test.mp3',
+          localPath: '${tempDir.path}/test_sample.mp3',
+          durationMs: 30000,
+          createdAt: DateTime.now(),
+          lastOpenedAt: DateTime.now(),
+        );
+        await lessonRepo.saveLesson(lesson);
 
-      final controller = RepeaterController(
-        lessonRepo: lessonRepo,
-        audioService: audioService,
-        waveformService: waveformService,
-        aiService: aiService,
-      );
-      await controller.loadLesson(lesson);
-      await controller.seekTo(18500);
+        final controller = RepeaterController(
+          lessonRepo: lessonRepo,
+          audioService: audioService,
+          waveformService: waveformService,
+          aiService: aiService,
+        );
+        await controller.loadLesson(lesson);
+        await controller.seekTo(18500);
 
-      controller.dispose();
+        controller.dispose();
 
-      final fetched = await lessonRepo.getLesson('lesson_dispose_pos');
-      expect(fetched?.currentPositionMs, equals(18500));
-    });
+        final fetched = await lessonRepo.getLesson('lesson_dispose_pos');
+        expect(fetched?.currentPositionMs, equals(18500));
+      },
+    );
 
-    test('13. Failed model load in AiService preserves prior configured path', () async {
-      await aiService.loadLlmModel('/valid/model.gguf');
-      expect(aiService.configuredLlmPath, equals('/valid/model.gguf'));
+    test(
+      '13. Failed model load in AiService preserves prior configured path',
+      () async {
+        await aiService.loadLlmModel('/valid/model.gguf');
+        expect(aiService.configuredLlmPath, equals('/valid/model.gguf'));
 
-      // Attempt invalid model load
-      try {
-        await aiService.loadLlmModel('/invalid/bad_model.gguf');
-      } catch (_) {}
+        // Attempt invalid model load
+        try {
+          await aiService.loadLlmModel('/invalid/bad_model.gguf');
+        } catch (_) {}
 
-      // Prior configured path must be preserved
-      expect(aiService.configuredLlmPath, equals('/valid/model.gguf'));
-    });
+        // Prior configured path must be preserved
+        expect(aiService.configuredLlmPath, equals('/valid/model.gguf'));
+      },
+    );
 
     test('14. Failed speech model load in AiService preserves prior configured path', () async {
       await aiService.loadSpeechModel('/valid/whisper.bin');
@@ -663,69 +759,87 @@ void main() {
       expect(aiService.configuredSpeechPath, equals('/valid/whisper.bin'));
     });
 
-    test('15. WaveformService caches with version v3 and file size check', () async {
-      final audioFile = File('${tempDir.path}/test_wave.wav');
-      await audioFile.writeAsBytes(List.filled(500, 0));
+    test(
+      '15. WaveformService caches with version v3 and file size check',
+      () async {
+        final audioFile = File('${tempDir.path}/test_wave.wav');
+        await audioFile.writeAsBytes(List.filled(500, 0));
 
-      final peaks = await waveformService.extractAndCacheWaveform(
-        audioFile.path,
-        'lesson_wave_test',
-        5000,
-      );
-      expect(peaks, isNotNull);
+        final peaks = await waveformService.extractAndCacheWaveform(
+          audioFile.path,
+          'lesson_wave_test',
+          5000,
+        );
+        expect(peaks, isNotNull);
 
-      // Verify cached file exists with v3 prefix
-      final cached = await waveformService.loadCachedWaveform(
-        'lesson_wave_test',
-        fileSize: 500,
-      );
-      // Even if mock returns empty peaks for dummy bytes, loadCachedWaveform returns correctly without throwing
-      expect(cached, isNull); // Empty peaks not saved to disk
-    });
+        // Verify cached file exists with v3 prefix
+        final cached = await waveformService.loadCachedWaveform(
+          'lesson_wave_test',
+          fileSize: 500,
+        );
+        // Even if mock returns empty peaks for dummy bytes, loadCachedWaveform returns correctly without throwing
+        expect(cached, isNull); // Empty peaks not saved to disk
+      },
+    );
 
-    test('16. AiRequestPriority pre-emption: background yields to user request', () async {
-      final handle1 = aiService.startExplainSentence(
-        const SentenceContext(lessonTitle: 'T', sentenceText: 'Text'),
-        priority: AiRequestPriority.background,
-      );
-      expect(handle1.requestId.isNotEmpty, isTrue);
+    test(
+      '16. AiRequestPriority pre-emption: background yields to user request',
+      () async {
+        final handle1 = aiService.startExplainSentence(
+          const SentenceContext(lessonTitle: 'T', sentenceText: 'Text'),
+          priority: AiRequestPriority.background,
+        );
+        expect(handle1.requestId.isNotEmpty, isTrue);
 
-      // User initiates explicit translation
-      final handle2 = aiService.startTranslateText(
-        'Word',
-        priority: AiRequestPriority.user,
-      );
-      expect(handle2.requestId.isNotEmpty, isTrue);
+        // User initiates explicit translation
+        final handle2 = aiService.startTranslateText(
+          'Word',
+          priority: AiRequestPriority.user,
+        );
+        expect(handle2.requestId.isNotEmpty, isTrue);
 
-      await handle1.cancel();
-      await handle2.cancel();
-    });
+        await handle1.cancel();
+        await handle2.cancel();
+      },
+    );
 
-    test('17. PromptBuilder creates correct prompt templates for all features', () {
-      final sentencePrompt = PromptBuilder.buildSentenceExplanation(
-        const SentenceContext(
-          lessonTitle: 'Tech Talk',
-          sentenceText: 'Machine learning algorithms improve automatically.',
-        ),
-      );
-      expect(sentencePrompt.contains('Machine learning algorithms improve automatically.'), isTrue);
-      expect(sentencePrompt.contains('Tech Talk'), isTrue);
+    test(
+      '17. PromptBuilder creates correct prompt templates for all features',
+      () {
+        final sentencePrompt = PromptBuilder.buildSentenceExplanation(
+          const SentenceContext(
+            lessonTitle: 'Tech Talk',
+            sentenceText: 'Machine learning algorithms improve automatically.',
+          ),
+        );
+        expect(
+          sentencePrompt.contains(
+            'Machine learning algorithms improve automatically.',
+          ),
+          isTrue,
+        );
+        expect(sentencePrompt.contains('Tech Talk'), isTrue);
 
-      final wordPrompt = PromptBuilder.buildDictionaryExplanation('algorithms');
-      expect(wordPrompt.contains('algorithms'), isTrue);
+        final wordPrompt = PromptBuilder.buildDictionaryExplanation(
+          'algorithms',
+        );
+        expect(wordPrompt.contains('algorithms'), isTrue);
 
-      final qaPrompt = PromptBuilder.buildSentenceQA(
-        context: const SentenceContext(
-          lessonTitle: 'Tech Talk',
-          sentenceText: 'Machine learning algorithms improve automatically.',
-        ),
-        userQuestion: 'How does it improve?',
-      );
-      expect(qaPrompt.contains('How does it improve?'), isTrue);
+        final qaPrompt = PromptBuilder.buildSentenceQA(
+          context: const SentenceContext(
+            lessonTitle: 'Tech Talk',
+            sentenceText: 'Machine learning algorithms improve automatically.',
+          ),
+          userQuestion: 'How does it improve?',
+        );
+        expect(qaPrompt.contains('How does it improve?'), isTrue);
 
-      final generalQa = PromptBuilder.buildGeneralQA(userQuestion: 'What is JLexa?');
-      expect(generalQa.contains('What is JLexa?'), isTrue);
-    });
+        final generalQa = PromptBuilder.buildGeneralQA(
+          userQuestion: 'What is JLexa?',
+        );
+        expect(generalQa.contains('What is JLexa?'), isTrue);
+      },
+    );
 
     test('18. AudioLesson copyWith, toMap, fromMap with all TranscriptStatus states', () {
       final base = AudioLesson(
@@ -750,8 +864,13 @@ void main() {
       expect(restored.transcriptStatus, equals(TranscriptStatus.processing));
       expect(restored.currentPositionMs, equals(4000));
 
-      final completedCopy = base.copyWith(transcriptStatus: TranscriptStatus.completed);
-      expect(completedCopy.transcriptStatus, equals(TranscriptStatus.completed));
+      final completedCopy = base.copyWith(
+        transcriptStatus: TranscriptStatus.completed,
+      );
+      expect(
+        completedCopy.transcriptStatus,
+        equals(TranscriptStatus.completed),
+      );
       expect(completedCopy.durationMs, equals(12000));
     });
 
@@ -766,11 +885,11 @@ void main() {
         lastOpenedAt: DateTime.now(),
       );
       await lessonRepo.saveLesson(lesson);
-      await waveformService.saveCachedWaveform(
-        'lesson_delete_wave_test',
-        [0.1, 0.5, 0.9],
-        fileSize: 100,
-      );
+      await waveformService.saveCachedWaveform('lesson_delete_wave_test', [
+        0.1,
+        0.5,
+        0.9,
+      ], fileSize: 100);
 
       final loadedBefore = await waveformService.loadCachedWaveform(
         'lesson_delete_wave_test',

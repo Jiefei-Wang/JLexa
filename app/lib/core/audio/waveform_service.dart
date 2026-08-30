@@ -1,12 +1,21 @@
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 abstract class IWaveformService {
-  Future<List<double>> extractAndCacheWaveform(String audioPath, String lessonId, int durationMs);
-  Future<List<double>?> loadCachedWaveform(String lessonId, {int? fileSize});
+  Future<List<double>> extractAndCacheWaveform(
+    String audioPath,
+    String lessonId,
+    int durationMs,
+  );
+  Future<List<double>?> loadCachedWaveform(
+    String lessonId, {
+    int? fileSize,
+    int? lastModified,
+  });
   Future<void> deleteCachedWaveform(String lessonId);
   List<double> getWindowSlice({
     required List<double> fullPeaks,
@@ -18,8 +27,26 @@ abstract class IWaveformService {
 }
 
 class WaveformService implements IWaveformService {
-  static const MethodChannel _whisperChannel = MethodChannel('com.jlexa.app/whisper');
+  static const MethodChannel _whisperChannel = MethodChannel(
+    'com.jlexa.app/whisper',
+  );
   final Map<String, List<double>> _memoryCache = {};
+
+  String _buildCacheKey(String lessonId, int? fileSize, int? lastModified) {
+    return '${lessonId}_${fileSize ?? 0}_${lastModified ?? 0}';
+  }
+
+  String _buildFileName(String lessonId, int? fileSize, int? lastModified) {
+    if (fileSize != null &&
+        fileSize > 0 &&
+        lastModified != null &&
+        lastModified > 0) {
+      return 'v3_${lessonId}_${fileSize}_$lastModified.peaks';
+    } else if (fileSize != null && fileSize > 0) {
+      return 'v3_${lessonId}_$fileSize.peaks';
+    }
+    return 'v3_$lessonId.peaks';
+  }
 
   @override
   Future<List<double>> extractAndCacheWaveform(
@@ -27,23 +54,29 @@ class WaveformService implements IWaveformService {
     String lessonId,
     int durationMs,
   ) async {
-    // Check cache in memory
-    if (_memoryCache.containsKey(lessonId)) {
-      return _memoryCache[lessonId]!;
-    }
-
     int fileSize = 0;
+    int lastModified = 0;
     final file = File(audioPath);
     if (await file.exists()) {
       try {
         fileSize = await file.length();
+        lastModified = (await file.lastModified()).millisecondsSinceEpoch;
       } catch (_) {}
     }
 
+    final memKey = _buildCacheKey(lessonId, fileSize, lastModified);
+    if (_memoryCache.containsKey(memKey)) {
+      return _memoryCache[memKey]!;
+    }
+
     // Check disk cache
-    final cached = await loadCachedWaveform(lessonId, fileSize: fileSize);
+    final cached = await loadCachedWaveform(
+      lessonId,
+      fileSize: fileSize,
+      lastModified: lastModified,
+    );
     if (cached != null && cached.isNotEmpty) {
-      _memoryCache[lessonId] = cached;
+      _memoryCache[memKey] = cached;
       return cached;
     }
 
@@ -54,12 +87,17 @@ class WaveformService implements IWaveformService {
       try {
         if (Platform.isAndroid) {
           // Native Android MediaCodec / WAV PCM peak extraction
-          final dynamic raw = await _whisperChannel.invokeMethod('extractAudioInfo', {
-            'audioPath': audioPath,
-            'numPeaks': max(100, (durationMs / 50).round()),
-          });
+          final dynamic raw = await _whisperChannel.invokeMethod(
+            'extractAudioInfo',
+            {
+              'audioPath': audioPath,
+              'numPeaks': max(100, (durationMs / 50).round()),
+            },
+          );
           if (raw is Map && raw['peaks'] is List) {
-            peaks = (raw['peaks'] as List).map((e) => (e as num).toDouble()).toList();
+            peaks = (raw['peaks'] as List)
+                .map((e) => (e as num).toDouble())
+                .toList();
           }
         } else if (audioPath.toLowerCase().endsWith('.wav')) {
           peaks = await _extractFromWav(file, durationMs);
@@ -70,21 +108,36 @@ class WaveformService implements IWaveformService {
     }
 
     if (peaks.isNotEmpty) {
-      _memoryCache[lessonId] = peaks;
-      await _saveCachedWaveform(lessonId, peaks, fileSize: fileSize);
+      _memoryCache[memKey] = peaks;
+      await _saveCachedWaveform(
+        lessonId,
+        peaks,
+        fileSize: fileSize,
+        lastModified: lastModified,
+      );
     }
 
     return peaks;
   }
 
   @override
-  Future<List<double>?> loadCachedWaveform(String lessonId, {int? fileSize}) async {
+  Future<List<double>?> loadCachedWaveform(
+    String lessonId, {
+    int? fileSize,
+    int? lastModified,
+  }) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final targetFileName = fileSize != null && fileSize > 0
-          ? 'v3_${lessonId}_$fileSize.peaks'
-          : 'v3_$lessonId.peaks';
-      final file = File('${dir.path}/waveforms/$targetFileName');
+      // Try exact versioned name first
+      final targetFileName = _buildFileName(lessonId, fileSize, lastModified);
+      var file = File('${dir.path}/waveforms/$targetFileName');
+      if (!await file.exists() && fileSize != null && fileSize > 0) {
+        // Fallback to file size only legacy name
+        file = File('${dir.path}/waveforms/v3_${lessonId}_$fileSize.peaks');
+      }
+      if (!await file.exists()) {
+        file = File('${dir.path}/waveforms/v3_$lessonId.peaks');
+      }
       if (await file.exists()) {
         final bytes = await file.readAsBytes();
         final floatList = Float32List.view(bytes.buffer);
@@ -97,7 +150,9 @@ class WaveformService implements IWaveformService {
   @override
   Future<void> deleteCachedWaveform(String lessonId) async {
     try {
-      _memoryCache.remove(lessonId);
+      _memoryCache.removeWhere(
+        (k, v) => k.startsWith('${lessonId}_') || k == lessonId,
+      );
       final dir = await getApplicationDocumentsDirectory();
       final waveformsDir = Directory('${dir.path}/waveforms');
       if (await waveformsDir.exists()) {
@@ -114,19 +169,31 @@ class WaveformService implements IWaveformService {
     } catch (_) {}
   }
 
-  Future<void> saveCachedWaveform(String lessonId, List<double> peaks, {int? fileSize}) =>
-      _saveCachedWaveform(lessonId, peaks, fileSize: fileSize);
+  Future<void> saveCachedWaveform(
+    String lessonId,
+    List<double> peaks, {
+    int? fileSize,
+    int? lastModified,
+  }) => _saveCachedWaveform(
+    lessonId,
+    peaks,
+    fileSize: fileSize,
+    lastModified: lastModified,
+  );
 
-  Future<void> _saveCachedWaveform(String lessonId, List<double> peaks, {int? fileSize}) async {
+  Future<void> _saveCachedWaveform(
+    String lessonId,
+    List<double> peaks, {
+    int? fileSize,
+    int? lastModified,
+  }) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
       final waveformsDir = Directory('${dir.path}/waveforms');
       if (!await waveformsDir.exists()) {
         await waveformsDir.create(recursive: true);
       }
-      final targetFileName = fileSize != null && fileSize > 0
-          ? 'v3_${lessonId}_$fileSize.peaks'
-          : 'v3_$lessonId.peaks';
+      final targetFileName = _buildFileName(lessonId, fileSize, lastModified);
       final file = File('${waveformsDir.path}/$targetFileName');
       final float32 = Float32List.fromList(peaks);
       await file.writeAsBytes(float32.buffer.asUint8List());
@@ -168,13 +235,19 @@ class WaveformService implements IWaveformService {
       if (chunkSize % 2 != 0) offset++;
     }
 
-    if (dataOffset == -1 || dataSize <= 0 || channels <= 0 || bitsPerSample != 16) {
+    if (dataOffset == -1 ||
+        dataSize <= 0 ||
+        channels <= 0 ||
+        bitsPerSample != 16) {
       return [];
     }
 
     final totalSamples = dataSize ~/ 2;
     final totalFrames = totalSamples ~/ channels;
-    final int pointsCount = max(100, (durationMs > 0 ? durationMs : (totalFrames * 1000 ~/ sampleRate)) ~/ 50);
+    final int pointsCount = max(
+      100,
+      (durationMs > 0 ? durationMs : (totalFrames * 1000 ~/ sampleRate)) ~/ 50,
+    );
     final int blockSize = max(1, totalFrames ~/ pointsCount);
     final List<double> peaks = [];
 
@@ -185,11 +258,11 @@ class WaveformService implements IWaveformService {
         final samplePos = dataOffset + f * channels * 2;
         if (samplePos + 1 < bytes.length) {
           final sample = byteData.getInt16(samplePos, Endian.little);
-          final norm = (sample.abs() / 32768.0).clamp(0.0, 1.0);
+          final norm = (sample.abs() / 32768.0).clamp(0.0, 1.0).toDouble();
           if (norm > maxAmp) maxAmp = norm;
         }
       }
-      peaks.add(maxAmp.clamp(0.02, 1.0));
+      peaks.add(maxAmp.clamp(0.02, 1.0).toDouble());
     }
 
     return peaks;
@@ -218,7 +291,10 @@ class WaveformService implements IWaveformService {
       if (currentMs < 0 || currentMs > totalDurationMs) {
         slice.add(0.02); // Padding silence outside file bounds
       } else {
-        final int peakIndex = (currentMs / msPerPeak).round().clamp(0, fullPeaks.length - 1);
+        final int peakIndex = (currentMs / msPerPeak)
+            .round()
+            .clamp(0, fullPeaks.length - 1)
+            .toInt();
         slice.add(fullPeaks[peakIndex]);
       }
     }

@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+
 import '../../core/vocabulary/vocabulary_models.dart';
 import '../../core/vocabulary/vocabulary_repository.dart';
 
@@ -14,8 +15,15 @@ class VocabularyController extends ChangeNotifier {
   List<VocabularyWord> get words => _filteredWords;
   int get allCount => _allWords.length;
   int get dueCount => _allWords.where((w) => w.isDue).length;
-  int get learningCount => _allWords.where((w) => w.state == VocabularyState.learning || w.state == VocabularyState.newWord).length;
-  int get masteredCount => _allWords.where((w) => w.state == VocabularyState.mastered).length;
+  int get learningCount => _allWords
+      .where(
+        (w) =>
+            w.state == VocabularyState.learning ||
+            w.state == VocabularyState.newWord,
+      )
+      .length;
+  int get masteredCount =>
+      _allWords.where((w) => w.state == VocabularyState.mastered).length;
   int get filterTab => _filterTab;
   bool get isLoading => _isLoading;
 
@@ -61,7 +69,13 @@ class VocabularyController extends ChangeNotifier {
         list = list.where((w) => w.isDue).toList();
         break;
       case 2: // Learning
-        list = list.where((w) => w.state == VocabularyState.learning || w.state == VocabularyState.newWord).toList();
+        list = list
+            .where(
+              (w) =>
+                  w.state == VocabularyState.learning ||
+                  w.state == VocabularyState.newWord,
+            )
+            .toList();
         break;
       case 3: // Mastered
         list = list.where((w) => w.state == VocabularyState.mastered).toList();
@@ -69,7 +83,9 @@ class VocabularyController extends ChangeNotifier {
     }
 
     if (_searchQuery.isNotEmpty) {
-      list = list.where((w) => w.word.toLowerCase().contains(_searchQuery)).toList();
+      list = list
+          .where((w) => w.word.toLowerCase().contains(_searchQuery))
+          .toList();
     }
 
     _filteredWords = list;

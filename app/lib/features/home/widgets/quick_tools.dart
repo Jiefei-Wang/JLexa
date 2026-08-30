@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
 
@@ -66,7 +67,11 @@ class QuickToolsGrid extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: AppColors.textTertiary, size: 18),
+            const Icon(
+              Icons.chevron_right,
+              color: AppColors.textTertiary,
+              size: 18,
+            ),
           ],
         ),
       ),

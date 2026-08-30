@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
+
 import '../database/app_database.dart';
 import 'ai_engine.dart';
 import 'ai_models.dart';
@@ -24,11 +26,9 @@ class AiService extends ChangeNotifier {
 
   bool get isGenerating => llmEngine.state == AiModelState.generating;
 
-  AiService({
-    AiEngine? llm,
-    SpeechRecognitionEngine? speech,
-  })  : llmEngine = llm ?? NativeLlamaEngine(),
-        speechEngine = speech ?? NativeWhisperEngine() {
+  AiService({AiEngine? llm, SpeechRecognitionEngine? speech})
+    : llmEngine = llm ?? NativeLlamaEngine(),
+      speechEngine = speech ?? NativeWhisperEngine() {
     _loadSavedSettings();
   }
 
@@ -37,20 +37,24 @@ class AiService extends ChangeNotifier {
       final db = await AppDatabase.instance.database;
       final results = await db.query('app_settings');
       final Map<String, String> map = {
-        for (var r in results) r['key'] as String: r['value'] as String
+        for (var r in results) r['key'] as String: r['value'] as String,
       };
 
-      if (map.containsKey('llm_model_path') && map['llm_model_path']!.isNotEmpty) {
+      if (map.containsKey('llm_model_path') &&
+          map['llm_model_path']!.isNotEmpty) {
         _configuredLlmPath = map['llm_model_path'];
       }
 
-      if (map.containsKey('whisper_model_path') && map['whisper_model_path']!.isNotEmpty) {
+      if (map.containsKey('whisper_model_path') &&
+          map['whisper_model_path']!.isNotEmpty) {
         _configuredSpeechPath = map['whisper_model_path'];
       }
 
       if (map.containsKey('ai_generation_settings')) {
         try {
-          final decoded = jsonDecode(map['ai_generation_settings']!) as Map<String, dynamic>;
+          final decoded = jsonDecode(
+            map['ai_generation_settings']!,
+          ) as Map<String, dynamic>;
           _settings = AiGenerationSettings.fromMap(decoded);
         } catch (_) {}
       }
@@ -62,11 +66,10 @@ class AiService extends ChangeNotifier {
   Future<void> saveSetting(String key, String value) async {
     try {
       final db = await AppDatabase.instance.database;
-      await db.insert(
-        'app_settings',
-        {'key': key, 'value': value},
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await db.insert('app_settings', {
+        'key': key,
+        'value': value,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     } catch (_) {}
   }
 
@@ -172,7 +175,10 @@ class AiService extends ChangeNotifier {
   }
 
   Stream<String> explainSentence(SentenceContext context) {
-    return startExplainSentence(context, priority: AiRequestPriority.background).stream;
+    return startExplainSentence(
+      context,
+      priority: AiRequestPriority.background,
+    ).stream;
   }
 
   AiGenerationHandle startTranslateText(

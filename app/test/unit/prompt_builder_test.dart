@@ -28,8 +28,14 @@ void main() {
 
       final prompt = PromptBuilder.buildSentenceExplanation(context);
       expect(prompt, contains('TED Talk: The power of habit'));
-      expect(prompt, contains('The key is not to prioritize what is on your schedule.'));
-      expect(prompt, contains('Most people think they never have enough time.'));
+      expect(
+        prompt,
+        contains('The key is not to prioritize what is on your schedule.'),
+      );
+      expect(
+        prompt,
+        contains('Most people think they never have enough time.'),
+      );
       expect(prompt, contains('schedule'));
       expect(prompt, contains('Summary:'));
       expect(prompt, contains('Possible correction:'));

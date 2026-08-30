@@ -1,4 +1,5 @@
 import 'package:sqflite/sqflite.dart';
+
 import '../database/app_database.dart';
 import 'demo_dictionary_data.dart';
 import 'dictionary_models.dart';
@@ -35,7 +36,8 @@ class DictionaryRepository implements IDictionaryRepository {
 
     // Check stemming / prefix matches if simple
     for (final entry in _memoryCache.values) {
-      if (cleanWord.startsWith(entry.word.toLowerCase()) || entry.word.toLowerCase().startsWith(cleanWord)) {
+      if (cleanWord.startsWith(entry.word.toLowerCase()) ||
+          entry.word.toLowerCase().startsWith(cleanWord)) {
         return entry;
       }
     }
@@ -48,10 +50,7 @@ class DictionaryRepository implements IDictionaryRepository {
     final clean = query.trim().toLowerCase();
     if (clean.isEmpty) return [];
 
-    return _memoryCache.keys
-        .where((w) => w.contains(clean))
-        .take(6)
-        .toList();
+    return _memoryCache.keys.where((w) => w.contains(clean)).take(6).toList();
   }
 
   @override
@@ -82,14 +81,10 @@ class DictionaryRepository implements IDictionaryRepository {
 
     try {
       final db = await AppDatabase.instance.database;
-      await db.insert(
-        'recent_searches',
-        {
-          'word': clean,
-          'searched_at': DateTime.now().millisecondsSinceEpoch,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await db.insert('recent_searches', {
+        'word': clean,
+        'searched_at': DateTime.now().millisecondsSinceEpoch,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     } catch (_) {}
   }
 

@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
+
 import 'audio_models.dart';
 
 class AudioPlaybackState {
@@ -51,6 +53,7 @@ class AudioService extends ChangeNotifier {
   bool _isSeeking = false;
   bool _hasLoadError = false;
   String? _loadErrorMessage;
+  int _loadGeneration = 0;
 
   bool get isPlaying => _isPlaying;
   int get positionMs => _positionMs;
@@ -63,7 +66,9 @@ class AudioService extends ChangeNotifier {
   int get currentSegmentIndex => _currentSegmentIndex;
 
   AudioSegment? get currentSegment {
-    if (_segments.isEmpty || _currentSegmentIndex < 0 || _currentSegmentIndex >= _segments.length) {
+    if (_segments.isEmpty ||
+        _currentSegmentIndex < 0 ||
+        _currentSegmentIndex >= _segments.length) {
       return null;
     }
     return _segments[_currentSegmentIndex];
@@ -79,78 +84,81 @@ class AudioService extends ChangeNotifier {
 
   void _initSubscriptions(AudioPlayer player) {
     try {
-      _playerStateSub = player.onPlayerStateChanged.listen(
-        (state) {
-          _isPlaying = state == PlayerState.playing;
-          notifyListeners();
-        },
-        onError: (_) {},
-      );
+      _playerStateSub = player.onPlayerStateChanged.listen((state) {
+        _isPlaying = state == PlayerState.playing;
+        notifyListeners();
+      }, onError: (_) {});
 
-      _positionSub = player.onPositionChanged.listen(
-        (pos) {
-          if (_isSeeking) return;
-          _positionMs = pos.inMilliseconds;
+      _positionSub = player.onPositionChanged.listen((pos) {
+        if (_isSeeking) return;
+        _positionMs = pos.inMilliseconds;
 
-          // Handle Repeat One segment boundary
-          if (_isRepeatOne && currentSegment != null) {
-            if (_positionMs >= currentSegment!.endMs) {
-              seekTo(currentSegment!.startMs);
-              return;
-            }
+        // Handle Repeat One segment boundary
+        if (_isRepeatOne && currentSegment != null) {
+          if (_positionMs >= currentSegment!.endMs) {
+            seekTo(currentSegment!.startMs);
+            return;
           }
+        }
 
-          // Sync active segment if normal playback
-          _updateActiveSegment();
+        // Sync active segment if normal playback
+        _updateActiveSegment();
+        notifyListeners();
+      }, onError: (_) {});
+
+      _durationSub = player.onDurationChanged.listen((dur) {
+        final newDurationMs = dur.inMilliseconds;
+        if (newDurationMs > 0 && newDurationMs != _durationMs) {
+          _durationMs = newDurationMs;
           notifyListeners();
-        },
-        onError: (_) {},
-      );
-
-      _durationSub = player.onDurationChanged.listen(
-        (dur) {
-          final newDurationMs = dur.inMilliseconds;
-          if (newDurationMs > 0 && newDurationMs != _durationMs) {
-            _durationMs = newDurationMs;
-            notifyListeners();
-          }
-        },
-        onError: (_) {},
-      );
+        }
+      }, onError: (_) {});
     } catch (_) {}
   }
 
-  Future<void> loadLesson(AudioLesson lesson, List<AudioSegment> segments) async {
+  Future<void> loadLesson(
+    AudioLesson lesson,
+    List<AudioSegment> segments,
+  ) async {
+    final loadId = ++_loadGeneration;
     _hasLoadError = false;
     _loadErrorMessage = null;
-    _currentLesson = lesson;
-    _segments = List.from(segments);
-    _positionMs = lesson.currentPositionMs;
-    _durationMs = lesson.durationMs;
-    _updateActiveSegment();
 
     try {
-      await _player.stop().timeout(const Duration(milliseconds: 500), onTimeout: () {});
+      await _player.stop();
+      if (loadId != _loadGeneration) return;
+
       if (lesson.localPath.startsWith('asset:')) {
-        await _player.setSource(AssetSource(lesson.localPath.replaceFirst('asset:', ''))).timeout(const Duration(milliseconds: 500), onTimeout: () {});
+        await _player.setSource(
+          AssetSource(lesson.localPath.replaceFirst('asset:', '')),
+        );
       } else {
         final file = File(lesson.localPath);
         if (!await file.exists()) {
           throw Exception('Audio file does not exist at ${lesson.localPath}');
         }
-        await _player.setSource(DeviceFileSource(lesson.localPath)).timeout(const Duration(milliseconds: 500), onTimeout: () {});
+        await _player.setSource(DeviceFileSource(lesson.localPath));
       }
-      if (_positionMs > 0) {
-        await _player.seek(Duration(milliseconds: _positionMs)).timeout(const Duration(milliseconds: 500), onTimeout: () {});
+      if (loadId != _loadGeneration) return;
+
+      if (lesson.currentPositionMs > 0) {
+        await _player.seek(Duration(milliseconds: lesson.currentPositionMs));
       }
+      if (loadId != _loadGeneration) return;
+
+      _currentLesson = lesson;
+      _segments = List.from(segments);
+      _positionMs = lesson.currentPositionMs;
+      _durationMs = lesson.durationMs;
+      _updateActiveSegment();
+      notifyListeners();
     } catch (e) {
+      if (loadId != _loadGeneration) return;
       _hasLoadError = true;
       _loadErrorMessage = 'Failed to load audio: $e';
       notifyListeners();
       rethrow;
     }
-
-    notifyListeners();
   }
 
   void updateSegments(List<AudioSegment> newSegments) {
@@ -194,37 +202,35 @@ class AudioService extends ChangeNotifier {
 
   Future<void> play() async {
     try {
-      await _player.resume().timeout(const Duration(milliseconds: 500), onTimeout: () {});
-      _isPlaying = true;
-      notifyListeners();
+      await _player.resume();
     } catch (_) {}
   }
 
   Future<void> pause() async {
     try {
-      await _player.pause().timeout(const Duration(milliseconds: 500), onTimeout: () {});
-      _isPlaying = false;
-      notifyListeners();
+      await _player.pause();
     } catch (_) {}
   }
 
   Future<void> seekTo(int positionMs) async {
     _isSeeking = true;
-    _positionMs = positionMs.clamp(0, _durationMs > 0 ? _durationMs : positionMs);
+    _positionMs = positionMs
+        .clamp(0, _durationMs > 0 ? _durationMs : positionMs)
+        .toInt();
     _updateActiveSegment();
     notifyListeners();
 
     try {
-      await _player.seek(Duration(milliseconds: _positionMs)).timeout(const Duration(milliseconds: 500), onTimeout: () {});
-    } catch (_) {}
-    finally {
+      await _player.seek(Duration(milliseconds: _positionMs));
+    } catch (_) {
+    } finally {
       _isSeeking = false;
     }
   }
 
   Future<void> stop() async {
     try {
-      await _player.stop().timeout(const Duration(milliseconds: 500), onTimeout: () {});
+      await _player.stop();
       _isPlaying = false;
       notifyListeners();
     } catch (_) {}

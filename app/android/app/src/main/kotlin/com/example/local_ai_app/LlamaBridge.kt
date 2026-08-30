@@ -44,6 +44,7 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
         callback: NativeGenerationCallback
     )
     private external fun nativeCancel()
+    private external fun nativeResetCancellation()
 
     private val job = SupervisorJob()
     private val scope = CoroutineScope(job + Dispatchers.IO)
@@ -161,6 +162,7 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
                 }
 
                 activeRequestId = requestId
+                nativeResetCancellation()
                 result.success(null)
 
                 scope.launch {
@@ -232,9 +234,12 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
             }
 
             "cancelGeneration" -> {
-                try {
-                    nativeCancel()
-                } catch (_: Throwable) {}
+                val reqId = call.argument<String>("requestId")
+                if (reqId == null || reqId == activeRequestId) {
+                    try {
+                        nativeCancel()
+                    } catch (_: Throwable) {}
+                }
                 result.success(null)
             }
 
