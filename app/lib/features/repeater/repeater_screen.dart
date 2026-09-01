@@ -51,11 +51,14 @@ class RepeaterScreen extends StatefulWidget {
   });
 
   @override
-  State<RepeaterScreen> createState() => _RepeaterScreenState();
+  State<RepeaterScreen> createState() => RepeaterScreenState();
 }
 
-class _RepeaterScreenState extends State<RepeaterScreen> {
+class RepeaterScreenState extends State<RepeaterScreen> {
   late final RepeaterController _controller;
+
+  Future<void> prepareLessonDeletion(String lessonId) =>
+      _controller.prepareLessonDeletion(lessonId);
 
   @override
   void initState() {
@@ -314,9 +317,15 @@ class _RepeaterScreenState extends State<RepeaterScreen> {
                             ],
                             const SizedBox(height: 12),
                             ElevatedButton.icon(
-                              onPressed: _controller.transcribeLesson,
+                              onPressed: _controller.isWhisperBusyElsewhere
+                                  ? null
+                                  : _controller.transcribeLesson,
                               icon: const Icon(Icons.auto_awesome, size: 18),
-                              label: const Text('Transcribe with Whisper'),
+                              label: Text(
+                                _controller.isWhisperBusyElsewhere
+                                    ? 'Whisper Busy Elsewhere'
+                                    : 'Transcribe with Whisper',
+                              ),
                             ),
                           ],
                         ),

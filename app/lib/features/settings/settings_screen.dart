@@ -1,14 +1,21 @@
 import 'package:flutter/material.dart';
 
 import '../../core/ai/ai_service.dart';
+import '../../core/ai/model_catalog.dart';
+import '../../core/ai/model_manager.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import 'settings_controller.dart';
 
 class SettingsScreen extends StatefulWidget {
   final AiService aiService;
+  final SettingsController? controller;
 
-  const SettingsScreen({super.key, required this.aiService});
+  const SettingsScreen({
+    super.key,
+    required this.aiService,
+    this.controller,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -16,28 +23,38 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late final SettingsController _controller;
+  bool _ownsController = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = SettingsController(aiService: widget.aiService);
+    if (widget.controller != null) {
+      _controller = widget.controller!;
+    } else {
+      _controller = SettingsController(aiService: widget.aiService);
+      _ownsController = true;
+    }
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    if (_ownsController) {
+      _controller.dispose();
+    }
     super.dispose();
   }
 
-  Future<void> _confirmForgetModel({
+  Future<void> _confirmDeleteModel({
     required String modelName,
     required VoidCallback onConfirm,
   }) async {
     final result = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Forget Model Configuration?'),
-        content: Text('Remove "$modelName" from configured models?'),
+        title: const Text('Delete Model?'),
+        content: Text(
+          'Are you sure you want to remove "$modelName" from your device storage?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -46,7 +63,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('Forget'),
+            child: const Text('Delete'),
           ),
         ],
       ),
@@ -61,8 +78,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, _) {
-        final llmInfo = _controller.llmInfo;
-        final speechInfo = _controller.speechInfo;
+        final llmModels = _controller.llmModels;
+        final whisperModels = _controller.whisperModels;
 
         return Scaffold(
           backgroundColor: AppColors.background,
@@ -98,254 +115,71 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         ),
                       ),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 16, color: AppColors.error),
+                        onPressed: _controller.clearError,
+                      ),
                     ],
                   ),
                 ),
 
-              // Section 1: Local LLM Model
+              // ==========================================
+              // Section 1: Local Language Model (LLM)
+              // ==========================================
               const Text(
                 'Local Language Model (LLM)',
                 style: AppTypography.titleSmall,
               ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.psychology,
-                          color: AppColors.accentPurple,
-                          size: 24,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                llmInfo?.name ?? 'No LLM Model Loaded',
-                                style: AppTypography.labelLarge,
-                              ),
-                              Text(
-                                llmInfo != null
-                                    ? '${llmInfo.formattedSize} • Ready for offline inference'
-                                    : 'Select a .gguf model file from local storage',
-                                style: AppTypography.bodySmall,
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: llmInfo?.isLoaded == true
-                                ? AppColors.successLight
-                                : AppColors.warningLight,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            llmInfo?.isLoaded == true ? 'Ready' : 'Not Loaded',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              color: llmInfo?.isLoaded == true
-                                  ? AppColors.success
-                                  : AppColors.warning,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: _controller.isLoading
-                                ? null
-                                : _controller.pickAndLoadLlmModel,
-                            icon: const Icon(Icons.file_open, size: 18),
-                            label: const Text('Choose GGUF Model'),
-                          ),
-                        ),
-                        if (llmInfo != null && !llmInfo.isLoaded) ...[
-                          const SizedBox(width: 8),
-                          FilledButton.tonal(
-                            onPressed: _controller.isLoading
-                                ? null
-                                : _controller.loadConfiguredLlmModel,
-                            child: const Text('Load'),
-                          ),
-                          const SizedBox(width: 4),
-                          IconButton(
-                            onPressed: _controller.isLoading
-                                ? null
-                                : () => _confirmForgetModel(
-                                    modelName: llmInfo.name,
-                                    onConfirm: () => _controller.forgetLlmModel(
-                                      deleteFile: false,
-                                    ),
-                                  ),
-                            icon: const Icon(
-                              Icons.delete_outline,
-                              color: AppColors.textTertiary,
-                              size: 20,
-                            ),
-                            tooltip: 'Forget Model',
-                          ),
-                        ],
-                        if (llmInfo?.isLoaded == true) ...[
-                          const SizedBox(width: 8),
-                          OutlinedButton(
-                            onPressed: _controller.unloadLlmModel,
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppColors.error,
-                            ),
-                            child: const Text('Unload'),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
-                ),
+              const SizedBox(height: 4),
+              const Text(
+                'Download an offline model for AI explanations, grammar insights, and translations.',
+                style: AppTypography.bodySmall,
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 10),
 
+              ...llmModels.map((item) => _buildModelCard(item)),
+
+              // Local LLM Import Box
+              _buildImportBox(
+                title: 'Have your own GGUF model?',
+                buttonLabel: 'Import Local GGUF',
+                icon: Icons.file_open,
+                onTap: _controller.isLoading ? null : _controller.pickAndImportLlmModel,
+              ),
+
+              const SizedBox(height: 24),
+
+              // ==========================================
               // Section 2: Speech Recognition Model (Whisper)
+              // ==========================================
               const Text(
                 'Speech Recognition Model (Whisper)',
                 style: AppTypography.titleSmall,
               ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.record_voice_over,
-                          color: AppColors.primary,
-                          size: 24,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                speechInfo?.name ?? 'No Whisper Model Loaded',
-                                style: AppTypography.labelLarge,
-                              ),
-                              Text(
-                                speechInfo != null
-                                    ? '${speechInfo.formattedSize} • Ready for speech-to-text'
-                                    : 'Select a ggml whisper model (.bin / .ggml) file',
-                                style: AppTypography.bodySmall,
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: speechInfo?.isLoaded == true
-                                ? AppColors.successLight
-                                : AppColors.warningLight,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            speechInfo?.isLoaded == true
-                                ? 'Ready'
-                                : (speechInfo != null
-                                      ? 'Configured'
-                                      : 'Not Loaded'),
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              color: speechInfo?.isLoaded == true
-                                  ? AppColors.success
-                                  : AppColors.warning,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: _controller.isLoading
-                                ? null
-                                : _controller.pickAndLoadSpeechModel,
-                            icon: const Icon(Icons.file_open, size: 18),
-                            label: const Text('Choose Whisper Model'),
-                          ),
-                        ),
-                        if (speechInfo != null && !speechInfo.isLoaded) ...[
-                          const SizedBox(width: 8),
-                          FilledButton.tonal(
-                            onPressed: _controller.isLoading
-                                ? null
-                                : _controller.loadConfiguredSpeechModel,
-                            child: const Text('Load'),
-                          ),
-                          const SizedBox(width: 4),
-                          IconButton(
-                            onPressed: _controller.isLoading
-                                ? null
-                                : () => _confirmForgetModel(
-                                    modelName: speechInfo.name,
-                                    onConfirm: () => _controller
-                                        .forgetSpeechModel(deleteFile: false),
-                                  ),
-                            icon: const Icon(
-                              Icons.delete_outline,
-                              color: AppColors.textTertiary,
-                              size: 20,
-                            ),
-                            tooltip: 'Forget Model',
-                          ),
-                        ],
-                        if (speechInfo?.isLoaded == true) ...[
-                          const SizedBox(width: 8),
-                          OutlinedButton(
-                            onPressed: _controller.unloadSpeechModel,
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppColors.error,
-                            ),
-                            child: const Text('Unload'),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
-                ),
+              const SizedBox(height: 4),
+              const Text(
+                'Select an offline speech recognition model for audio lesson transcription.',
+                style: AppTypography.bodySmall,
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 10),
 
+              ...whisperModels.map((item) => _buildModelCard(item)),
+
+              // Local Whisper Import Box
+              _buildImportBox(
+                title: 'Have your own Whisper model?',
+                buttonLabel: 'Import Local Whisper Model',
+                icon: Icons.file_open,
+                onTap: _controller.isLoading
+                    ? null
+                    : _controller.pickAndImportSpeechModel,
+              ),
+
+              const SizedBox(height: 24),
+
+              // ==========================================
               // Section 3: AI Inference Settings
+              // ==========================================
               const Text(
                 'Inference Configuration',
                 style: AppTypography.titleSmall,
@@ -424,6 +258,298 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildModelCard(ManagedModelItem item) {
+    final isDownloading = item.state == ModelDownloadState.downloading;
+    final isLoaded = item.state == ModelDownloadState.loaded;
+    final isLoading = item.state == ModelDownloadState.loading;
+    final isDownloaded = item.isDownloaded;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isLoaded
+              ? AppColors.primary
+              : (item.isRecommended ? AppColors.secondary : AppColors.border),
+          width: isLoaded ? 1.5 : 1.0,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                item.type == ModelType.llm ? Icons.psychology : Icons.record_voice_over,
+                color: isLoaded ? AppColors.primary : AppColors.textSecondary,
+                size: 24,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            item.displayName,
+                            style: AppTypography.labelLarge,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (item.isRecommended) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.primaryLight,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text(
+                              'RECOMMENDED',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${item.formattedSize}${item.speedHint.isNotEmpty ? " • ${item.speedHint}" : ""}${item.memoryHint.isNotEmpty ? " • ${item.memoryHint}" : ""}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _buildStateBadge(item.state),
+            ],
+          ),
+          if (item.description.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              item.description,
+              style: AppTypography.bodySmall,
+            ),
+          ],
+          if (isDownloading) ...[
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  item.progress != null
+                      ? 'Downloading: ${item.progress!.formattedReceived} / ${item.progress!.formattedTotal}'
+                      : 'Downloading...',
+                  style: const TextStyle(fontSize: 12, color: AppColors.primary),
+                ),
+                Text(
+                  item.progress?.percentageString ?? '0%',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            LinearProgressIndicator(
+              value: item.progress?.progress,
+              backgroundColor: AppColors.border,
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () => _controller.cancelDownload(item.id),
+                icon: const Icon(Icons.close, size: 16, color: AppColors.error),
+                label: const Text(
+                  'Cancel',
+                  style: TextStyle(color: AppColors.error, fontSize: 13),
+                ),
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                if (!isDownloaded && item.catalogModel != null)
+                  FilledButton.tonalIcon(
+                    onPressed: _controller.isLoading
+                        ? null
+                        : () => _controller.downloadModel(item.catalogModel!),
+                    icon: const Icon(Icons.download, size: 18),
+                    label: const Text('Download'),
+                  ),
+                if (isDownloaded && !isLoaded) ...[
+                  FilledButton.icon(
+                    onPressed: _controller.isLoading || isLoading
+                        ? null
+                        : () => _controller.loadModel(item),
+                    icon: isLoading
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.play_arrow, size: 18),
+                    label: Text(isLoading ? 'Loading...' : 'Use'),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: _controller.isLoading
+                        ? null
+                        : () => _confirmDeleteModel(
+                            modelName: item.displayName,
+                            onConfirm: () => _controller.deleteModel(item),
+                          ),
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      color: AppColors.textTertiary,
+                      size: 20,
+                    ),
+                    tooltip: 'Delete Model File',
+                  ),
+                ],
+                if (isLoaded) ...[
+                  OutlinedButton(
+                    onPressed: _controller.isLoading
+                        ? null
+                        : () => _controller.unloadModel(item),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.error,
+                    ),
+                    child: const Text('Unload'),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: _controller.isLoading
+                        ? null
+                        : () => _confirmDeleteModel(
+                            modelName: item.displayName,
+                            onConfirm: () => _controller.deleteModel(item),
+                          ),
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      color: AppColors.textTertiary,
+                      size: 20,
+                    ),
+                    tooltip: 'Delete Model File',
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStateBadge(ModelDownloadState state) {
+    Color bg;
+    Color fg;
+    String label;
+
+    switch (state) {
+      case ModelDownloadState.loaded:
+        bg = AppColors.successLight;
+        fg = AppColors.success;
+        label = 'LOADED';
+        break;
+      case ModelDownloadState.loading:
+        bg = AppColors.primaryLight;
+        fg = AppColors.primary;
+        label = 'LOADING...';
+        break;
+      case ModelDownloadState.downloaded:
+        bg = AppColors.secondaryLight;
+        fg = AppColors.secondary;
+        label = 'DOWNLOADED';
+        break;
+      case ModelDownloadState.downloading:
+        bg = AppColors.primaryLight;
+        fg = AppColors.primary;
+        label = 'DOWNLOADING';
+        break;
+      case ModelDownloadState.error:
+        bg = AppColors.errorLight;
+        fg = AppColors.error;
+        label = 'ERROR';
+        break;
+      case ModelDownloadState.notDownloaded:
+        bg = AppColors.background;
+        fg = AppColors.textTertiary;
+        label = 'GET';
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+          color: fg,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImportBox({
+    required String title,
+    required String buttonLabel,
+    required IconData icon,
+    required VoidCallback? onTap,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border, style: BorderStyle.solid),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Text(title, style: AppTypography.labelLarge),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: onTap,
+            icon: Icon(icon, size: 16),
+            label: Text(buttonLabel),
+          ),
+        ],
+      ),
     );
   }
 

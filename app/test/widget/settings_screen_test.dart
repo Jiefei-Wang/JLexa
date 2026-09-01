@@ -1,0 +1,300 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:jlexa/core/ai/ai_engine.dart';
+import 'package:jlexa/core/ai/ai_models.dart';
+import 'package:jlexa/core/ai/ai_service.dart';
+import 'package:jlexa/core/ai/model_catalog.dart';
+import 'package:jlexa/core/ai/model_downloader.dart';
+import 'package:jlexa/core/ai/model_file_picker.dart';
+import 'package:jlexa/core/ai/model_manager.dart';
+import 'package:jlexa/core/ai/model_storage.dart';
+import 'package:jlexa/core/ai/prompt_builder.dart';
+import 'package:jlexa/core/ai/speech_engine.dart';
+import 'package:jlexa/core/audio/audio_models.dart';
+import 'package:jlexa/features/settings/settings_controller.dart';
+import 'package:jlexa/features/settings/settings_screen.dart';
+import 'package:path/path.dart' as p;
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+import '../test_helper.dart';
+
+class MockAiEngine implements AiEngine {
+  bool _isLoaded = false;
+  String? _loadedPath;
+
+  @override
+  bool get isLoaded => _isLoaded;
+
+  @override
+  String? get loadedModelPath => _loadedPath;
+
+  @override
+  AiModelState get state => _isLoaded ? AiModelState.ready : AiModelState.noModel;
+
+  @override
+  Future<void> loadModel(String modelPath, {AiGenerationSettings? settings}) async {
+    _isLoaded = true;
+    _loadedPath = modelPath;
+  }
+
+  @override
+  Future<void> unload() async {
+    _isLoaded = false;
+    _loadedPath = null;
+  }
+
+  @override
+  Future<void> cancel() async {}
+
+  @override
+  Future<void> cancelRequest(String requestId) async {}
+
+  @override
+  Stream<String> generate(
+    String prompt, {
+    AiGenerationSettings? settings,
+    int? seed,
+    List<ChatMessagePayload>? chatMessages,
+  }) => Stream.value('test');
+
+  @override
+  AiGenerationHandle startGeneration(
+    String prompt, {
+    AiGenerationSettings? settings,
+    int? seed,
+    List<ChatMessagePayload>? chatMessages,
+    AiRequestPriority priority = AiRequestPriority.user,
+  }) {
+    return AiGenerationHandle(
+      requestId: 'mock',
+      stream: Stream.value('test'),
+      onCancel: () async {},
+    );
+  }
+}
+
+class MockSpeechEngine implements SpeechRecognitionEngine {
+  bool _isLoaded = false;
+  String? _loadedPath;
+
+  @override
+  bool get isLoaded => _isLoaded;
+
+  @override
+  String? get loadedModelPath => _loadedPath;
+
+  @override
+  Future<void> loadModel(String modelPath) async {
+    _isLoaded = true;
+    _loadedPath = modelPath;
+  }
+
+  @override
+  Future<void> unload() async {
+    _isLoaded = false;
+    _loadedPath = null;
+  }
+
+  @override
+  Future<void> cancel() async {}
+
+  @override
+  Future<void> cancelRequest(String requestId) async {}
+
+  @override
+  Future<Map<String, dynamic>?> getAudioMetadata(String audioPath) async => null;
+
+  @override
+  Future<List<AudioSegment>> transcribeAudio({
+    required String audioPath,
+    required String lessonId,
+    String? requestId,
+    int nThreads = 4,
+    void Function(double progress)? onProgress,
+  }) async => [];
+}
+
+void main() {
+  setUpAll(() {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+    setupMockPlatformChannels();
+  });
+
+  group('SettingsScreen Widget Tests', () {
+    late Directory tempDir;
+    late ModelStorage storage;
+    late FakeModelDownloader downloader;
+    late FakeModelFilePicker filePicker;
+    late MockAiEngine mockLlm;
+    late MockSpeechEngine mockSpeech;
+    late AiService aiService;
+    late ModelManager modelManager;
+    late SettingsController controller;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('jlexa_settings_widget_test_');
+      storage = ModelStorage(baseDirProvider: () async => tempDir);
+      downloader = FakeModelDownloader(stepDelay: const Duration(milliseconds: 10));
+      filePicker = FakeModelFilePicker();
+      mockLlm = MockAiEngine();
+      mockSpeech = MockSpeechEngine();
+      aiService = AiService(llm: mockLlm, speech: mockSpeech);
+      modelManager = ModelManager(
+        storage: storage,
+        downloader: downloader,
+        aiService: aiService,
+      );
+      await modelManager.initialize();
+
+      controller = SettingsController(
+        aiService: aiService,
+        manager: modelManager,
+        picker: filePicker,
+      );
+    });
+
+    tearDown(() async {
+      controller.dispose();
+      modelManager.dispose();
+      aiService.dispose();
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    });
+
+    testWidgets('Renders curated models, recommended badges, and import options', (
+      WidgetTester tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(800, 2400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SettingsScreen(
+            aiService: aiService,
+            controller: controller,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Verify Headers
+      expect(find.text('Settings & Local Models'), findsOneWidget);
+      expect(find.text('Local Language Model (LLM)'), findsOneWidget);
+      expect(find.text('Speech Recognition Model (Whisper)'), findsOneWidget);
+      expect(find.text('Inference Configuration'), findsOneWidget);
+
+      // Verify Curated Model Names
+      expect(find.text('Qwen2.5 0.5B Instruct'), findsOneWidget);
+      expect(find.text('Qwen2.5 1.5B Instruct'), findsOneWidget);
+      expect(find.text('Qwen2.5 3B Instruct'), findsOneWidget);
+      expect(find.text('SmolLM2 360M Instruct'), findsOneWidget);
+
+      expect(find.text('Whisper Tiny (English)'), findsOneWidget);
+      expect(find.text('Whisper Base (English)'), findsOneWidget);
+      expect(find.text('Whisper Small (English)'), findsOneWidget);
+
+      // Verify Badges and Import Buttons
+      expect(find.text('RECOMMENDED'), findsNWidgets(2));
+      expect(find.text('Import Local GGUF'), findsOneWidget);
+      expect(find.text('Import Local Whisper Model'), findsOneWidget);
+    });
+
+    testWidgets('Download workflow with progress, completion, use, and unload', (
+      WidgetTester tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(800, 2400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SettingsScreen(
+            aiService: aiService,
+            controller: controller,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Download the model
+      await tester.runAsync(() async {
+        await controller.downloadModel(ModelCatalog.curatedLlmModels.first);
+      });
+      await tester.pump();
+
+      // After download completes, button should change to 'Use'
+      expect(find.widgetWithText(FilledButton, 'Use'), findsWidgets);
+
+      // Load model
+      final downloadedItem = controller.llmModels.firstWhere(
+        (m) => m.id == ModelCatalog.curatedLlmModels.first.id,
+      );
+      await tester.runAsync(() async {
+        await controller.loadModel(downloadedItem);
+      });
+      await tester.pump();
+
+      // Model is loaded -> LOADED badge and Unload button visible
+      expect(find.text('LOADED'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Unload'), findsOneWidget);
+
+      // Unload model
+      final loadedItem = controller.llmModels.firstWhere(
+        (m) => m.id == ModelCatalog.curatedLlmModels.first.id,
+      );
+      await tester.runAsync(() async {
+        await controller.unloadModel(loadedItem);
+      });
+      await tester.pump();
+
+      // Returns to downloaded state with 'Use' button
+      expect(find.widgetWithText(FilledButton, 'Use'), findsWidgets);
+    });
+
+    testWidgets('Local GGUF import loads model into managed state', (
+      WidgetTester tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(800, 2400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      late Directory extDir;
+      late File extFile;
+
+      await tester.runAsync(() async {
+        extDir = await Directory.systemTemp.createTemp('ext_');
+        extFile = File(p.join(extDir.path, 'custom_imported.gguf'));
+        await extFile.writeAsBytes(List<int>.filled(512, 0x11));
+        filePicker.nextLlmPath = extFile.path;
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SettingsScreen(
+            aiService: aiService,
+            controller: controller,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Import Local GGUF
+      await tester.runAsync(() async {
+        await controller.pickAndImportLlmModel();
+      });
+      await tester.pump();
+
+      // Verify custom model is displayed and loaded
+      expect(find.text('custom_imported.gguf'), findsOneWidget);
+      expect(find.text('LOADED'), findsOneWidget);
+
+      await tester.runAsync(() async {
+        if (await extDir.exists()) {
+          await extDir.delete(recursive: true);
+        }
+      });
+    });
+  });
+}

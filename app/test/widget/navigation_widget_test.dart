@@ -23,9 +23,8 @@ void main() {
   testWidgets(
     'MainScaffold renders navigation destinations and switches tabs',
     (WidgetTester tester) async {
-      tester.view.physicalSize = const Size(800, 2400);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
+      await tester.binding.setSurfaceSize(const Size(800, 2400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
 
       final dictionaryRepo = DictionaryRepository();
       final vocabularyRepo = VocabularyRepository();
@@ -36,22 +35,27 @@ void main() {
 
       await tester.runAsync(() async {
         await dictionaryRepo.lookupWord('resilient');
-        await tester.pumpWidget(
-          MaterialApp(
-            home: MainScaffold(
-              dictionaryRepo: dictionaryRepo,
-              vocabularyRepo: vocabularyRepo,
-              lessonRepo: lessonRepo,
-              audioService: audioService,
-              waveformService: waveformService,
-              aiService: aiService,
-            ),
-          ),
-        );
-        await Future.delayed(const Duration(milliseconds: 600));
+        await Future.delayed(const Duration(milliseconds: 100));
       });
 
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MainScaffold(
+            dictionaryRepo: dictionaryRepo,
+            vocabularyRepo: vocabularyRepo,
+            lessonRepo: lessonRepo,
+            audioService: audioService,
+            waveformService: waveformService,
+            aiService: aiService,
+          ),
+        ),
+      );
+
+      await tester.runAsync(() async {
+        await Future.delayed(const Duration(milliseconds: 300));
+      });
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
 
       // Verify Home screen loaded by checking app bar title
       expect(find.text('JLexa'), findsOneWidget);
@@ -61,6 +65,7 @@ void main() {
       // Tap on Dictionary bottom navigation bar item
       await tester.tap(find.byIcon(Icons.menu_book_outlined));
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       // Verify Dictionary screen is active
       expect(find.byType(DictionaryScreen), findsOneWidget);
@@ -68,9 +73,10 @@ void main() {
       // Tap on Study/Vocabulary bottom navigation bar item
       await tester.tap(find.byIcon(Icons.style_outlined));
       await tester.runAsync(() async {
-        await Future.delayed(const Duration(milliseconds: 400));
+        await Future.delayed(const Duration(milliseconds: 300));
       });
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
 
       // Verify Study screen is active
       expect(find.byType(VocabularyScreen), findsOneWidget);

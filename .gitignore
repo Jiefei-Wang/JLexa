@@ -42,6 +42,10 @@ app/coverage/
 # Android build outputs & local config
 app/android/.gradle/
 app/android/local.properties
+app/android/key.properties
+key.properties
+*.jks
+*.keystore
 app/android/app/.cxx/
 app/android/app/build/
 app/android/app/debug/
@@ -73,3 +77,5 @@ native/whisper.cpp/build/
 *.swp
 .DS_Store
 .history
+test_artifacts/
+*.part

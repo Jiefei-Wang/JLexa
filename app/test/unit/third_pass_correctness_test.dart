@@ -11,6 +11,7 @@ import 'package:jlexa/core/audio/audio_models.dart';
 import 'package:jlexa/core/audio/audio_service.dart';
 import 'package:jlexa/core/audio/lesson_repository.dart';
 import 'package:jlexa/core/audio/waveform_service.dart';
+import 'package:jlexa/core/database/app_database.dart';
 import 'package:jlexa/core/dictionary/dictionary_repository.dart';
 import 'package:jlexa/core/vocabulary/vocabulary_models.dart';
 import 'package:jlexa/core/vocabulary/vocabulary_repository.dart';
@@ -242,6 +243,14 @@ void main() {
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('jlexa_third_pass_');
     PathProviderPlatform.instance = FakePathProviderPlatform(tempDir.path);
+
+    final db = await AppDatabase.instance.database;
+    await db.delete('recent_searches');
+    await db.delete('vocabulary');
+    await db.delete('audio_segments');
+    await db.delete('audio_lessons');
+    await db.delete('chat_messages');
+    await db.delete('app_settings');
 
     lessonRepo = LessonRepository();
     audioService = AudioService();

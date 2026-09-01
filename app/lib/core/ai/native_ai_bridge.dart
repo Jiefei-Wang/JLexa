@@ -7,44 +7,9 @@ import 'package:uuid/uuid.dart';
 import '../audio/audio_models.dart';
 import 'ai_engine.dart';
 import 'ai_models.dart';
+import 'llama_request_coordinator.dart';
 import 'prompt_builder.dart';
 import 'speech_engine.dart';
-
-class _LlamaQueuedRequest {
-  final String requestId;
-  final String prompt;
-  final AiGenerationSettings? settings;
-  final int? seed;
-  final List<ChatMessagePayload>? chatMessages;
-  final AiRequestPriority priority;
-  final StreamController<String> controller;
-  final Completer<void> doneCompleter;
-  bool isCancelled = false;
-  bool hasStartedNatively = false;
-
-  _LlamaQueuedRequest({
-    required this.requestId,
-    required this.prompt,
-    this.settings,
-    this.seed,
-    this.chatMessages,
-    required this.priority,
-    required this.controller,
-    required this.doneCompleter,
-  });
-
-  void cancelBeforeStart() {
-    if (isCancelled || hasStartedNatively) return;
-    isCancelled = true;
-    if (!controller.isClosed) {
-      controller.addError(const AiCancelledException());
-      controller.close();
-    }
-    if (!doneCompleter.isCompleted) {
-      doneCompleter.complete();
-    }
-  }
-}
 
 class NativeLlamaEngine implements AiEngine {
   static const MethodChannel _channel = MethodChannel('com.jlexa.app/llama');
@@ -57,11 +22,14 @@ class NativeLlamaEngine implements AiEngine {
   String? _loadedModelPath;
   AiModelState _state = AiModelState.noModel;
 
-  _LlamaQueuedRequest? _activeRequest;
-  _LlamaQueuedRequest? _pendingRequest;
+  late final LlamaRequestCoordinator _coordinator;
   StreamSubscription? _streamSubscription;
 
   NativeLlamaEngine() {
+    _coordinator = LlamaRequestCoordinator(
+      onNativeStart: _startNativeGeneration,
+      onNativeCancel: _cancelNativeGeneration,
+    );
     _initStream();
   }
 
@@ -72,65 +40,40 @@ class NativeLlamaEngine implements AiEngine {
         if (event is Map) {
           final requestId = event['requestId'] as String?;
           final type = event['type'] as String?;
-          if (requestId != null && _activeRequest?.requestId == requestId) {
-            final active = _activeRequest!;
-            final controller = active.controller;
-            final completer = active.doneCompleter;
-
+          if (requestId != null) {
             if (type == 'token') {
               final text = event['text'] as String? ?? '';
-              if (!controller.isClosed) {
-                controller.add(text);
-              }
+              _coordinator.onToken(requestId, text);
             } else if (type == 'done') {
-              if (!controller.isClosed) {
-                controller.close();
-              }
-              if (!completer.isCompleted) {
-                completer.complete();
-              }
-              _onNativeTerminal(requestId);
+              _coordinator.onDone(requestId);
+              _updateState();
             } else if (type == 'cancelled') {
-              if (!controller.isClosed) {
-                controller.addError(const AiCancelledException());
-                controller.close();
-              }
-              if (!completer.isCompleted) {
-                completer.complete();
-              }
-              _onNativeTerminal(requestId);
+              _coordinator.onCancelled(requestId);
+              _updateState();
             } else if (type == 'error') {
               final msg = event['message'] as String? ?? 'Generation failed';
-              if (!controller.isClosed) {
-                controller.addError(AiGenerationException(msg));
-                controller.close();
-              }
-              if (!completer.isCompleted) {
-                completer.complete();
-              }
-              _onNativeTerminal(requestId);
+              _coordinator.onError(requestId, msg);
+              _updateState();
             }
           }
         }
       },
       onError: (dynamic error) {
-        if (_activeRequest != null) {
-          final active = _activeRequest!;
-          if (!active.controller.isClosed) {
-            active.controller.addError(
-              error is Exception
-                  ? error
-                  : AiGenerationException(error.toString()),
-            );
-            active.controller.close();
-          }
-          if (!active.doneCompleter.isCompleted) {
-            active.doneCompleter.complete();
-          }
-          _onNativeTerminal(active.requestId);
+        final activeId = _coordinator.activeRequest?.requestId;
+        if (activeId != null) {
+          _coordinator.onError(activeId, error.toString());
+          _updateState();
         }
       },
     );
+  }
+
+  void _updateState() {
+    if (_coordinator.activeRequest != null) {
+      _state = AiModelState.generating;
+    } else {
+      _state = _isLoaded ? AiModelState.ready : AiModelState.noModel;
+    }
   }
 
   @override
@@ -224,131 +167,53 @@ class NativeLlamaEngine implements AiEngine {
     }
 
     final requestId = _uuid.v4();
-    final controller = StreamController<String>();
-    final doneCompleter = Completer<void>();
-
-    final req = _LlamaQueuedRequest(
+    final handle = _coordinator.queueRequest(
       requestId: requestId,
       prompt: prompt,
       settings: settings,
       seed: seed,
       chatMessages: chatMessages,
       priority: priority,
-      controller: controller,
-      doneCompleter: doneCompleter,
     );
 
-    // If there is already a pending request, the newest request supersedes it
-    if (_pendingRequest != null) {
-      _pendingRequest!.cancelBeforeStart();
-      _pendingRequest = null;
-    }
-
-    if (_activeRequest == null) {
-      // Nothing running natively, start immediately
-      _startNativeGeneration(req);
-    } else {
-      // A request is currently running natively.
-      // Set new request as pending replacement and cancel the active request.
-      _pendingRequest = req;
-      cancelRequest(_activeRequest!.requestId);
-    }
-
-    return AiGenerationHandle(
-      requestId: requestId,
-      stream: controller.stream,
-      onCancel: () => _handleCancel(req),
-      done: doneCompleter.future,
-    );
+    _updateState();
+    return handle;
   }
 
-  Future<void> _handleCancel(_LlamaQueuedRequest req) async {
-    if (req == _pendingRequest) {
-      req.cancelBeforeStart();
-      _pendingRequest = null;
-    } else if (req == _activeRequest) {
-      await cancelRequest(req.requestId);
-    }
-  }
-
-  Future<void> _startNativeGeneration(_LlamaQueuedRequest req) async {
-    if (req.isCancelled) {
-      _onNativeTerminal(req.requestId);
-      return;
-    }
-
-    _activeRequest = req;
-    req.hasStartedNatively = true;
+  Future<void> _startNativeGeneration(LlamaQueuedRequest req) async {
     _state = AiModelState.generating;
-
-    try {
-      await _channel.invokeMethod('startGeneration', {
-        'requestId': req.requestId,
-        'prompt': req.prompt,
-        'temperature': req.settings?.temperature ?? 0.7,
-        'maxTokens': req.settings?.maxTokens ?? 512,
-        'topP': req.settings?.topP ?? 0.9,
-        'seed': req.seed ?? 0,
-        if (req.chatMessages != null && req.chatMessages!.isNotEmpty) ...{
-          'chatRoles': req.chatMessages!.map((m) => m.role).toList(),
-          'chatContents': req.chatMessages!.map((m) => m.content).toList(),
-        },
-      });
-    } catch (e) {
-      if (!req.controller.isClosed) {
-        req.controller.addError(
-          e is Exception ? e : AiGenerationException(e.toString()),
-        );
-        req.controller.close();
-      }
-      if (!req.doneCompleter.isCompleted) {
-        req.doneCompleter.complete();
-      }
-      _onNativeTerminal(req.requestId);
-    }
+    await _channel.invokeMethod('startGeneration', {
+      'requestId': req.requestId,
+      'prompt': req.prompt,
+      'temperature': req.settings?.temperature ?? 0.7,
+      'maxTokens': req.settings?.maxTokens ?? 512,
+      'topP': req.settings?.topP ?? 0.9,
+      'seed': req.seed ?? 0,
+      if (req.chatMessages != null && req.chatMessages!.isNotEmpty) ...{
+        'chatRoles': req.chatMessages!.map((m) => m.role).toList(),
+        'chatContents': req.chatMessages!.map((m) => m.content).toList(),
+      },
+    });
   }
 
-  void _onNativeTerminal(String requestId) {
-    if (_activeRequest?.requestId == requestId) {
-      _activeRequest = null;
-    }
-
-    // Check if there is a pending request waiting to start
-    while (_pendingRequest != null) {
-      final nextReq = _pendingRequest!;
-      _pendingRequest = null;
-      if (!nextReq.isCancelled) {
-        _startNativeGeneration(nextReq);
-        return;
-      }
-    }
-
-    _state = _isLoaded ? AiModelState.ready : AiModelState.noModel;
-  }
-
-  @override
-  Future<void> cancelRequest(String requestId) async {
-    if (!Platform.isAndroid) return;
-    if (_pendingRequest?.requestId == requestId) {
-      _pendingRequest!.cancelBeforeStart();
-      _pendingRequest = null;
-      return;
-    }
+  Future<void> _cancelNativeGeneration(String requestId) async {
     try {
       await _channel.invokeMethod('cancelGeneration', {'requestId': requestId});
     } catch (_) {}
   }
 
   @override
+  Future<void> cancelRequest(String requestId) async {
+    if (!Platform.isAndroid) return;
+    await _coordinator.cancelRequest(requestId);
+    _updateState();
+  }
+
+  @override
   Future<void> cancel() async {
     if (!Platform.isAndroid) return;
-    if (_pendingRequest != null) {
-      _pendingRequest!.cancelBeforeStart();
-      _pendingRequest = null;
-    }
-    if (_activeRequest != null) {
-      await cancelRequest(_activeRequest!.requestId);
-    }
+    await _coordinator.cancelAll();
+    _updateState();
   }
 
   @override
@@ -365,19 +230,7 @@ class NativeLlamaEngine implements AiEngine {
 
   void dispose() {
     _streamSubscription?.cancel();
-    if (_pendingRequest != null) {
-      _pendingRequest!.cancelBeforeStart();
-      _pendingRequest = null;
-    }
-    if (_activeRequest != null) {
-      if (!_activeRequest!.controller.isClosed) {
-        _activeRequest!.controller.close();
-      }
-      if (!_activeRequest!.doneCompleter.isCompleted) {
-        _activeRequest!.doneCompleter.complete();
-      }
-      _activeRequest = null;
-    }
+    _coordinator.dispose();
   }
 }
 
@@ -393,6 +246,10 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
 
   final Map<String, void Function(double)> _progressCallbacks = {};
   StreamSubscription? _streamSubscription;
+
+  String? _activeRequestId;
+  bool _isCancelling = false;
+  Completer<void>? _activeTranscriptionCompleter;
 
   NativeWhisperEngine() {
     _initStream();
@@ -464,7 +321,19 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
       );
     }
 
+    // If an earlier request is actively cancelling, wait for it to reach terminal before starting
+    if (_isCancelling && _activeTranscriptionCompleter != null) {
+      try {
+        await _activeTranscriptionCompleter!.future;
+      } catch (_) {}
+    }
+
     final reqId = requestId ?? _uuid.v4();
+    _activeRequestId = reqId;
+    _isCancelling = false;
+    final completer = Completer<void>();
+    _activeTranscriptionCompleter = completer;
+
     if (onProgress != null) {
       _progressCallbacks[reqId] = onProgress;
       onProgress(0.0);
@@ -491,8 +360,23 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
       }
 
       return [];
+    } on PlatformException catch (e) {
+      if (e.code == 'BUSY' || e.message?.contains('BUSY') == true) {
+        throw const AiBusyException(
+          'Whisper is busy finishing another transcription.',
+        );
+      }
+      rethrow;
     } finally {
       _progressCallbacks.remove(reqId);
+      if (!completer.isCompleted) {
+        completer.complete();
+      }
+      if (_activeRequestId == reqId) {
+        _activeRequestId = null;
+        _isCancelling = false;
+        _activeTranscriptionCompleter = null;
+      }
     }
   }
 
@@ -530,6 +414,9 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
   @override
   Future<void> cancelRequest(String requestId) async {
     if (!Platform.isAndroid) return;
+    if (_activeRequestId == requestId) {
+      _isCancelling = true;
+    }
     try {
       await _channel.invokeMethod('cancelTranscription', {
         'requestId': requestId,
@@ -540,6 +427,9 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
   @override
   Future<void> cancel() async {
     if (!Platform.isAndroid) return;
+    if (_activeRequestId != null) {
+      _isCancelling = true;
+    }
     try {
       await _channel.invokeMethod('cancelTranscription');
     } catch (_) {}

@@ -1,6 +1,15 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -41,12 +50,19 @@ android {
 
     signingConfigs {
         create("release") {
-            val keystoreFile = project.findProperty("RELEASE_STORE_FILE") as String?
-            if (keystoreFile != null && file(keystoreFile).exists()) {
-                storeFile = file(keystoreFile)
-                storePassword = project.findProperty("RELEASE_STORE_PASSWORD") as String?
-                keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String?
-                keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String?
+            val keyPath = keystoreProperties.getProperty("storeFile")
+                ?: (project.findProperty("RELEASE_STORE_FILE") as String?)
+            if (keyPath != null) {
+                val keyFile = if (file(keyPath).isAbsolute) file(keyPath) else rootProject.file(keyPath)
+                if (keyFile.exists()) {
+                    storeFile = keyFile
+                    storePassword = keystoreProperties.getProperty("storePassword")
+                        ?: (project.findProperty("RELEASE_STORE_PASSWORD") as String?)
+                    keyAlias = keystoreProperties.getProperty("keyAlias")
+                        ?: (project.findProperty("RELEASE_KEY_ALIAS") as String?)
+                    keyPassword = keystoreProperties.getProperty("keyPassword")
+                        ?: (project.findProperty("RELEASE_KEY_PASSWORD") as String?)
+                }
             }
         }
     }

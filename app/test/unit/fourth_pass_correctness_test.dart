@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jlexa/core/ai/ai_engine.dart';
 import 'package:jlexa/core/ai/ai_models.dart';
 import 'package:jlexa/core/ai/ai_service.dart';
+import 'package:jlexa/core/ai/llama_request_coordinator.dart';
 import 'package:jlexa/core/ai/prompt_builder.dart';
 import 'package:jlexa/core/ai/speech_engine.dart';
 import 'package:jlexa/core/audio/audio_models.dart';
@@ -202,6 +203,8 @@ class TestFourthPassSpeechEngine implements SpeechRecognitionEngine {
   String? _loadedModelPath = '/mock/whisper.bin';
   final List<String> cancelledRequests = [];
   bool cancelCalled = false;
+  bool throwBusy = false;
+  String? currentRequestId;
   Completer<List<AudioSegment>>? transcriptionCompleter;
 
   @override
@@ -230,6 +233,10 @@ class TestFourthPassSpeechEngine implements SpeechRecognitionEngine {
     if (!_isLoaded) {
       throw const AiModelNotLoadedException();
     }
+    if (throwBusy) {
+      throw const AiBusyException('Whisper is busy finishing another transcription.');
+    }
+    currentRequestId = requestId;
     onProgress?.call(0.5);
 
     if (transcriptionCompleter != null) {
@@ -259,25 +266,20 @@ class TestFourthPassSpeechEngine implements SpeechRecognitionEngine {
   @override
   Future<void> cancel() async {
     cancelCalled = true;
-    if (transcriptionCompleter != null &&
-        !transcriptionCompleter!.isCompleted) {
-      transcriptionCompleter!.complete([]);
-    }
   }
 
   @override
   Future<void> cancelRequest(String requestId) async {
     cancelledRequests.add(requestId);
-    cancelCalled = true;
-    if (transcriptionCompleter != null &&
-        !transcriptionCompleter!.isCompleted) {
-      transcriptionCompleter!.complete([]);
+    if (requestId == currentRequestId) {
+      cancelCalled = true;
     }
   }
 
   @override
   Future<void> unload() async {
     _isLoaded = false;
+    _loadedModelPath = null;
   }
 }
 
@@ -301,6 +303,14 @@ void main() {
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('jlexa_fourth_pass_');
     PathProviderPlatform.instance = FakePathProviderPlatform(tempDir.path);
+
+    final db = await AppDatabase.instance.database;
+    await db.delete('recent_searches');
+    await db.delete('vocabulary');
+    await db.delete('audio_segments');
+    await db.delete('audio_lessons');
+    await db.delete('chat_messages');
+    await db.delete('app_settings');
 
     lessonRepo = LessonRepository();
     dictionaryRepo = DictionaryRepository();
@@ -520,6 +530,7 @@ void main() {
 
         // Cancel transcription
         await controller.cancelTranscription();
+        completer.complete([]);
         await transcribeFuture;
 
         expect(controller.transcriptionState, equals(TranscriptionState.idle));
@@ -841,6 +852,619 @@ void main() {
           lastModified: 2000000,
         );
         expect(loaded2, isNull);
+      });
+    },
+  );
+
+  group('Sixth Correctness Pass: Sections 1 & 3 (LlamaRequestCoordinator Priority & Lifecycle)', () {
+    test('1. background A -> user B: cancels A, B does not start before A terminal, after A terminal B starts natively', () async {
+      final nativeStarts = <String>[];
+      final nativeCancels = <String>[];
+
+      final coordinator = LlamaRequestCoordinator(
+        onNativeStart: (req) async {
+          nativeStarts.add(req.requestId);
+        },
+        onNativeCancel: (reqId) async {
+          nativeCancels.add(reqId);
+        },
+      );
+
+      // Start background A
+      coordinator.queueRequest(
+        requestId: 'req_bg_A',
+        prompt: 'prompt A',
+        priority: AiRequestPriority.background,
+      );
+      expect(nativeStarts, equals(['req_bg_A']));
+      expect(coordinator.activeRequest?.requestId, equals('req_bg_A'));
+      expect(coordinator.pendingRequest, isNull);
+
+      // Incoming user B
+      coordinator.queueRequest(
+        requestId: 'req_user_B',
+        prompt: 'prompt B',
+        priority: AiRequestPriority.user,
+      );
+
+      // A was cancelled, B is pending but NOT yet started natively!
+      expect(nativeCancels, equals(['req_bg_A']));
+      expect(nativeStarts, equals(['req_bg_A'])); // B not started yet
+      expect(coordinator.pendingRequest?.requestId, equals('req_user_B'));
+
+      // Emit terminal event for A
+      coordinator.onDone('req_bg_A');
+
+      // Now B has started natively!
+      expect(nativeStarts, equals(['req_bg_A', 'req_user_B']));
+      expect(coordinator.activeRequest?.requestId, equals('req_user_B'));
+      expect(coordinator.pendingRequest, isNull);
+
+      coordinator.dispose();
+    });
+
+    test('2. user A -> background B: A is NOT cancelled, B queued as pending without interrupting A', () async {
+      final nativeStarts = <String>[];
+      final nativeCancels = <String>[];
+
+      final coordinator = LlamaRequestCoordinator(
+        onNativeStart: (req) async {
+          nativeStarts.add(req.requestId);
+        },
+        onNativeCancel: (reqId) async {
+          nativeCancels.add(reqId);
+        },
+      );
+
+      // Start user A
+      coordinator.queueRequest(
+        requestId: 'req_user_A',
+        prompt: 'prompt A',
+        priority: AiRequestPriority.user,
+      );
+      expect(nativeStarts, equals(['req_user_A']));
+
+      // Incoming background B
+      coordinator.queueRequest(
+        requestId: 'req_bg_B',
+        prompt: 'prompt B',
+        priority: AiRequestPriority.background,
+      );
+
+      // A must NOT be cancelled!
+      expect(nativeCancels.isEmpty, isTrue);
+      expect(coordinator.activeRequest?.requestId, equals('req_user_A'));
+      expect(coordinator.pendingRequest?.requestId, equals('req_bg_B'));
+
+      // Emit token on A
+      coordinator.onToken('req_user_A', 'token1');
+
+      // Terminal on A -> B starts
+      coordinator.onDone('req_user_A');
+      expect(nativeStarts, equals(['req_user_A', 'req_bg_B']));
+      expect(coordinator.activeRequest?.requestId, equals('req_bg_B'));
+
+      coordinator.dispose();
+    });
+
+    test('3. user A -> pending background B -> user C: B is cancelled before start, A cancelled for C, C starts after A terminal', () async {
+      final nativeStarts = <String>[];
+      final nativeCancels = <String>[];
+
+      final coordinator = LlamaRequestCoordinator(
+        onNativeStart: (req) async {
+          nativeStarts.add(req.requestId);
+        },
+        onNativeCancel: (reqId) async {
+          nativeCancels.add(reqId);
+        },
+      );
+
+      // User A starts
+      coordinator.queueRequest(
+        requestId: 'req_user_A',
+        prompt: 'prompt A',
+        priority: AiRequestPriority.user,
+      );
+
+      // Background B queued
+      final handleB = coordinator.queueRequest(
+        requestId: 'req_bg_B',
+        prompt: 'prompt B',
+        priority: AiRequestPriority.background,
+      );
+
+      // User C arrives
+      coordinator.queueRequest(
+        requestId: 'req_user_C',
+        prompt: 'prompt C',
+        priority: AiRequestPriority.user,
+      );
+
+      // B was cancelled before start and its done completed
+      expect(coordinator.pendingRequest?.requestId, equals('req_user_C'));
+      expect(nativeCancels, equals(['req_user_A']));
+
+      // B's stream received cancellation error
+      expect(handleB.done, completes);
+
+      // Terminal on A -> C starts (B was skipped)
+      coordinator.onDone('req_user_A');
+      expect(nativeStarts, equals(['req_user_A', 'req_user_C']));
+
+      coordinator.dispose();
+    });
+
+    test('4. background A -> pending user B -> background C: C does NOT replace B, B starts after A terminal', () async {
+      final nativeStarts = <String>[];
+      final nativeCancels = <String>[];
+
+      final coordinator = LlamaRequestCoordinator(
+        onNativeStart: (req) async {
+          nativeStarts.add(req.requestId);
+        },
+        onNativeCancel: (reqId) async {
+          nativeCancels.add(reqId);
+        },
+      );
+
+      // Background A starts
+      coordinator.queueRequest(
+        requestId: 'req_bg_A',
+        prompt: 'prompt A',
+        priority: AiRequestPriority.background,
+      );
+
+      // User B arrives -> cancels A, B pending
+      coordinator.queueRequest(
+        requestId: 'req_user_B',
+        prompt: 'prompt B',
+        priority: AiRequestPriority.user,
+      );
+      expect(coordinator.pendingRequest?.requestId, equals('req_user_B'));
+
+      // Background C arrives -> MUST NOT displace user B
+      coordinator.queueRequest(
+        requestId: 'req_bg_C',
+        prompt: 'prompt C',
+        priority: AiRequestPriority.background,
+      );
+
+      // B remains pending
+      expect(coordinator.pendingRequest?.requestId, equals('req_user_B'));
+
+      // A terminal -> B starts
+      coordinator.onDone('req_bg_A');
+      expect(nativeStarts, equals(['req_bg_A', 'req_user_B']));
+
+      coordinator.dispose();
+    });
+
+    test('5. background A -> background B -> background C: B superseded before start, only C starts after A terminal', () async {
+      final nativeStarts = <String>[];
+      final nativeCancels = <String>[];
+
+      final coordinator = LlamaRequestCoordinator(
+        onNativeStart: (req) async {
+          nativeStarts.add(req.requestId);
+        },
+        onNativeCancel: (reqId) async {
+          nativeCancels.add(reqId);
+        },
+      );
+
+      // Background A starts
+      coordinator.queueRequest(
+        requestId: 'req_bg_A',
+        prompt: 'prompt A',
+        priority: AiRequestPriority.background,
+      );
+
+      // Background B arrives
+      final handleB = coordinator.queueRequest(
+        requestId: 'req_bg_B',
+        prompt: 'prompt B',
+        priority: AiRequestPriority.background,
+      );
+      expect(coordinator.pendingRequest?.requestId, equals('req_bg_B'));
+
+      // Background C arrives
+      coordinator.queueRequest(
+        requestId: 'req_bg_C',
+        prompt: 'prompt C',
+        priority: AiRequestPriority.background,
+      );
+      expect(coordinator.pendingRequest?.requestId, equals('req_bg_C'));
+
+      // B was cancelled before start
+      expect(handleB.done, completes);
+
+      // A terminal -> C starts
+      coordinator.onDone('req_bg_A');
+      expect(nativeStarts, equals(['req_bg_A', 'req_bg_C']));
+
+      coordinator.dispose();
+    });
+
+    test('6. pending request cancelled before native start: never calls onNativeStart, done completes immediately', () async {
+      final nativeStarts = <String>[];
+      final nativeCancels = <String>[];
+
+      final coordinator = LlamaRequestCoordinator(
+        onNativeStart: (req) async {
+          nativeStarts.add(req.requestId);
+        },
+        onNativeCancel: (reqId) async {
+          nativeCancels.add(reqId);
+        },
+      );
+
+      coordinator.queueRequest(
+        requestId: 'req_user_1',
+        prompt: 'prompt 1',
+        priority: AiRequestPriority.user,
+      );
+
+      final handle2 = coordinator.queueRequest(
+        requestId: 'req_bg_2',
+        prompt: 'prompt 2',
+        priority: AiRequestPriority.background,
+      );
+
+      // Cancel handle2 before it ever starts
+      await handle2.cancel();
+      expect(handle2.done, completes);
+
+      // Terminal on req_user_1
+      coordinator.onDone('req_user_1');
+
+      // req_bg_2 was NOT started natively
+      expect(nativeStarts, equals(['req_user_1']));
+      expect(coordinator.activeRequest, isNull);
+
+      coordinator.dispose();
+    });
+
+    test('7. cancel acknowledgement alone does not complete active request.done until native terminal', () async {
+      final coordinator = LlamaRequestCoordinator(
+        onNativeStart: (req) async {},
+        onNativeCancel: (reqId) async {},
+      );
+
+      final handle = coordinator.queueRequest(
+        requestId: 'req_active',
+        prompt: 'prompt',
+        priority: AiRequestPriority.user,
+      );
+
+      // Cancel request
+      final cancelFuture = coordinator.cancelRequest('req_active');
+      await cancelFuture;
+
+      // Cancel is acknowledged, but done is NOT completed yet until native terminal!
+      bool isDone = false;
+      handle.done.then((_) => isDone = true);
+      await Future.delayed(const Duration(milliseconds: 20));
+      expect(isDone, isFalse);
+
+      // Emit native cancellation terminal
+      coordinator.onCancelled('req_active');
+      await Future.delayed(const Duration(milliseconds: 20));
+      expect(isDone, isTrue);
+
+      coordinator.dispose();
+    });
+  });
+
+  group('Sixth Correctness Pass: Sections 4, 5, 6, 7, 8 (Awaitable Lesson Deletion & Transcription Lifecycle)', () {
+    test('Active lesson deletion awaits delayed Whisper transcription terminal before deleting file & DB', () async {
+      final audioFile = File('${tempDir.path}/del_delay_test.wav');
+      await audioFile.writeAsBytes(createDummyWavBytes(durationMs: 4000));
+
+      final lesson = AudioLesson(
+        id: 'lesson_del_delayed',
+        title: 'Delayed Lesson',
+        originalFileName: 'del_delay_test.wav',
+        localPath: audioFile.path,
+        durationMs: 4000,
+        currentPositionMs: 0,
+        createdAt: DateTime.now(),
+        lastOpenedAt: DateTime.now(),
+      );
+
+      await lessonRepo.saveLesson(lesson);
+
+      final delayedSpeech = TestFourthPassSpeechEngine();
+      final transCompleter = Completer<List<AudioSegment>>();
+      delayedSpeech.transcriptionCompleter = transCompleter;
+
+      final testAi = AiService(llm: mockAiEngine, speech: delayedSpeech);
+
+      final controller = RepeaterController(
+        lessonRepo: lessonRepo,
+        audioService: audioService,
+        waveformService: waveformService,
+        aiService: testAi,
+      );
+
+      await controller.loadLesson(lesson);
+
+      // Start transcription
+      final transFuture = controller.transcribeLesson();
+      expect(controller.isTranscribing, isTrue);
+
+      // Trigger deletion preparation
+      bool prepDone = false;
+      final prepFuture = controller
+          .prepareLessonDeletion('lesson_del_delayed')
+          .then((_) => prepDone = true);
+
+      await Future.delayed(const Duration(milliseconds: 30));
+      // Before transcription completes, preparation is still waiting!
+      expect(prepDone, isFalse);
+      expect(await audioFile.exists(), isTrue);
+
+      // Now complete delayed transcription
+      transCompleter.complete([]);
+      await transFuture;
+      await prepFuture;
+      expect(prepDone, isTrue);
+
+      // Now delete from repository
+      await lessonRepo.deleteLesson('lesson_del_delayed');
+
+      // Verify deletion from DB and file
+      final checkDb = await lessonRepo.getLesson('lesson_del_delayed');
+      expect(checkDb, isNull);
+      expect(await audioFile.exists(), isFalse);
+
+      controller.dispose();
+    });
+
+    test('Deleting background-transcribing lesson A while lesson B is active leaves lesson B untouched', () async {
+      final fileA = File('${tempDir.path}/del_a.wav');
+      await fileA.writeAsBytes(createDummyWavBytes(durationMs: 3000));
+      final fileB = File('${tempDir.path}/del_b.wav');
+      await fileB.writeAsBytes(createDummyWavBytes(durationMs: 3000));
+
+      final lessonA = AudioLesson(
+        id: 'lesson_bg_del_A',
+        title: 'Lesson A',
+        originalFileName: 'del_a.wav',
+        localPath: fileA.path,
+        durationMs: 3000,
+        currentPositionMs: 0,
+        createdAt: DateTime.now(),
+        lastOpenedAt: DateTime.now(),
+      );
+      final lessonB = AudioLesson(
+        id: 'lesson_active_B',
+        title: 'Lesson B',
+        originalFileName: 'del_b.wav',
+        localPath: fileB.path,
+        durationMs: 3000,
+        currentPositionMs: 1200,
+        createdAt: DateTime.now(),
+        lastOpenedAt: DateTime.now(),
+      );
+
+      await lessonRepo.saveLesson(lessonA);
+      await lessonRepo.saveLesson(lessonB);
+
+      final delayedSpeech = TestFourthPassSpeechEngine();
+      final transCompleterA = Completer<List<AudioSegment>>();
+      delayedSpeech.transcriptionCompleter = transCompleterA;
+
+      final testAi = AiService(llm: mockAiEngine, speech: delayedSpeech);
+
+      final controller = RepeaterController(
+        lessonRepo: lessonRepo,
+        audioService: audioService,
+        waveformService: waveformService,
+        aiService: testAi,
+      );
+
+      // Load A, start transcription
+      await controller.loadLesson(lessonA);
+      final transAFuture = controller.transcribeLesson();
+
+      // Switch to B
+      await controller.loadLesson(lessonB);
+      expect(controller.lesson?.id, equals('lesson_active_B'));
+      expect(audioService.currentLesson?.id, equals('lesson_active_B'));
+
+      // Delete A while B is active
+      final prepA = controller.prepareLessonDeletion('lesson_bg_del_A');
+      transCompleterA.complete([]);
+      await transAFuture;
+      await prepA;
+
+      await lessonRepo.deleteLesson('lesson_bg_del_A');
+
+      // Verify: A is deleted, but B is completely unaffected!
+      final dbA = await lessonRepo.getLesson('lesson_bg_del_A');
+      expect(dbA, isNull);
+      expect(await fileA.exists(), isFalse);
+
+      expect(controller.lesson?.id, equals('lesson_active_B'));
+      expect(audioService.currentLesson?.id, equals('lesson_active_B'));
+      expect(await fileB.exists(), isTrue);
+
+      controller.dispose();
+    });
+  });
+
+  group('Sixth Correctness Pass: Sections 9 & 10 (Whisper BUSY Handling)', () {
+    test('Whisper BUSY error does NOT mark lesson failed in database and displays retry message', () async {
+      final busySpeech = TestFourthPassSpeechEngine();
+      final testAi = AiService(llm: mockAiEngine, speech: busySpeech);
+
+      final lesson = AudioLesson(
+        id: 'lesson_busy_test',
+        title: 'Busy Lesson',
+        originalFileName: 'busy.wav',
+        localPath: '${tempDir.path}/test_sample.wav',
+        durationMs: 3000,
+        currentPositionMs: 0,
+        createdAt: DateTime.now(),
+        lastOpenedAt: DateTime.now(),
+      );
+      await lessonRepo.saveLesson(lesson);
+
+      final controller = RepeaterController(
+        lessonRepo: lessonRepo,
+        audioService: audioService,
+        waveformService: waveformService,
+        aiService: testAi,
+      );
+
+      await controller.loadLesson(lesson);
+
+      // Simulate Whisper engine returning BUSY
+      busySpeech.throwBusy = true;
+      await controller.transcribeLesson();
+
+      // Status in DB must NOT be failed! It must remain none.
+      final updatedLesson = await lessonRepo.getLesson('lesson_busy_test');
+      expect(updatedLesson?.transcriptStatus, equals(TranscriptStatus.none));
+      expect(controller.transcriptionError, contains('busy'));
+
+      controller.dispose();
+    });
+
+    test('Late Whisper cancelRequest with stale requestId does not cancel active transcription with different requestId', () async {
+      final speech = TestFourthPassSpeechEngine();
+
+      // Request A starts and finishes
+      final resA = await speech.transcribeAudio(
+        audioPath: '${tempDir.path}/test_sample.wav',
+        lessonId: 'lesson_A',
+        requestId: 'req_A',
+      );
+      expect(resA.isNotEmpty, isTrue);
+
+      // Request B starts
+      final completerB = Completer<List<AudioSegment>>();
+      speech.transcriptionCompleter = completerB;
+      speech.cancelCalled = false;
+
+      final transBFuture = speech.transcribeAudio(
+        audioPath: '${tempDir.path}/test_sample.wav',
+        lessonId: 'lesson_B',
+        requestId: 'req_B',
+      );
+
+      // Late cancel for request A arrives
+      await speech.cancelRequest('req_A');
+
+      // Request B is still alive!
+      completerB.complete([
+        AudioSegment(
+          id: 'seg_B',
+          lessonId: 'lesson_B',
+          startMs: 0,
+          endMs: 1000,
+          text: 'Text B',
+        ),
+      ]);
+
+      final resB = await transBFuture;
+      expect(resB.first.id, equals('seg_B'));
+    });
+  });
+
+  group(
+    'Sixth Correctness Pass: Section 2 (Real-World LLM Cross-Feature Priority)',
+    () {
+      test('Repeater background explanation does NOT cancel active user Chat generation', () async {
+        final nativeStarts = <String>[];
+        final nativeCancels = <String>[];
+        late final LlamaRequestCoordinator coordinator;
+
+        coordinator = LlamaRequestCoordinator(
+          onNativeStart: (req) async {
+            nativeStarts.add(req.requestId);
+          },
+          onNativeCancel: (reqId) async {
+            nativeCancels.add(reqId);
+          },
+        );
+
+        // 1. User starts Chat generation
+        coordinator.queueRequest(
+          requestId: 'chat_user_req',
+          prompt: 'User Chat Question',
+          priority: AiRequestPriority.user,
+        );
+
+        expect(nativeStarts, equals(['chat_user_req']));
+        expect(coordinator.activeRequest?.requestId, equals('chat_user_req'));
+
+        // 2. Repeater audio advances into another sentence -> requests background explanation
+        coordinator.queueRequest(
+          requestId: 'repeater_bg_req',
+          prompt: 'Explain sentence',
+          priority: AiRequestPriority.background,
+        );
+
+        // CRITICAL: Chat request is NOT cancelled!
+        expect(nativeCancels.contains('chat_user_req'), isFalse);
+        expect(coordinator.activeRequest?.requestId, equals('chat_user_req'));
+        expect(
+          coordinator.pendingRequest?.requestId,
+          equals('repeater_bg_req'),
+        );
+
+        // Chat stream receives tokens normally
+        coordinator.onToken('chat_user_req', 'Hello ');
+        coordinator.onToken('chat_user_req', 'user!');
+
+        // 3. When Chat finishes, background Repeater work may proceed
+        coordinator.onDone('chat_user_req');
+        expect(nativeStarts, equals(['chat_user_req', 'repeater_bg_req']));
+        expect(coordinator.activeRequest?.requestId, equals('repeater_bg_req'));
+
+        coordinator.dispose();
+      });
+
+      test('Repeater background explanation does NOT cancel active user Dictionary generation', () async {
+        final nativeStarts = <String>[];
+        final nativeCancels = <String>[];
+
+        final coordinator = LlamaRequestCoordinator(
+          onNativeStart: (req) async {
+            nativeStarts.add(req.requestId);
+          },
+          onNativeCancel: (reqId) async {
+            nativeCancels.add(reqId);
+          },
+        );
+
+        // 1. User searches in Dictionary -> triggers USER priority generation
+        coordinator.queueRequest(
+          requestId: 'dict_user_req',
+          prompt: 'Define word',
+          priority: AiRequestPriority.user,
+        );
+
+        expect(nativeStarts, equals(['dict_user_req']));
+
+        // 2. Repeater requests background explanation
+        coordinator.queueRequest(
+          requestId: 'repeater_bg_req_2',
+          prompt: 'Explain sentence 2',
+          priority: AiRequestPriority.background,
+        );
+
+        // Dict request is NOT cancelled!
+        expect(nativeCancels.contains('dict_user_req'), isFalse);
+        expect(coordinator.activeRequest?.requestId, equals('dict_user_req'));
+
+        // Dict completes -> background explanation starts
+        coordinator.onDone('dict_user_req');
+        expect(nativeStarts, equals(['dict_user_req', 'repeater_bg_req_2']));
+
+        coordinator.dispose();
       });
     },
   );

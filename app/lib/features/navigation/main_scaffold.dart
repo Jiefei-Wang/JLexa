@@ -46,6 +46,8 @@ class MainScaffold extends StatefulWidget {
 
 class MainScaffoldState extends State<MainScaffold> {
   final GlobalKey<HomeScreenState> _homeKey = GlobalKey<HomeScreenState>();
+  final GlobalKey<RepeaterScreenState> _repeaterKey =
+      GlobalKey<RepeaterScreenState>();
   int _currentIndex = 0;
   String? _targetDictionaryWord;
   AudioLesson? _activeLesson;
@@ -59,14 +61,11 @@ class MainScaffoldState extends State<MainScaffold> {
     }
   }
 
-  void handleLessonDeleted(String lessonId) {
-    if (_activeLesson?.id == lessonId ||
-        widget.audioService.currentLesson?.id == lessonId) {
-      widget.audioService.clearLesson();
+  Future<void> handleLessonDeleted(String lessonId) async {
+    await _repeaterKey.currentState?.prepareLessonDeletion(lessonId);
+    if (_activeLesson?.id == lessonId) {
       setState(() {
-        if (_activeLesson?.id == lessonId) {
-          _activeLesson = null;
-        }
+        _activeLesson = null;
       });
     }
   }
@@ -224,6 +223,7 @@ class MainScaffoldState extends State<MainScaffold> {
             initialWord: _targetDictionaryWord,
           ),
           RepeaterScreen(
+            key: _repeaterKey,
             lessonRepo: widget.lessonRepo,
             audioService: widget.audioService,
             waveformService: widget.waveformService,

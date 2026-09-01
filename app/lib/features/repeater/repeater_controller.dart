@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/ai/ai_models.dart';
@@ -38,6 +39,7 @@ class RepeaterController extends ChangeNotifier {
   int _transcriptionGeneration = 0;
   String? _activeTranscriptionRequestId;
   String? _transcribingLessonId;
+  Completer<void>? _transcriptionCompleter;
 
   int _loadGeneration = 0;
   String? _activeSegmentId;
@@ -58,6 +60,8 @@ class RepeaterController extends ChangeNotifier {
   bool get isAiGenerating => _isAiGenerating;
   bool get isLoading => _isLoading;
   bool get isWaveformLoading => _isWaveformLoading;
+  bool get isWhisperBusyElsewhere =>
+      _transcribingLessonId != null && _transcribingLessonId != _lesson?.id;
   TranscriptionState get transcriptionState =>
       (_lesson?.id == _transcribingLessonId)
       ? _transcriptionState
@@ -67,8 +71,7 @@ class RepeaterController extends ChangeNotifier {
       _transcriptionState == TranscriptionState.transcribing;
   double get transcriptionProgress =>
       (_lesson?.id == _transcribingLessonId) ? _transcriptionProgress : 0.0;
-  String? get transcriptionError =>
-      (_lesson?.id == _transcribingLessonId) ? _transcriptionError : null;
+  String? get transcriptionError => _transcriptionError;
   String? get audioLoadError => _audioLoadError;
   bool get hasAudioLoadError => _audioLoadError != null;
 
@@ -269,7 +272,13 @@ class RepeaterController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    if (_transcriptionState != TranscriptionState.idle) return;
+    if (_transcriptionState != TranscriptionState.idle) {
+      if (isWhisperBusyElsewhere) {
+        _transcriptionError = 'Whisper is busy transcribing another lesson.';
+        notifyListeners();
+      }
+      return;
+    }
 
     // Capture immutable operation identity
     final targetLesson = _lesson!;
@@ -279,6 +288,8 @@ class RepeaterController extends ChangeNotifier {
     final reqId = const Uuid().v4();
     _activeTranscriptionRequestId = reqId;
     _transcribingLessonId = targetLessonId;
+    final completer = Completer<void>();
+    _transcriptionCompleter = completer;
 
     _transcriptionState = TranscriptionState.transcribing;
     _transcriptionProgress = 0.0;
@@ -341,6 +352,26 @@ class RepeaterController extends ChangeNotifier {
           _lesson = _lesson!.copyWith(transcriptStatus: TranscriptStatus.none);
           _transcriptionError = null;
         }
+      } else if (e is PlatformException &&
+              (e.code.toLowerCase() == 'busy' ||
+                  e.message?.toLowerCase().contains('busy') == true) ||
+          e is AiBusyException ||
+          e.toString().toLowerCase().contains('busy')) {
+        // BUSY is a retryable temporary state, NOT a transcription failure!
+        try {
+          await lessonRepo.updateTranscriptStatus(
+            targetLessonId,
+            TranscriptStatus.none,
+          );
+        } catch (_) {}
+        if (operationId == _transcriptionGeneration) {
+          _transcriptionError = 'Whisper is busy finishing another transcription. Please try again.';
+          if (_lesson?.id == targetLessonId) {
+            _lesson = _lesson!.copyWith(
+              transcriptStatus: TranscriptStatus.none,
+            );
+          }
+        }
       } else {
         if (operationId == _transcriptionGeneration) {
           _transcriptionError = e.toString();
@@ -353,6 +384,12 @@ class RepeaterController extends ChangeNotifier {
         } catch (_) {}
       }
     } finally {
+      if (!completer.isCompleted) {
+        completer.complete();
+      }
+      if (_transcriptionCompleter == completer) {
+        _transcriptionCompleter = null;
+      }
       if (operationId == _transcriptionGeneration) {
         _activeTranscriptionRequestId = null;
         _transcribingLessonId = null;
@@ -375,6 +412,35 @@ class RepeaterController extends ChangeNotifier {
         await aiService.speechEngine.cancel();
       }
     } catch (_) {}
+  }
+
+  Future<void> prepareLessonDeletion(String lessonId) async {
+    // 1. If this lesson is currently transcribing, cancel and await transcription terminal completion
+    if (_transcribingLessonId == lessonId) {
+      final reqId = _activeTranscriptionRequestId;
+      _transcriptionState = TranscriptionState.cancelling;
+      notifyListeners();
+      if (reqId != null) {
+        try {
+          await aiService.speechEngine.cancelRequest(reqId);
+        } catch (_) {}
+      } else {
+        try {
+          await aiService.speechEngine.cancel();
+        } catch (_) {}
+      }
+      final comp = _transcriptionCompleter;
+      if (comp != null && !comp.isCompleted) {
+        try {
+          await comp.future;
+        } catch (_) {}
+      }
+    }
+
+    // 2. If this lesson is currently active in Repeater/AudioService, clean it up
+    if (_lesson?.id == lessonId) {
+      await clearLesson();
+    }
   }
 
   void toggleSnapToSpeech() {

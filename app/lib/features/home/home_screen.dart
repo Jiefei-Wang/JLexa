@@ -17,7 +17,7 @@ class HomeScreen extends StatefulWidget {
   final AiService aiService;
   final ValueChanged<String> onOpenDictionary;
   final ValueChanged<AudioLesson> onOpenLesson;
-  final ValueChanged<String>? onDeleteLesson;
+  final Future<void> Function(String lessonId)? onDeleteLesson;
   final VoidCallback onOpenSettings;
   final VoidCallback onOpenAiChat;
   final VoidCallback onOpenVocabulary;
@@ -277,7 +277,9 @@ class HomeScreenState extends State<HomeScreen> {
                         onTap: () => widget.onOpenLesson(lesson),
                         onDelete: () async {
                           final id = lesson.id;
-                          widget.onDeleteLesson?.call(id);
+                          if (widget.onDeleteLesson != null) {
+                            await widget.onDeleteLesson!(id);
+                          }
                           await _controller.deleteLesson(id);
                         },
                       ),

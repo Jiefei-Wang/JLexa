@@ -48,6 +48,7 @@ void main() {
       text: 'Second segment',
     );
 
+    await lessonRepo.deleteLesson('bounds_test_lesson');
     await lessonRepo.saveLesson(lesson);
     await lessonRepo.saveSegments('bounds_test_lesson', [seg1, seg2]);
 
@@ -60,7 +61,9 @@ void main() {
     );
 
     // Wait for initial load
-    await Future.delayed(const Duration(milliseconds: 200));
+    while (controller.isLoading) {
+      await Future.delayed(const Duration(milliseconds: 10));
+    }
 
     // Try to update seg1 to invalid bounds past duration or too short
     await controller.updateSegmentBounds(

@@ -22,9 +22,8 @@ void main() {
   testWidgets(
     'RepeaterScreen renders total progress, waveform, controls, and transcript',
     (WidgetTester tester) async {
-      tester.view.physicalSize = const Size(800, 2400);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
+      await tester.binding.setSurfaceSize(const Size(800, 2400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
 
       final dictionaryRepo = DictionaryRepository();
       final vocabularyRepo = VocabularyRepository();
@@ -55,33 +54,36 @@ void main() {
       await tester.runAsync(() async {
         await lessonRepo.saveLesson(testLesson);
         await lessonRepo.saveSegments('test_lesson_1', [testSegment]);
-        await tester.pumpWidget(
-          MaterialApp(
-            home: RepeaterScreen(
-              lessonRepo: lessonRepo,
-              audioService: audioService,
-              waveformService: waveformService,
-              aiService: aiService,
-              dictionaryRepo: dictionaryRepo,
-              vocabularyRepo: vocabularyRepo,
-              activeLesson: testLesson,
-              onOpenAiChat: ({
-                required String lessonTitle,
-                required String sentenceText,
-                String? prevSentence,
-                String? nextSentence,
-                int startMs = 0,
-                int endMs = 0,
-                List<String> uncertainWords = const [],
-              }) {},
-              onImportAudio: () {},
-            ),
-          ),
-        );
-        await Future.delayed(const Duration(milliseconds: 600));
       });
 
-      await tester.pump();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RepeaterScreen(
+            lessonRepo: lessonRepo,
+            audioService: audioService,
+            waveformService: waveformService,
+            aiService: aiService,
+            dictionaryRepo: dictionaryRepo,
+            vocabularyRepo: vocabularyRepo,
+            activeLesson: testLesson,
+            onOpenAiChat: ({
+              required String lessonTitle,
+              required String sentenceText,
+              String? prevSentence,
+              String? nextSentence,
+              int startMs = 0,
+              int endMs = 0,
+              List<String> uncertainWords = const [],
+            }) {},
+            onImportAudio: () {},
+          ),
+        ),
+      );
+
+      await tester.runAsync(() async {
+        await Future.delayed(const Duration(milliseconds: 600));
+      });
+      await tester.pumpAndSettle();
 
       // Verify key Repeater UI components
       expect(find.text('Total Progress'), findsOneWidget);

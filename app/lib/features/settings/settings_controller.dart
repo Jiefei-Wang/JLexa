@@ -1,214 +1,192 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 
 import '../../core/ai/ai_models.dart';
 import '../../core/ai/ai_service.dart';
+import '../../core/ai/model_catalog.dart';
+import '../../core/ai/model_downloader.dart';
+import '../../core/ai/model_file_picker.dart';
+import '../../core/ai/model_manager.dart';
+import '../../core/ai/model_storage.dart';
 
 class SettingsController extends ChangeNotifier {
   final AiService aiService;
+  final ModelManager modelManager;
+  final ModelFilePicker filePicker;
 
-  ModelInfo? _llmInfo;
-  ModelInfo? _speechInfo;
-  bool _isLoading = false;
+  bool _isProcessing = false;
   String? _errorMessage;
+  bool _isDisposed = false;
 
-  ModelInfo? get llmInfo => _llmInfo;
-  ModelInfo? get speechInfo => _speechInfo;
-  bool get isLoading => _isLoading;
+  bool get isLoading => _isProcessing || !modelManager.isInitialized;
   String? get errorMessage => _errorMessage;
 
-  SettingsController({required this.aiService}) {
-    aiService.addListener(_refreshModelInfo);
-    _refreshModelInfo();
+  List<ManagedModelItem> get llmModels => modelManager.llmModels;
+  List<ManagedModelItem> get whisperModels => modelManager.whisperModels;
+
+  @override
+  void notifyListeners() {
+    if (!_isDisposed) {
+      super.notifyListeners();
+    }
   }
 
-  void _refreshModelInfo() {
-    final llmPath =
+  SettingsController({
+    required this.aiService,
+    ModelManager? manager,
+    ModelFilePicker? picker,
+  }) : modelManager =
+           manager ??
+           ModelManager(
+             storage: ModelStorage(),
+             downloader: DioModelDownloader(),
+             aiService: aiService,
+           ),
+       filePicker = picker ?? PlatformModelFilePicker() {
+    modelManager.addListener(_onModelManagerChanged);
+  }
+
+  void _onModelManagerChanged() {
+    notifyListeners();
+  }
+
+  void clearError() {
+    _errorMessage = null;
+    notifyListeners();
+  }
+
+  Future<void> downloadModel(DownloadableModel model) async {
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      await modelManager.downloadModel(model);
+    } catch (e) {
+      _errorMessage = 'Download failed: $e';
+      notifyListeners();
+    }
+  }
+
+  void cancelDownload(String modelId) {
+    modelManager.cancelDownload(modelId);
+    notifyListeners();
+  }
+
+  Future<void> loadModel(ManagedModelItem item) async {
+    _errorMessage = null;
+    _isProcessing = true;
+    notifyListeners();
+    try {
+      await modelManager.loadModel(item);
+    } catch (e) {
+      _errorMessage = 'Failed to load model "${item.displayName}": $e';
+    } finally {
+      _isProcessing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> unloadModel(ManagedModelItem item) async {
+    _errorMessage = null;
+    _isProcessing = true;
+    notifyListeners();
+    try {
+      await modelManager.unloadModel(item);
+    } catch (e) {
+      _errorMessage = 'Failed to unload model: $e';
+    } finally {
+      _isProcessing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteModel(ManagedModelItem item) async {
+    _errorMessage = null;
+    _isProcessing = true;
+    notifyListeners();
+    try {
+      await modelManager.deleteModel(item);
+    } catch (e) {
+      _errorMessage = 'Failed to delete model: $e';
+    } finally {
+      _isProcessing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> pickAndImportLlmModel() async {
+    _errorMessage = null;
+    try {
+      final pickedPath = await filePicker.pickLlmModel();
+      if (pickedPath == null) return;
+
+      _isProcessing = true;
+      notifyListeners();
+
+      await modelManager.importLocalModel(pickedPath, ModelType.llm);
+    } catch (e) {
+      _errorMessage = '$e';
+    } finally {
+      _isProcessing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> pickAndImportSpeechModel() async {
+    _errorMessage = null;
+    try {
+      final pickedPath = await filePicker.pickSpeechModel();
+      if (pickedPath == null) return;
+
+      _isProcessing = true;
+      notifyListeners();
+
+      await modelManager.importLocalModel(pickedPath, ModelType.whisper);
+    } catch (e) {
+      _errorMessage = '$e';
+    } finally {
+      _isProcessing = false;
+      notifyListeners();
+    }
+  }
+
+  // Backward compatibility getters
+  ModelInfo? get llmInfo {
+    final loadedPath =
         aiService.llmEngine.loadedModelPath ?? aiService.configuredLlmPath;
-    if (llmPath != null && llmPath.isNotEmpty) {
-      final file = File(llmPath);
-      final size = file.existsSync() ? file.lengthSync() : 0;
-      _llmInfo = ModelInfo(
-        path: llmPath,
-        name: llmPath.split(Platform.pathSeparator).last,
-        fileSizeBytes: size,
+    if (loadedPath != null && loadedPath.isNotEmpty) {
+      final file = File(loadedPath);
+      return ModelInfo(
+        path: loadedPath,
+        name: p.basename(loadedPath),
+        fileSizeBytes: file.existsSync() ? file.lengthSync() : 0,
         isLoaded: aiService.llmEngine.isLoaded,
       );
-    } else {
-      _llmInfo = null;
     }
+    return null;
+  }
 
-    final speechPath =
+  ModelInfo? get speechInfo {
+    final loadedPath =
         aiService.speechEngine.loadedModelPath ??
         aiService.configuredSpeechPath;
-    if (speechPath != null && speechPath.isNotEmpty) {
-      final file = File(speechPath);
-      final size = file.existsSync() ? file.lengthSync() : 0;
-      _speechInfo = ModelInfo(
-        path: speechPath,
-        name: speechPath.split(Platform.pathSeparator).last,
-        fileSizeBytes: size,
+    if (loadedPath != null && loadedPath.isNotEmpty) {
+      final file = File(loadedPath);
+      return ModelInfo(
+        path: loadedPath,
+        name: p.basename(loadedPath),
+        fileSizeBytes: file.existsSync() ? file.lengthSync() : 0,
         isLoaded: aiService.speechEngine.isLoaded,
       );
-    } else {
-      _speechInfo = null;
     }
-
-    notifyListeners();
-  }
-
-  Future<String> _copyToAppStorage(String sourcePath, String subDir) async {
-    final sourceFile = File(sourcePath);
-    final appSupport = await getApplicationSupportDirectory();
-    final targetDir = Directory('${appSupport.path}/models/$subDir');
-    if (!await targetDir.exists()) {
-      await targetDir.create(recursive: true);
-    }
-
-    final fileName = sourceFile.uri.pathSegments.last;
-    final targetFile = File('${targetDir.path}/$fileName');
-
-    // If file already exists and has same size, reuse it
-    if (await targetFile.exists()) {
-      final sourceLen = await sourceFile.length();
-      final targetLen = await targetFile.length();
-      if (sourceLen == targetLen) {
-        return targetFile.path;
-      }
-    }
-
-    await sourceFile.copy(targetFile.path);
-    return targetFile.path;
-  }
-
-  Future<void> pickAndLoadLlmModel() async {
-    _errorMessage = null;
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['gguf'],
-      );
-
-      if (result != null && result.files.single.path != null) {
-        final rawPath = result.files.single.path!;
-        _isLoading = true;
-        notifyListeners();
-
-        // Explicitly unload previous model first
-        if (aiService.llmEngine.isLoaded) {
-          await aiService.unloadLlmModel();
-        }
-
-        // Copy to app support storage
-        final managedPath = await _copyToAppStorage(rawPath, 'llm');
-
-        await aiService.loadLlmModel(managedPath);
-        _refreshModelInfo();
-      }
-    } catch (e) {
-      _errorMessage = 'Failed to load LLM model: $e';
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  Future<void> loadConfiguredLlmModel() async {
-    final path = aiService.configuredLlmPath;
-    if (path == null || path.isEmpty) return;
-
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
-
-    try {
-      await aiService.loadLlmModel(path);
-      _refreshModelInfo();
-    } catch (e) {
-      _errorMessage = 'Failed to load configured LLM model: $e';
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  Future<void> unloadLlmModel() async {
-    await aiService.unloadLlmModel();
-    _refreshModelInfo();
-  }
-
-  Future<void> forgetLlmModel({bool deleteFile = false}) async {
-    await aiService.forgetLlmModel(deleteFile: deleteFile);
-    _refreshModelInfo();
-  }
-
-  Future<void> pickAndLoadSpeechModel() async {
-    _errorMessage = null;
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['bin', 'ggml'],
-      );
-
-      if (result != null && result.files.single.path != null) {
-        final rawPath = result.files.single.path!;
-        _isLoading = true;
-        notifyListeners();
-
-        // Explicitly unload previous model first
-        if (aiService.speechEngine.isLoaded) {
-          await aiService.unloadSpeechModel();
-        }
-
-        // Copy to app support storage
-        final managedPath = await _copyToAppStorage(rawPath, 'whisper');
-
-        await aiService.loadSpeechModel(managedPath);
-        _refreshModelInfo();
-      }
-    } catch (e) {
-      _errorMessage = 'Failed to load speech model: $e';
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  Future<void> loadConfiguredSpeechModel() async {
-    final path = aiService.configuredSpeechPath;
-    if (path == null || path.isEmpty) return;
-
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
-
-    try {
-      await aiService.loadSpeechModel(path);
-      _refreshModelInfo();
-    } catch (e) {
-      _errorMessage = 'Failed to load configured speech model: $e';
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  Future<void> unloadSpeechModel() async {
-    await aiService.unloadSpeechModel();
-    _refreshModelInfo();
-  }
-
-  Future<void> forgetSpeechModel({bool deleteFile = false}) async {
-    await aiService.forgetSpeechModel(deleteFile: deleteFile);
-    _refreshModelInfo();
+    return null;
   }
 
   @override
   void dispose() {
-    aiService.removeListener(_refreshModelInfo);
+    _isDisposed = true;
+    modelManager.removeListener(_onModelManagerChanged);
     super.dispose();
   }
 }
