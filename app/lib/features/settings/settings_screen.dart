@@ -9,11 +9,13 @@ import 'settings_controller.dart';
 
 class SettingsScreen extends StatefulWidget {
   final AiService aiService;
+  final ModelManager? modelManager;
   final SettingsController? controller;
 
   const SettingsScreen({
     super.key,
     required this.aiService,
+    this.modelManager,
     this.controller,
   });
 
@@ -31,7 +33,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (widget.controller != null) {
       _controller = widget.controller!;
     } else {
-      _controller = SettingsController(aiService: widget.aiService);
+      _controller = SettingsController(
+        aiService: widget.aiService,
+        manager: widget.modelManager,
+      );
       _ownsController = true;
     }
   }

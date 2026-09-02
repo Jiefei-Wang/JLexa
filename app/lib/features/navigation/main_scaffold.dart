@@ -7,6 +7,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/ai/ai_service.dart';
+import '../../core/ai/model_downloader.dart';
+import '../../core/ai/model_manager.dart';
+import '../../core/ai/model_storage.dart';
 import '../../core/ai/native_ai_bridge.dart';
 import '../../core/audio/audio_models.dart';
 import '../../core/audio/audio_service.dart';
@@ -29,6 +32,7 @@ class MainScaffold extends StatefulWidget {
   final AudioService audioService;
   final WaveformService waveformService;
   final AiService aiService;
+  final ModelManager? modelManager;
 
   const MainScaffold({
     super.key,
@@ -38,6 +42,7 @@ class MainScaffold extends StatefulWidget {
     required this.audioService,
     required this.waveformService,
     required this.aiService,
+    this.modelManager,
   });
 
   @override
@@ -48,9 +53,34 @@ class MainScaffoldState extends State<MainScaffold> {
   final GlobalKey<HomeScreenState> _homeKey = GlobalKey<HomeScreenState>();
   final GlobalKey<RepeaterScreenState> _repeaterKey =
       GlobalKey<RepeaterScreenState>();
+  late final ModelManager _modelManager;
+  bool _ownsModelManager = false;
   int _currentIndex = 0;
   String? _targetDictionaryWord;
   AudioLesson? _activeLesson;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.modelManager != null) {
+      _modelManager = widget.modelManager!;
+    } else {
+      _modelManager = ModelManager(
+        storage: ModelStorage(),
+        downloader: DioModelDownloader(),
+        aiService: widget.aiService,
+      );
+      _ownsModelManager = true;
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_ownsModelManager) {
+      _modelManager.dispose();
+    }
+    super.dispose();
+  }
 
   void switchToTab(int index) {
     setState(() {
@@ -208,7 +238,10 @@ class MainScaffoldState extends State<MainScaffold> {
             onOpenSettings: () {
               Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => SettingsScreen(aiService: widget.aiService),
+                  builder: (_) => SettingsScreen(
+                    aiService: widget.aiService,
+                    modelManager: _modelManager,
+                  ),
                 ),
               );
             },

@@ -65,8 +65,14 @@ class DictionaryController extends ChangeNotifier {
 
   void setSelectedTab(int index) {
     if (_selectedTab != index) {
+      if (_isAiGenerating) {
+        if (_selectedTab == 1) _aiTranslationText = '';
+        if (_selectedTab == 2) _aiExplanationText = '';
+      }
+      ++_aiGeneration;
       _activeAiHandle?.cancel();
       _activeAiHandle = null;
+      _isAiGenerating = false;
     }
     _selectedTab = index;
     if (_selectedTab == 1 &&
@@ -212,9 +218,19 @@ class DictionaryController extends ChangeNotifier {
         _aiTranslationText += chunk;
         notifyListeners();
       }
+    } on AiCancelledException {
+      if (gen == _aiGeneration && !_isDisposed) {
+        _aiTranslationText = '';
+      }
     } catch (e) {
       if (gen == _aiGeneration && !_isDisposed) {
-        _aiTranslationText = 'Translation unavailable: $e';
+        if (e is AiCancelledException ||
+            e.toString().contains('cancelled') ||
+            e.toString().contains('canceled')) {
+          _aiTranslationText = '';
+        } else {
+          _aiTranslationText = 'Translation unavailable: $e';
+        }
       }
     } finally {
       if (gen == _aiGeneration && !_isDisposed) {
@@ -252,9 +268,19 @@ class DictionaryController extends ChangeNotifier {
         _aiExplanationText += chunk;
         notifyListeners();
       }
+    } on AiCancelledException {
+      if (gen == _aiGeneration && !_isDisposed) {
+        _aiExplanationText = '';
+      }
     } catch (e) {
       if (gen == _aiGeneration && !_isDisposed) {
-        _aiExplanationText = 'Explanation unavailable: $e';
+        if (e is AiCancelledException ||
+            e.toString().contains('cancelled') ||
+            e.toString().contains('canceled')) {
+          _aiExplanationText = '';
+        } else {
+          _aiExplanationText = 'Explanation unavailable: $e';
+        }
       }
     } finally {
       if (gen == _aiGeneration && !_isDisposed) {
@@ -312,9 +338,19 @@ class DictionaryController extends ChangeNotifier {
         _aiExplanationText += chunk;
         notifyListeners();
       }
+    } on AiCancelledException {
+      if (gen == _aiGeneration && !_isDisposed) {
+        _aiExplanationText = '';
+      }
     } catch (e) {
       if (gen == _aiGeneration && !_isDisposed) {
-        _aiExplanationText = 'AI explanation unavailable: $e';
+        if (e is AiCancelledException ||
+            e.toString().contains('cancelled') ||
+            e.toString().contains('canceled')) {
+          _aiExplanationText = '';
+        } else {
+          _aiExplanationText = 'AI explanation unavailable: $e';
+        }
       }
     } finally {
       if (gen == _aiGeneration && !_isDisposed) {
@@ -335,6 +371,7 @@ class DictionaryController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    ++_aiGeneration;
     _activeAiHandle?.cancel();
     _activeAiHandle = null;
     _tts.stop();

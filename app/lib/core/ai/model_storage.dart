@@ -24,8 +24,13 @@ class ModelStorage {
       final dir = await _customBaseDirProvider();
       return Directory(p.join(dir.path, 'models'));
     }
-    final appSupport = await getApplicationSupportDirectory();
-    return Directory(p.join(appSupport.path, 'models'));
+    try {
+      final appSupport = await getApplicationSupportDirectory();
+      return Directory(p.join(appSupport.path, 'models'));
+    } catch (_) {
+      final temp = Directory.systemTemp;
+      return Directory(p.join(temp.path, 'jlexa_models'));
+    }
   }
 
   Future<Directory> getModelTypeDirectory(ModelType type) async {
@@ -50,7 +55,11 @@ class ModelStorage {
     return p.join(dir.path, '$safeName.part');
   }
 
-  Future<void> cleanStalePartFiles() async {
+  Future<void> cleanStalePartFiles({
+    Set<String> activePartPaths = const {},
+  }) async {
+    final activeCanonical =
+        activePartPaths.map((path) => p.canonicalize(path)).toSet();
     for (final type in ModelType.values) {
       try {
         final dir = await getModelTypeDirectory(type);
@@ -58,6 +67,9 @@ class ModelStorage {
           final entries = dir.listSync();
           for (final entry in entries) {
             if (entry is File && entry.path.endsWith('.part')) {
+              if (activeCanonical.contains(p.canonicalize(entry.path))) {
+                continue;
+              }
               try {
                 await entry.delete();
               } catch (_) {}
@@ -86,8 +98,19 @@ class ModelStorage {
         await partFile.delete();
       } catch (_) {}
       throw const ModelValidationException(
-        'Download failed: downloaded file is empty.',
+        'Download failed: downloaded file is empty (0 bytes).',
       );
+    }
+
+    if (expectedSizeBytes != null && expectedSizeBytes > 0) {
+      if (size != expectedSizeBytes) {
+        try {
+          await partFile.delete();
+        } catch (_) {}
+        throw ModelValidationException(
+          'Download validation failed: expected $expectedSizeBytes bytes, but got $size bytes.',
+        );
+      }
     }
 
     final finalFile = File(finalPath);

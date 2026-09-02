@@ -19,6 +19,7 @@ import '../test_helper.dart';
 class MockAiEngine implements AiEngine {
   bool _isLoaded = false;
   String? _loadedPath;
+  final Set<String> failLoadPaths = {};
 
   @override
   bool get isLoaded => _isLoaded;
@@ -31,6 +32,12 @@ class MockAiEngine implements AiEngine {
 
   @override
   Future<void> loadModel(String modelPath, {AiGenerationSettings? settings}) async {
+    if (failLoadPaths.contains(p.canonicalize(modelPath)) ||
+        failLoadPaths.contains(modelPath)) {
+      _isLoaded = false;
+      _loadedPath = null;
+      throw Exception('Simulated load failure for $modelPath');
+    }
     _isLoaded = true;
     _loadedPath = modelPath;
   }
@@ -74,6 +81,7 @@ class MockAiEngine implements AiEngine {
 class MockSpeechEngine implements SpeechRecognitionEngine {
   bool _isLoaded = false;
   String? _loadedPath;
+  final Set<String> failLoadPaths = {};
 
   @override
   bool get isLoaded => _isLoaded;
@@ -83,6 +91,12 @@ class MockSpeechEngine implements SpeechRecognitionEngine {
 
   @override
   Future<void> loadModel(String modelPath) async {
+    if (failLoadPaths.contains(p.canonicalize(modelPath)) ||
+        failLoadPaths.contains(modelPath)) {
+      _isLoaded = false;
+      _loadedPath = null;
+      throw Exception('Simulated speech model load failure for $modelPath');
+    }
     _isLoaded = true;
     _loadedPath = modelPath;
   }
@@ -182,6 +196,63 @@ void main() {
       expect(await File(updated.localPath!).exists(), isTrue);
     });
 
+    test('cancelDownload: clean cancel leaves no error, removes part, returns to notDownloaded', () async {
+      final targetModel = ModelCatalog.curatedLlmModels.first;
+      final slowDownloader = FakeModelDownloader(
+        stepDelay: const Duration(milliseconds: 50),
+      );
+      final testManager = ModelManager(
+        storage: storage,
+        downloader: slowDownloader,
+        aiService: aiService,
+      );
+      await testManager.initialize();
+
+      // Start download in background
+      final downloadFuture = testManager.downloadModel(targetModel);
+      await Future.delayed(const Duration(milliseconds: 20));
+
+      // Cancel download
+      testManager.cancelDownload(targetModel.id);
+      await downloadFuture; // Should resolve cleanly without rethrowing cancel error
+
+      final item = testManager.llmModels.firstWhere((m) => m.id == targetModel.id);
+      expect(item.state, ModelDownloadState.notDownloaded);
+      expect(item.errorMessage, isNull);
+      expect(item.isDownloaded, isFalse);
+
+      final partPath = await storage.getPartModelPath(
+        targetModel.modelType,
+        targetModel.filename,
+      );
+      final finalPath = await storage.getFinalModelPath(
+        targetModel.modelType,
+        targetModel.filename,
+      );
+      expect(await File(partPath).exists(), isFalse);
+      expect(await File(finalPath).exists(), isFalse);
+
+      testManager.dispose();
+    });
+
+    test('Cancelling after completion does not delete completed model', () async {
+      final targetModel = ModelCatalog.curatedLlmModels.first;
+      await manager.downloadModel(targetModel);
+
+      final item = manager.llmModels.firstWhere((m) => m.id == targetModel.id);
+      expect(item.isDownloaded, isTrue);
+      final finalPath = item.localPath!;
+      expect(await File(finalPath).exists(), isTrue);
+
+      // Call cancel after completion
+      manager.cancelDownload(targetModel.id);
+      await manager.refreshModels();
+
+      expect(await File(finalPath).exists(), isTrue);
+      final afterItem = manager.llmModels.firstWhere((m) => m.id == targetModel.id);
+      expect(afterItem.isDownloaded, isTrue);
+    });
+
     test('loadModel and unloadModel switch state between downloaded and loaded', () async {
       final targetModel = ModelCatalog.curatedLlmModels.first;
       await manager.downloadModel(targetModel);
@@ -225,6 +296,101 @@ void main() {
       expect(manager.llmModels.firstWhere((m) => m.id == modelB.id).isLoaded, isTrue);
     });
 
+    test('LLM Model switching rollback: when B fails to load, A is restored', () async {
+      final modelA = ModelCatalog.curatedLlmModels[0];
+      final modelB = ModelCatalog.curatedLlmModels[1];
+
+      await manager.downloadModel(modelA);
+      await manager.downloadModel(modelB);
+
+      final itemA = manager.llmModels.firstWhere((m) => m.id == modelA.id);
+      final itemB = manager.llmModels.firstWhere((m) => m.id == modelB.id);
+
+      // 1. Successfully load Model A
+      await manager.loadModel(itemA);
+      expect(mockLlm.isLoaded, isTrue);
+      expect(mockLlm.loadedModelPath, itemA.localPath);
+      expect(manager.llmModels.firstWhere((m) => m.id == modelA.id).isLoaded, isTrue);
+
+      // 2. Configure mock engine to fail on Model B
+      mockLlm.failLoadPaths.add(p.canonicalize(itemB.localPath!));
+
+      // 3. Attempt loading Model B -> should throw but restore Model A
+      await expectLater(
+        () => manager.loadModel(itemB),
+        throwsA(isA<Exception>()),
+      );
+
+      // 4. Verify Model A is restored and still loaded
+      expect(mockLlm.isLoaded, isTrue);
+      expect(mockLlm.loadedModelPath, itemA.localPath);
+
+      final finalItemA = manager.llmModels.firstWhere((m) => m.id == modelA.id);
+      final finalItemB = manager.llmModels.firstWhere((m) => m.id == modelB.id);
+
+      expect(finalItemA.state, ModelDownloadState.loaded);
+      expect(finalItemA.isLoaded, isTrue);
+      expect(finalItemB.isLoaded, isFalse);
+      expect(finalItemB.errorMessage, contains('Restored previous model'));
+    });
+
+    test('Whisper Model switching rollback: when B fails to load, A is restored', () async {
+      final modelA = ModelCatalog.curatedWhisperModels[0];
+      final modelB = ModelCatalog.curatedWhisperModels[1];
+
+      await manager.downloadModel(modelA);
+      await manager.downloadModel(modelB);
+
+      final itemA = manager.whisperModels.firstWhere((m) => m.id == modelA.id);
+      final itemB = manager.whisperModels.firstWhere((m) => m.id == modelB.id);
+
+      // 1. Successfully load Whisper Model A
+      await manager.loadModel(itemA);
+      expect(mockSpeech.isLoaded, isTrue);
+      expect(mockSpeech.loadedModelPath, itemA.localPath);
+      expect(manager.whisperModels.firstWhere((m) => m.id == modelA.id).isLoaded, isTrue);
+
+      // 2. Configure mock speech engine to fail on Model B
+      mockSpeech.failLoadPaths.add(p.canonicalize(itemB.localPath!));
+
+      // 3. Attempt loading Model B
+      await expectLater(
+        () => manager.loadModel(itemB),
+        throwsA(isA<Exception>()),
+      );
+
+      // 4. Verify Whisper Model A is restored and still loaded
+      expect(mockSpeech.isLoaded, isTrue);
+      expect(mockSpeech.loadedModelPath, itemA.localPath);
+
+      final finalItemA = manager.whisperModels.firstWhere((m) => m.id == modelA.id);
+      final finalItemB = manager.whisperModels.firstWhere((m) => m.id == modelB.id);
+
+      expect(finalItemA.state, ModelDownloadState.loaded);
+      expect(finalItemA.isLoaded, isTrue);
+      expect(finalItemB.isLoaded, isFalse);
+      expect(finalItemB.errorMessage, contains('Restored previous model'));
+    });
+
+    test('Load invalid model when no model loaded leaves no model loaded', () async {
+      final model = ModelCatalog.curatedLlmModels.first;
+      await manager.downloadModel(model);
+
+      final item = manager.llmModels.firstWhere((m) => m.id == model.id);
+      mockLlm.failLoadPaths.add(p.canonicalize(item.localPath!));
+
+      await expectLater(
+        () => manager.loadModel(item),
+        throwsA(isA<Exception>()),
+      );
+
+      expect(mockLlm.isLoaded, isFalse);
+      expect(aiService.llmEngine.isLoaded, isFalse);
+      final updated = manager.llmModels.firstWhere((m) => m.id == model.id);
+      expect(updated.isLoaded, isFalse);
+      expect(updated.errorMessage, contains('Failed to load model'));
+    });
+
     test('deleteModel safely unloads and removes file', () async {
       final targetModel = ModelCatalog.curatedLlmModels.first;
       await manager.downloadModel(targetModel);
@@ -245,6 +411,33 @@ void main() {
       expect(item.state, ModelDownloadState.notDownloaded);
       expect(item.isLoaded, isFalse);
       expect(await File(localPath).exists(), isFalse);
+    });
+
+    test('deleteModel cancels active download if downloading', () async {
+      final targetModel = ModelCatalog.curatedLlmModels.first;
+      final slowDownloader = FakeModelDownloader(
+        stepDelay: const Duration(milliseconds: 50),
+      );
+      final testManager = ModelManager(
+        storage: storage,
+        downloader: slowDownloader,
+        aiService: aiService,
+      );
+      await testManager.initialize();
+
+      // Start download
+      final downloadFuture = testManager.downloadModel(targetModel);
+      await Future.delayed(const Duration(milliseconds: 20));
+
+      // Delete model while downloading
+      final item = testManager.llmModels.firstWhere((m) => m.id == targetModel.id);
+      await testManager.deleteModel(item);
+      await downloadFuture;
+
+      final updated = testManager.llmModels.firstWhere((m) => m.id == targetModel.id);
+      expect(updated.state, ModelDownloadState.notDownloaded);
+
+      testManager.dispose();
     });
 
     test('importLocalModel copies file, adds to list, and loads it', () async {

@@ -148,6 +148,137 @@ void main() {
       await externalDir.delete(recursive: true);
     });
 
+    test('cleanStalePartFiles preserves active part files and deletes inactive ones', () async {
+      final llmDir = await storage.getModelTypeDirectory(ModelType.llm);
+      final activePart = File(p.join(llmDir.path, 'active_download.gguf.part'));
+      final stalePart = File(p.join(llmDir.path, 'stale_abandoned.gguf.part'));
+      final validModel = File(p.join(llmDir.path, 'valid.gguf'));
+
+      await activePart.writeAsString('active chunk');
+      await stalePart.writeAsString('stale chunk');
+      await validModel.writeAsString('valid model');
+
+      await storage.cleanStalePartFiles(
+        activePartPaths: {activePart.path},
+      );
+
+      expect(await activePart.exists(), isTrue);
+      expect(await validModel.exists(), isTrue);
+      expect(await stalePart.exists(), isFalse);
+    });
+
+    test('atomicFinalizeDownload size validation: exact match succeeds', () async {
+      final partPath = await storage.getPartModelPath(
+        ModelType.llm,
+        'exact.gguf',
+      );
+      final finalPath = await storage.getFinalModelPath(
+        ModelType.llm,
+        'exact.gguf',
+      );
+
+      final partFile = File(partPath);
+      await partFile.writeAsBytes(List<int>.filled(2048, 0x01));
+
+      final result = await storage.atomicFinalizeDownload(
+        partPath,
+        finalPath,
+        expectedSizeBytes: 2048,
+      );
+
+      expect(result, finalPath);
+      expect(await File(finalPath).exists(), isTrue);
+      expect(await File(finalPath).length(), 2048);
+      expect(await partFile.exists(), isFalse);
+    });
+
+    test('atomicFinalizeDownload size validation: undersized file fails and cleans part', () async {
+      final partPath = await storage.getPartModelPath(
+        ModelType.llm,
+        'undersized.gguf',
+      );
+      final finalPath = await storage.getFinalModelPath(
+        ModelType.llm,
+        'undersized.gguf',
+      );
+
+      final partFile = File(partPath);
+      await partFile.writeAsBytes(List<int>.filled(500, 0x01)); // Expected 1000
+
+      await expectLater(
+        () => storage.atomicFinalizeDownload(
+          partPath,
+          finalPath,
+          expectedSizeBytes: 1000,
+        ),
+        throwsA(isA<ModelValidationException>()),
+      );
+
+      expect(await partFile.exists(), isFalse);
+      expect(await File(finalPath).exists(), isFalse);
+    });
+
+    test('atomicFinalizeDownload size validation: oversized file fails and cleans part', () async {
+      final partPath = await storage.getPartModelPath(
+        ModelType.llm,
+        'oversized.gguf',
+      );
+      final finalPath = await storage.getFinalModelPath(
+        ModelType.llm,
+        'oversized.gguf',
+      );
+
+      final partFile = File(partPath);
+      await partFile.writeAsBytes(List<int>.filled(1500, 0x01)); // Expected 1000
+
+      await expectLater(
+        () => storage.atomicFinalizeDownload(
+          partPath,
+          finalPath,
+          expectedSizeBytes: 1000,
+        ),
+        throwsA(isA<ModelValidationException>()),
+      );
+
+      expect(await partFile.exists(), isFalse);
+      expect(await File(finalPath).exists(), isFalse);
+    });
+
+    test('atomicFinalizeDownload invalid replacement download preserves existing valid model', () async {
+      final partPath = await storage.getPartModelPath(
+        ModelType.llm,
+        'existing_model.gguf',
+      );
+      final finalPath = await storage.getFinalModelPath(
+        ModelType.llm,
+        'existing_model.gguf',
+      );
+
+      // Create prior valid model
+      final existingFinalFile = File(finalPath);
+      await existingFinalFile.writeAsString('prior working model content');
+      final originalLen = await existingFinalFile.length();
+
+      // Create corrupt/truncated replacement partial file
+      final partFile = File(partPath);
+      await partFile.writeAsBytes(List<int>.filled(100, 0x99)); // Expected 50000
+
+      await expectLater(
+        () => storage.atomicFinalizeDownload(
+          partPath,
+          finalPath,
+          expectedSizeBytes: 50000,
+        ),
+        throwsA(isA<ModelValidationException>()),
+      );
+
+      // Part file must be deleted, and existing valid model must still exist untouched
+      expect(await partFile.exists(), isFalse);
+      expect(await existingFinalFile.exists(), isTrue);
+      expect(await existingFinalFile.length(), originalLen);
+      expect(await existingFinalFile.readAsString(), 'prior working model content');
+    });
+
     test('deleteModelFile deletes target file', () async {
       final finalPath = await storage.getFinalModelPath(
         ModelType.llm,

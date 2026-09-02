@@ -14,6 +14,16 @@ class ModelDownloadException implements Exception {
   String toString() => message;
 }
 
+class ModelDownloadCancelledException implements Exception {
+  final String message;
+  const ModelDownloadCancelledException([
+    this.message = 'Download was cancelled.',
+  ]);
+
+  @override
+  String toString() => message;
+}
+
 abstract class ModelDownloader {
   Future<void> download({
     required DownloadableModel model,
@@ -89,7 +99,13 @@ class DioModelDownloader implements ModelDownloader {
       );
     } on DioException catch (e) {
       if (CancelToken.isCancel(e)) {
-        throw const ModelDownloadException('Download was cancelled.');
+        final f = File(destinationPartPath);
+        if (await f.exists()) {
+          try {
+            await f.delete();
+          } catch (_) {}
+        }
+        throw const ModelDownloadCancelledException('Download was cancelled.');
       }
 
       final status = e.response?.statusCode;
@@ -114,7 +130,9 @@ class DioModelDownloader implements ModelDownloader {
         statusCode: status,
       );
     } catch (e) {
-      if (e is ModelDownloadException) rethrow;
+      if (e is ModelDownloadException || e is ModelDownloadCancelledException) {
+        rethrow;
+      }
       throw ModelDownloadException('Download failed: $e');
     } finally {
       _activeTokens.remove(model.id);
@@ -127,11 +145,13 @@ class FakeModelDownloader implements ModelDownloader {
   final Duration stepDelay;
   final bool shouldFail;
   final String? failureMessage;
+  final int? fakeWriteSizeBytes;
 
   FakeModelDownloader({
     this.stepDelay = const Duration(milliseconds: 50),
     this.shouldFail = false,
     this.failureMessage,
+    this.fakeWriteSizeBytes,
   });
 
   @override
@@ -163,7 +183,13 @@ class FakeModelDownloader implements ModelDownloader {
     for (int i = 1; i <= steps; i++) {
       if (_activeDownloads[model.id] != true) {
         _activeDownloads.remove(model.id);
-        throw const ModelDownloadException('Download was cancelled.');
+        final f = File(destinationPartPath);
+        if (await f.exists()) {
+          try {
+            await f.delete();
+          } catch (_) {}
+        }
+        throw const ModelDownloadCancelledException('Download was cancelled.');
       }
 
       if (stepDelay.inMilliseconds > 0) {
@@ -172,7 +198,13 @@ class FakeModelDownloader implements ModelDownloader {
 
       if (_activeDownloads[model.id] != true) {
         _activeDownloads.remove(model.id);
-        throw const ModelDownloadException('Download was cancelled.');
+        final f = File(destinationPartPath);
+        if (await f.exists()) {
+          try {
+            await f.delete();
+          } catch (_) {}
+        }
+        throw const ModelDownloadCancelledException('Download was cancelled.');
       }
 
       final progress = i / steps;
@@ -186,15 +218,23 @@ class FakeModelDownloader implements ModelDownloader {
       );
     }
 
-    // Write a mock binary content to destinationPartPath
+    // Write mock binary content to destinationPartPath
     final partFile = File(destinationPartPath);
     if (!await partFile.parent.exists()) {
       await partFile.parent.create(recursive: true);
     }
 
-    // Write a compact fake file for tests
-    final bytes = List<int>.filled(1024, 0x42);
-    await partFile.writeAsBytes(bytes);
+    final targetSize = fakeWriteSizeBytes ?? (model.expectedSizeBytes > 0 ? model.expectedSizeBytes : 1024);
+    if (targetSize <= 64 * 1024) {
+      await partFile.writeAsBytes(List<int>.filled(targetSize, 0x42));
+    } else {
+      // Set file length via truncate without allocating large memory buffers
+      final initBytes = List<int>.filled(1024, 0x42);
+      await partFile.writeAsBytes(initBytes);
+      final raf = await partFile.open(mode: FileMode.append);
+      await raf.truncate(targetSize);
+      await raf.close();
+    }
 
     _activeDownloads.remove(model.id);
   }

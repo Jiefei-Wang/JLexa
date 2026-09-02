@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import 'core/ai/ai_service.dart';
+import 'core/ai/model_downloader.dart';
+import 'core/ai/model_manager.dart';
+import 'core/ai/model_storage.dart';
 import 'core/audio/audio_service.dart';
 import 'core/audio/lesson_repository.dart';
 import 'core/audio/waveform_service.dart';
@@ -18,6 +21,13 @@ void main() async {
   final audioService = AudioService();
   final waveformService = WaveformService();
   final aiService = AiService();
+  final modelStorage = ModelStorage();
+  final modelDownloader = DioModelDownloader();
+  final modelManager = ModelManager(
+    storage: modelStorage,
+    downloader: modelDownloader,
+    aiService: aiService,
+  );
 
   runApp(
     JLexaApp(
@@ -27,6 +37,7 @@ void main() async {
       audioService: audioService,
       waveformService: waveformService,
       aiService: aiService,
+      modelManager: modelManager,
     ),
   );
 }
@@ -38,6 +49,7 @@ class JLexaApp extends StatelessWidget {
   final AudioService audioService;
   final WaveformService waveformService;
   final AiService aiService;
+  final ModelManager? modelManager;
 
   const JLexaApp({
     super.key,
@@ -47,6 +59,7 @@ class JLexaApp extends StatelessWidget {
     required this.audioService,
     required this.waveformService,
     required this.aiService,
+    this.modelManager,
   });
 
   @override
@@ -62,6 +75,7 @@ class JLexaApp extends StatelessWidget {
         audioService: audioService,
         waveformService: waveformService,
         aiService: aiService,
+        modelManager: modelManager,
       ),
     );
   }

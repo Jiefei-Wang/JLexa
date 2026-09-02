@@ -15,6 +15,7 @@ class SettingsController extends ChangeNotifier {
   final AiService aiService;
   final ModelManager modelManager;
   final ModelFilePicker filePicker;
+  final bool _ownsManager;
 
   bool _isProcessing = false;
   String? _errorMessage;
@@ -37,7 +38,8 @@ class SettingsController extends ChangeNotifier {
     required this.aiService,
     ModelManager? manager,
     ModelFilePicker? picker,
-  }) : modelManager =
+  }) : _ownsManager = manager == null,
+       modelManager =
            manager ??
            ModelManager(
              storage: ModelStorage(),
@@ -49,7 +51,9 @@ class SettingsController extends ChangeNotifier {
   }
 
   void _onModelManagerChanged() {
-    notifyListeners();
+    if (!_isDisposed) {
+      notifyListeners();
+    }
   }
 
   void clearError() {
@@ -62,15 +66,25 @@ class SettingsController extends ChangeNotifier {
     notifyListeners();
     try {
       await modelManager.downloadModel(model);
+    } on ModelDownloadCancelledException {
+      _errorMessage = null;
     } catch (e) {
-      _errorMessage = 'Download failed: $e';
-      notifyListeners();
+      if (!_isDisposed) {
+        _errorMessage = 'Download failed: $e';
+      }
+    } finally {
+      if (!_isDisposed) {
+        notifyListeners();
+      }
     }
   }
 
   void cancelDownload(String modelId) {
+    _errorMessage = null;
     modelManager.cancelDownload(modelId);
-    notifyListeners();
+    if (!_isDisposed) {
+      notifyListeners();
+    }
   }
 
   Future<void> loadModel(ManagedModelItem item) async {
@@ -80,10 +94,14 @@ class SettingsController extends ChangeNotifier {
     try {
       await modelManager.loadModel(item);
     } catch (e) {
-      _errorMessage = 'Failed to load model "${item.displayName}": $e';
+      if (!_isDisposed) {
+        _errorMessage = 'Failed to load model "${item.displayName}": $e';
+      }
     } finally {
-      _isProcessing = false;
-      notifyListeners();
+      if (!_isDisposed) {
+        _isProcessing = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -94,10 +112,14 @@ class SettingsController extends ChangeNotifier {
     try {
       await modelManager.unloadModel(item);
     } catch (e) {
-      _errorMessage = 'Failed to unload model: $e';
+      if (!_isDisposed) {
+        _errorMessage = 'Failed to unload model: $e';
+      }
     } finally {
-      _isProcessing = false;
-      notifyListeners();
+      if (!_isDisposed) {
+        _isProcessing = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -108,10 +130,14 @@ class SettingsController extends ChangeNotifier {
     try {
       await modelManager.deleteModel(item);
     } catch (e) {
-      _errorMessage = 'Failed to delete model: $e';
+      if (!_isDisposed) {
+        _errorMessage = 'Failed to delete model: $e';
+      }
     } finally {
-      _isProcessing = false;
-      notifyListeners();
+      if (!_isDisposed) {
+        _isProcessing = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -119,17 +145,21 @@ class SettingsController extends ChangeNotifier {
     _errorMessage = null;
     try {
       final pickedPath = await filePicker.pickLlmModel();
-      if (pickedPath == null) return;
+      if (pickedPath == null || _isDisposed) return;
 
       _isProcessing = true;
       notifyListeners();
 
       await modelManager.importLocalModel(pickedPath, ModelType.llm);
     } catch (e) {
-      _errorMessage = '$e';
+      if (!_isDisposed) {
+        _errorMessage = '$e';
+      }
     } finally {
-      _isProcessing = false;
-      notifyListeners();
+      if (!_isDisposed) {
+        _isProcessing = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -137,17 +167,21 @@ class SettingsController extends ChangeNotifier {
     _errorMessage = null;
     try {
       final pickedPath = await filePicker.pickSpeechModel();
-      if (pickedPath == null) return;
+      if (pickedPath == null || _isDisposed) return;
 
       _isProcessing = true;
       notifyListeners();
 
       await modelManager.importLocalModel(pickedPath, ModelType.whisper);
     } catch (e) {
-      _errorMessage = '$e';
+      if (!_isDisposed) {
+        _errorMessage = '$e';
+      }
     } finally {
-      _isProcessing = false;
-      notifyListeners();
+      if (!_isDisposed) {
+        _isProcessing = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -187,6 +221,9 @@ class SettingsController extends ChangeNotifier {
   void dispose() {
     _isDisposed = true;
     modelManager.removeListener(_onModelManagerChanged);
+    if (_ownsManager) {
+      modelManager.dispose();
+    }
     super.dispose();
   }
 }

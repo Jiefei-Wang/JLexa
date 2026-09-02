@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -93,5 +95,13 @@ void setupMockPlatformChannels() {
   messenger.setMockMethodCallHandler(
     const MethodChannel('com.jlexa.app/whisper'),
     (MethodCall call) async => false,
+  );
+
+  // Mock path_provider
+  messenger.setMockMethodCallHandler(
+    const MethodChannel('plugins.flutter.io/path_provider'),
+    (MethodCall call) async {
+      return Directory.systemTemp.path;
+    },
   );
 }

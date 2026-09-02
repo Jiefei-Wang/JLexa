@@ -102,6 +102,8 @@ class ModelManager extends ChangeNotifier {
   final Map<String, String> _modelErrors = {};
   final Set<String> _loadingModelIds = {};
 
+  final Set<String> _activePartPaths = {};
+
   List<ManagedModelItem> _llmModels = [];
   List<ManagedModelItem> _whisperModels = [];
   bool _isInitialized = false;
@@ -133,7 +135,7 @@ class ModelManager extends ChangeNotifier {
   }
 
   Future<void> initialize() async {
-    await storage.cleanStalePartFiles();
+    await storage.cleanStalePartFiles(activePartPaths: _activePartPaths);
     await refreshModels();
     _isInitialized = true;
     notifyListeners();
@@ -162,7 +164,9 @@ class ModelManager extends ChangeNotifier {
         knownLlmPaths.add(p.canonicalize(finalPath));
       }
 
-      final isDownloading = downloader.isDownloading(catalog.id);
+      final isDownloading =
+          downloader.isDownloading(catalog.id) ||
+          _downloadProgress.containsKey(catalog.id);
       final isLoading = _loadingModelIds.contains(catalog.id);
       final isCurrentlyLoaded =
           aiService.llmEngine.isLoaded &&
@@ -257,7 +261,9 @@ class ModelManager extends ChangeNotifier {
         knownWhisperPaths.add(p.canonicalize(finalPath));
       }
 
-      final isDownloading = downloader.isDownloading(catalog.id);
+      final isDownloading =
+          downloader.isDownloading(catalog.id) ||
+          _downloadProgress.containsKey(catalog.id);
       final isLoading = _loadingModelIds.contains(catalog.id);
       final isCurrentlyLoaded =
           aiService.speechEngine.isLoaded &&
@@ -356,6 +362,9 @@ class ModelManager extends ChangeNotifier {
       catalogModel.filename,
     );
 
+    final canonPart = p.canonicalize(partPath);
+    _activePartPaths.add(canonPart);
+
     _downloadProgress[modelId] = const ModelProgress(
       receivedBytes: 0,
       totalBytes: 0,
@@ -386,10 +395,25 @@ class ModelManager extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       _downloadProgress.remove(modelId);
+      if (e is ModelDownloadCancelledException) {
+        try {
+          final partFile = File(partPath);
+          if (await partFile.exists()) {
+            await partFile.delete();
+          }
+        } catch (_) {}
+        _modelErrors.remove(modelId);
+        await refreshModels();
+        notifyListeners();
+        return;
+      }
+
       _modelErrors[modelId] = e.toString();
       await refreshModels();
       notifyListeners();
       rethrow;
+    } finally {
+      _activePartPaths.remove(canonPart);
     }
   }
 
@@ -425,6 +449,7 @@ class ModelManager extends ChangeNotifier {
   void cancelDownload(String modelId) {
     downloader.cancel(modelId);
     _downloadProgress.remove(modelId);
+    _modelErrors.remove(modelId);
     _syncModelStates();
   }
 
@@ -440,19 +465,58 @@ class ModelManager extends ChangeNotifier {
 
     try {
       if (item.type == ModelType.llm) {
-        if (aiService.llmEngine.isLoaded) {
-          await aiService.unloadLlmModel();
+        final previousLoadedPath =
+            aiService.llmEngine.isLoaded
+                ? aiService.llmEngine.loadedModelPath
+                : null;
+
+        try {
+          await aiService.loadLlmModel(item.localPath!);
+        } catch (e) {
+          // Attempt rollback to previously loaded LLM model
+          if (previousLoadedPath != null &&
+              previousLoadedPath != item.localPath) {
+            try {
+              await aiService.loadLlmModel(previousLoadedPath);
+              _modelErrors[item.id] =
+                  'Failed to load model "${item.displayName}": $e. Restored previous model.';
+            } catch (rollbackErr) {
+              _modelErrors[item.id] =
+                  'Failed to load model "${item.displayName}": $e. Also failed to restore previous model: $rollbackErr.';
+            }
+          } else {
+            _modelErrors[item.id] =
+                'Failed to load model "${item.displayName}": $e';
+          }
+          rethrow;
         }
-        await aiService.loadLlmModel(item.localPath!);
       } else {
-        if (aiService.speechEngine.isLoaded) {
-          await aiService.unloadSpeechModel();
+        final previousLoadedPath =
+            aiService.speechEngine.isLoaded
+                ? aiService.speechEngine.loadedModelPath
+                : null;
+
+        try {
+          await aiService.loadSpeechModel(item.localPath!);
+        } catch (e) {
+          // Attempt rollback to previously loaded Whisper model
+          if (previousLoadedPath != null &&
+              previousLoadedPath != item.localPath) {
+            try {
+              await aiService.loadSpeechModel(previousLoadedPath);
+              _modelErrors[item.id] =
+                  'Failed to load model "${item.displayName}": $e. Restored previous model.';
+            } catch (rollbackErr) {
+              _modelErrors[item.id] =
+                  'Failed to load model "${item.displayName}": $e. Also failed to restore previous model: $rollbackErr.';
+            }
+          } else {
+            _modelErrors[item.id] =
+                'Failed to load model "${item.displayName}": $e';
+          }
+          rethrow;
         }
-        await aiService.loadSpeechModel(item.localPath!);
       }
-    } catch (e) {
-      _modelErrors[item.id] = 'Failed to load model: $e';
-      rethrow;
     } finally {
       _loadingModelIds.remove(item.id);
       await refreshModels();
@@ -471,17 +535,22 @@ class ModelManager extends ChangeNotifier {
   }
 
   Future<void> deleteModel(ManagedModelItem item) async {
-    // 1. If currently loaded, unload safely first
+    // 1. If actively downloading, cancel download first
+    if (downloader.isDownloading(item.id)) {
+      cancelDownload(item.id);
+    }
+
+    // 2. If currently loaded, unload safely first
     if (item.isLoaded) {
       await unloadModel(item);
     }
 
-    // 2. Delete file
+    // 3. Delete file
     if (item.localPath != null && item.localPath!.isNotEmpty) {
       await storage.deleteModelFile(item.localPath!);
     }
 
-    // 3. Forget persisted path in AiService if it was the selected model
+    // 4. Forget persisted path in AiService if it was the selected model
     if (item.type == ModelType.llm) {
       if (aiService.configuredLlmPath == item.localPath) {
         await aiService.forgetLlmModel(deleteFile: false);
@@ -545,6 +614,13 @@ class ModelManager extends ChangeNotifier {
   void dispose() {
     _isDisposed = true;
     aiService.removeListener(_onAiServiceChanged);
+    for (final id in _downloadProgress.keys.toList()) {
+      try {
+        downloader.cancel(id);
+      } catch (_) {}
+    }
+    _downloadProgress.clear();
+    _loadingModelIds.clear();
     super.dispose();
   }
 }
