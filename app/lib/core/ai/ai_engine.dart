@@ -6,7 +6,13 @@ abstract class AiEngine {
   String? get loadedModelPath;
   AiModelState get state;
 
-  Future<void> loadModel(String modelPath, {AiGenerationSettings? settings});
+  Future<void> loadModel(
+    String modelPath, {
+    AiGenerationSettings? settings,
+    LlamaRuntimeSettings? runtimeSettings,
+  });
+  Future<List<LlamaBackendInfo>> getAvailableBackends();
+  Future<LlamaActiveBackendInfo> getActiveBackendInfo();
   Stream<String> generate(
     String prompt, {
     AiGenerationSettings? settings,

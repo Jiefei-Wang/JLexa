@@ -89,6 +89,7 @@ class NativeLlamaEngine implements AiEngine {
   Future<void> loadModel(
     String modelPath, {
     AiGenerationSettings? settings,
+    LlamaRuntimeSettings? runtimeSettings,
   }) async {
     if (!Platform.isAndroid) {
       throw const AiUnsupportedPlatformException();
@@ -96,11 +97,18 @@ class NativeLlamaEngine implements AiEngine {
 
     _state = AiModelState.loading;
     try {
+      final runtime = runtimeSettings ?? LlamaRuntimeSettings.defaultSettings;
       final bool success =
           await _channel.invokeMethod('loadModel', {
             'modelPath': modelPath,
-            'contextLength': settings?.contextLength ?? 2048,
-            'threads': settings?.threads ?? 4,
+            'backend': runtime.backend.name,
+            'contextLength':
+                runtime.contextLength ?? settings?.contextLength ?? 2048,
+            'threads': runtime.threads ?? settings?.threads ?? 4,
+            'gpuLayers': runtime.gpuLayers ?? -1,
+            'batchSize': runtime.batchSize ?? 512,
+            'ubatchSize': runtime.microBatchSize ?? 512,
+            'flashAttention': runtime.flashAttention.nativeValue,
           }) ??
           false;
 
@@ -121,6 +129,52 @@ class NativeLlamaEngine implements AiEngine {
       _loadedModelPath = null;
       _state = AiModelState.error;
       rethrow;
+    }
+  }
+
+  @override
+  Future<List<LlamaBackendInfo>> getAvailableBackends() async {
+    if (!Platform.isAndroid) {
+      return const [
+        LlamaBackendInfo(
+          backend: 'cpu',
+          compiled: true,
+          available: true,
+          deviceName: 'CPU (Host)',
+        ),
+      ];
+    }
+    try {
+      final List<dynamic>? list = await _channel.invokeMethod(
+        'getAvailableBackends',
+      );
+      if (list == null) return const [];
+      return list.map((item) => LlamaBackendInfo.fromMap(item as Map)).toList();
+    } catch (_) {
+      return const [
+        LlamaBackendInfo(
+          backend: 'cpu',
+          compiled: true,
+          available: true,
+          deviceName: 'CPU',
+        ),
+      ];
+    }
+  }
+
+  @override
+  Future<LlamaActiveBackendInfo> getActiveBackendInfo() async {
+    if (!Platform.isAndroid) {
+      return const LlamaActiveBackendInfo();
+    }
+    try {
+      final Map<dynamic, dynamic>? map = await _channel.invokeMethod(
+        'getActiveBackendInfo',
+      );
+      if (map == null) return const LlamaActiveBackendInfo();
+      return LlamaActiveBackendInfo.fromMap(map);
+    } catch (_) {
+      return const LlamaActiveBackendInfo();
     }
   }
 

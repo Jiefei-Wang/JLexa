@@ -10,9 +10,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.annotation.Keep
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
+@Keep
 class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
     companion object {
@@ -30,7 +32,18 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
         }
     }
 
-    private external fun nativeLoadModel(modelPath: String, contextLength: Int, threads: Int): Boolean
+    private external fun nativeGetAvailableBackends(): List<Map<String, Any>>
+    private external fun nativeGetActiveBackendInfo(): Map<String, Any>?
+    private external fun nativeLoadModel(
+        modelPath: String,
+        backend: String,
+        contextLength: Int,
+        threads: Int,
+        gpuLayers: Int,
+        batchSize: Int,
+        ubatchSize: Int,
+        flashAttention: Int
+    ): Boolean
     private external fun nativeUnloadModel()
     private external fun nativeIsModelLoaded(): Boolean
     private external fun nativeGenerate(
@@ -55,9 +68,58 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
     private var activeRequestId: String? = null
 
     // Native token & completion callback interface
+    @Keep
     interface NativeGenerationCallback {
+        @Keep
         fun onToken(token: String)
+        @Keep
         fun onComplete(cancelled: Boolean, errorMsg: String)
+    }
+
+    @Keep
+    class GenerationCallback(
+        private val bridge: LlamaBridge,
+        private val requestId: String
+    ) : NativeGenerationCallback {
+        override fun onToken(token: String) {
+            bridge.sendEvent(
+                mapOf(
+                    "requestId" to requestId,
+                    "type" to "token",
+                    "text" to token
+                )
+            )
+        }
+
+        override fun onComplete(cancelled: Boolean, errorMsg: String) {
+            bridge.isGenerating.set(false)
+            if (bridge.activeRequestId == requestId) {
+                bridge.activeRequestId = null
+            }
+            if (cancelled) {
+                bridge.sendEvent(
+                    mapOf(
+                        "requestId" to requestId,
+                        "type" to "cancelled"
+                    )
+                )
+            } else if (errorMsg.isNotEmpty()) {
+                bridge.sendEvent(
+                    mapOf(
+                        "requestId" to requestId,
+                        "type" to "error",
+                        "message" to errorMsg
+                    )
+                )
+            } else {
+                bridge.sendEvent(
+                    mapOf(
+                        "requestId" to requestId,
+                        "type" to "done"
+                    )
+                )
+            }
+        }
     }
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
@@ -96,10 +158,33 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
         }
 
         when (call.method) {
+            "getAvailableBackends" -> {
+                try {
+                    val backends = nativeGetAvailableBackends()
+                    result.success(backends)
+                } catch (e: Throwable) {
+                    result.error("BACKEND_DISCOVERY_ERROR", e.message, null)
+                }
+            }
+
+            "getActiveBackendInfo" -> {
+                try {
+                    val info = nativeGetActiveBackendInfo()
+                    result.success(info)
+                } catch (e: Throwable) {
+                    result.error("BACKEND_INFO_ERROR", e.message, null)
+                }
+            }
+
             "loadModel" -> {
                 val modelPath = call.argument<String>("modelPath")
+                val backend = call.argument<String>("backend") ?: "auto"
                 val contextLength = call.argument<Int>("contextLength") ?: 2048
                 val threads = call.argument<Int>("threads") ?: 4
+                val gpuLayers = call.argument<Int>("gpuLayers") ?: -1
+                val batchSize = call.argument<Int>("batchSize") ?: 512
+                val ubatchSize = call.argument<Int>("ubatchSize") ?: 512
+                val flashAttention = call.argument<Int>("flashAttention") ?: -1
 
                 if (modelPath == null) {
                     result.error("INVALID_ARGS", "modelPath is required", null)
@@ -108,7 +193,16 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
 
                 scope.launch {
                     try {
-                        val loaded = nativeLoadModel(modelPath, contextLength, threads)
+                        val loaded = nativeLoadModel(
+                            modelPath,
+                            backend,
+                            contextLength,
+                            threads,
+                            gpuLayers,
+                            batchSize,
+                            ubatchSize,
+                            flashAttention
+                        )
                         withContext(Dispatchers.Main) {
                             result.success(loaded)
                         }
@@ -175,47 +269,7 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
                             seed,
                             chatRoles,
                             chatContents,
-                            object : NativeGenerationCallback {
-                                override fun onToken(token: String) {
-                                    sendEvent(
-                                        mapOf(
-                                            "requestId" to requestId,
-                                            "type" to "token",
-                                            "text" to token
-                                        )
-                                    )
-                                }
-
-                                override fun onComplete(cancelled: Boolean, errorMsg: String) {
-                                    isGenerating.set(false)
-                                    if (activeRequestId == requestId) {
-                                        activeRequestId = null
-                                    }
-                                    if (cancelled) {
-                                        sendEvent(
-                                            mapOf(
-                                                "requestId" to requestId,
-                                                "type" to "cancelled"
-                                            )
-                                        )
-                                    } else if (errorMsg.isNotEmpty()) {
-                                        sendEvent(
-                                            mapOf(
-                                                "requestId" to requestId,
-                                                "type" to "error",
-                                                "message" to errorMsg
-                                            )
-                                        )
-                                    } else {
-                                        sendEvent(
-                                            mapOf(
-                                                "requestId" to requestId,
-                                                "type" to "done"
-                                            )
-                                        )
-                                    }
-                                }
-                            }
+                            GenerationCallback(this@LlamaBridge, requestId)
                         )
                     } catch (e: Throwable) {
                         isGenerating.set(false)

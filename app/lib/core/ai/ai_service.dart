@@ -11,12 +11,31 @@ import 'native_ai_bridge.dart';
 import 'prompt_builder.dart';
 import 'speech_engine.dart';
 
+enum AiServiceInitState {
+  uninitialized,
+  initializing,
+  ready,
+  readyWithWarnings,
+}
+
 class AiService extends ChangeNotifier {
   final AiEngine llmEngine;
   final SpeechRecognitionEngine speechEngine;
 
+  AiServiceInitState _initState = AiServiceInitState.uninitialized;
+  AiServiceInitState get initState => _initState;
+
   AiGenerationSettings _settings = const AiGenerationSettings();
   AiGenerationSettings get settings => _settings;
+
+  LlamaRuntimeSettings _llamaRuntimeSettings = const LlamaRuntimeSettings();
+  LlamaRuntimeSettings get llamaRuntimeSettings => _llamaRuntimeSettings;
+
+  List<LlamaBackendInfo> _availableBackends = const [];
+  List<LlamaBackendInfo> get availableBackends => _availableBackends;
+
+  LlamaActiveBackendInfo _activeBackendInfo = const LlamaActiveBackendInfo();
+  LlamaActiveBackendInfo get activeBackendInfo => _activeBackendInfo;
 
   String? _configuredLlmPath;
   String? get configuredLlmPath => _configuredLlmPath;
@@ -24,15 +43,30 @@ class AiService extends ChangeNotifier {
   String? _configuredSpeechPath;
   String? get configuredSpeechPath => _configuredSpeechPath;
 
+  String? _llmRestorationError;
+  String? get llmRestorationError => _llmRestorationError;
+
+  String? _speechRestorationError;
+  String? get speechRestorationError => _speechRestorationError;
+
   bool get isGenerating => llmEngine.state == AiModelState.generating;
 
   AiService({AiEngine? llm, SpeechRecognitionEngine? speech})
     : llmEngine = llm ?? NativeLlamaEngine(),
-      speechEngine = speech ?? NativeWhisperEngine() {
-    _loadSavedSettings();
-  }
+      speechEngine = speech ?? NativeWhisperEngine();
 
-  Future<void> _loadSavedSettings() async {
+  Future<void> initialize() async {
+    if (_initState == AiServiceInitState.initializing ||
+        _initState == AiServiceInitState.ready ||
+        _initState == AiServiceInitState.readyWithWarnings) {
+      return;
+    }
+    _initState = AiServiceInitState.initializing;
+    notifyListeners();
+
+    _llmRestorationError = null;
+    _speechRestorationError = null;
+
     try {
       final db = await AppDatabase.instance.database;
       final results = await db.query('app_settings');
@@ -52,15 +86,90 @@ class AiService extends ChangeNotifier {
 
       if (map.containsKey('ai_generation_settings')) {
         try {
-          final decoded = jsonDecode(
-            map['ai_generation_settings']!,
-          ) as Map<String, dynamic>;
+          final decoded =
+              jsonDecode(map['ai_generation_settings']!)
+                  as Map<String, dynamic>;
           _settings = AiGenerationSettings.fromMap(decoded);
         } catch (_) {}
       }
 
+      // Load & migrate LlamaRuntimeSettings
+      if (map.containsKey('llama_runtime_settings')) {
+        try {
+          final decoded =
+              jsonDecode(map['llama_runtime_settings']!)
+                  as Map<String, dynamic>;
+          _llamaRuntimeSettings = LlamaRuntimeSettings.fromMap(decoded);
+        } catch (_) {}
+      } else {
+        // Migrate from legacy generation settings if present
+        _llamaRuntimeSettings = LlamaRuntimeSettings(
+          backend: LlamaBackendPreference.auto,
+          contextLength: _settings.contextLength,
+          threads: _settings.threads,
+        );
+      }
+
+      // Discover available backends from native engine
+      try {
+        _availableBackends = await llmEngine.getAvailableBackends();
+      } catch (_) {
+        _availableBackends = const [
+          LlamaBackendInfo(
+            backend: 'cpu',
+            compiled: true,
+            available: true,
+            deviceName: 'CPU',
+          ),
+        ];
+      }
+
+      // 1. Independent LLM restoration
+      if (_configuredLlmPath != null && _configuredLlmPath!.isNotEmpty) {
+        final llmFile = File(_configuredLlmPath!);
+        if (await llmFile.exists()) {
+          try {
+            await llmEngine.loadModel(
+              _configuredLlmPath!,
+              settings: _settings,
+              runtimeSettings: _llamaRuntimeSettings,
+            );
+            _activeBackendInfo = await llmEngine.getActiveBackendInfo();
+          } catch (e) {
+            _llmRestorationError =
+                'Could not reload saved LLM: ${e.toString()}';
+          }
+        } else {
+          _llmRestorationError =
+              'Configured LLM file not found: $_configuredLlmPath';
+        }
+      }
+
+      // 2. Independent Whisper restoration
+      if (_configuredSpeechPath != null && _configuredSpeechPath!.isNotEmpty) {
+        final whisperFile = File(_configuredSpeechPath!);
+        if (await whisperFile.exists()) {
+          try {
+            await speechEngine.loadModel(_configuredSpeechPath!);
+          } catch (e) {
+            _speechRestorationError =
+                'Could not reload saved Whisper model: ${e.toString()}';
+          }
+        } else {
+          _speechRestorationError =
+              'Configured Whisper file not found: $_configuredSpeechPath';
+        }
+      }
+
+      _initState =
+          (_llmRestorationError != null || _speechRestorationError != null)
+              ? AiServiceInitState.readyWithWarnings
+              : AiServiceInitState.ready;
       notifyListeners();
-    } catch (_) {}
+    } catch (e) {
+      _initState = AiServiceInitState.readyWithWarnings;
+      notifyListeners();
+    }
   }
 
   Future<void> saveSetting(String key, String value) async {
@@ -77,11 +186,21 @@ class AiService extends ChangeNotifier {
     await saveSetting(key, path);
   }
 
-  Future<void> loadLlmModel(String path) async {
+  Future<void> loadLlmModel(
+    String path, {
+    LlamaRuntimeSettings? runtimeSettings,
+  }) async {
     final prevPath = _configuredLlmPath;
+    final rSettings = runtimeSettings ?? _llamaRuntimeSettings;
     try {
-      await llmEngine.loadModel(path, settings: _settings);
+      await llmEngine.loadModel(
+        path,
+        settings: _settings,
+        runtimeSettings: rSettings,
+      );
       _configuredLlmPath = path;
+      _llmRestorationError = null;
+      _activeBackendInfo = await llmEngine.getActiveBackendInfo();
       await saveSetting('llm_model_path', path);
       notifyListeners();
     } catch (e) {
@@ -94,6 +213,7 @@ class AiService extends ChangeNotifier {
   /// Unloads the native LLM model from RAM while preserving the configured path.
   Future<void> unloadLlmModel() async {
     await llmEngine.unload();
+    _activeBackendInfo = const LlamaActiveBackendInfo();
     notifyListeners();
   }
 
@@ -102,6 +222,8 @@ class AiService extends ChangeNotifier {
     final oldPath = _configuredLlmPath;
     await llmEngine.unload();
     _configuredLlmPath = null;
+    _llmRestorationError = null;
+    _activeBackendInfo = const LlamaActiveBackendInfo();
     await saveSetting('llm_model_path', '');
     if (deleteFile && oldPath != null) {
       try {
@@ -117,6 +239,7 @@ class AiService extends ChangeNotifier {
     try {
       await speechEngine.loadModel(path);
       _configuredSpeechPath = path;
+      _speechRestorationError = null;
       await saveSetting('whisper_model_path', path);
       notifyListeners();
     } catch (e) {
@@ -137,6 +260,7 @@ class AiService extends ChangeNotifier {
     final oldPath = _configuredSpeechPath;
     await speechEngine.unload();
     _configuredSpeechPath = null;
+    _speechRestorationError = null;
     await saveSetting('whisper_model_path', '');
     if (deleteFile && oldPath != null) {
       try {
@@ -151,6 +275,31 @@ class AiService extends ChangeNotifier {
     _settings = newSettings;
     saveSetting('ai_generation_settings', jsonEncode(newSettings.toMap()));
     notifyListeners();
+  }
+
+  Future<void> updateLlamaRuntimeSettings(
+    LlamaRuntimeSettings newSettings, {
+    bool autoReload = true,
+  }) async {
+    _llamaRuntimeSettings = newSettings;
+    await saveSetting(
+      'llama_runtime_settings',
+      jsonEncode(newSettings.toMap()),
+    );
+    notifyListeners();
+
+    if (autoReload && llmEngine.isLoaded && _configuredLlmPath != null) {
+      try {
+        await loadLlmModel(_configuredLlmPath!, runtimeSettings: newSettings);
+      } catch (_) {}
+    }
+  }
+
+  Future<void> resetLlamaRuntimeSettings({bool autoReload = true}) async {
+    await updateLlamaRuntimeSettings(
+      LlamaRuntimeSettings.defaultSettings,
+      autoReload: autoReload,
+    );
   }
 
   AiGenerationHandle startExplainSentence(

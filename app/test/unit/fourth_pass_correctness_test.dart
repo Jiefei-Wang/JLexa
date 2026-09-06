@@ -109,10 +109,28 @@ class TestFourthPassAiEngine implements AiEngine {
   Future<void> loadModel(
     String modelPath, {
     AiGenerationSettings? settings,
+    LlamaRuntimeSettings? runtimeSettings,
   }) async {
     _isLoaded = true;
     _loadedModelPath = modelPath;
     _state = AiModelState.ready;
+  }
+
+  @override
+  Future<List<LlamaBackendInfo>> getAvailableBackends() async {
+    return const [
+      LlamaBackendInfo(
+        backend: 'cpu',
+        compiled: true,
+        available: true,
+        deviceName: 'CPU (Mock)',
+      ),
+    ];
+  }
+
+  @override
+  Future<LlamaActiveBackendInfo> getActiveBackendInfo() async {
+    return const LlamaActiveBackendInfo();
   }
 
   @override

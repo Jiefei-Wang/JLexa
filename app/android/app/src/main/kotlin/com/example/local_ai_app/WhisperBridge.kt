@@ -12,9 +12,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import androidx.annotation.Keep
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
+@Keep
 class WhisperBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
     companion object {
@@ -53,8 +55,28 @@ class WhisperBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandle
     private val isCancelled = AtomicBoolean(false)
     private var activeRequestId: String? = null
 
+    @Keep
     interface NativeProgressCallback {
+        @Keep
         fun onProgress(progress: Int)
+    }
+
+    @Keep
+    class ProgressCallback(
+        private val bridge: WhisperBridge,
+        private val requestId: String
+    ) : NativeProgressCallback {
+        override fun onProgress(progress: Int) {
+            bridge.mainHandler.post {
+                bridge.eventSink?.success(
+                    mapOf(
+                        "requestId" to requestId,
+                        "type" to "progress",
+                        "progress" to (progress.toDouble() / 100.0).coerceIn(0.0, 1.0)
+                    )
+                )
+            }
+        }
     }
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
@@ -210,19 +232,7 @@ class WhisperBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandle
                             pcm.validSampleCount,
                             threads,
                             "en",
-                            object : NativeProgressCallback {
-                                override fun onProgress(progress: Int) {
-                                    mainHandler.post {
-                                        eventSink?.success(
-                                            mapOf(
-                                                "requestId" to requestId,
-                                                "type" to "progress",
-                                                "progress" to (progress.toDouble() / 100.0).coerceIn(0.0, 1.0)
-                                            )
-                                        )
-                                    }
-                                }
-                            }
+                            ProgressCallback(this@WhisperBridge, requestId)
                         )
 
                         if (isCancelled.get()) {

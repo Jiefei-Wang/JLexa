@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+
+import '../dictionary/offline_dictionary_data.dart';
 
 class AppDatabase {
   static final AppDatabase instance = AppDatabase._init();
@@ -35,12 +38,85 @@ class AppDatabase {
           await db.execute(
             "UPDATE audio_lessons SET transcript_status = 'none' WHERE transcript_status = 'processing'",
           );
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS offline_dictionary (
+              word TEXT PRIMARY KEY,
+              phonetic TEXT,
+              part_of_speech TEXT,
+              definitions_json TEXT NOT NULL,
+              chinese_definitions_json TEXT NOT NULL,
+              examples_json TEXT NOT NULL,
+              synonyms_json TEXT NOT NULL,
+              is_high_frequency INTEGER NOT NULL DEFAULT 0
+            )
+          ''');
+          await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_offline_dict_word ON offline_dictionary(word)',
+          );
+
+          final count = Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM offline_dictionary'),
+          );
+          if (count == null || count < kOfflineDictionaryEntries.length) {
+            final batch = db.batch();
+            for (final entry in kOfflineDictionaryEntries) {
+              batch.insert('offline_dictionary', {
+                'word': entry.word.toLowerCase(),
+                'phonetic': entry.phonetic,
+                'part_of_speech': entry.partOfSpeech,
+                'definitions_json': jsonEncode(entry.definitions),
+                'chinese_definitions_json': jsonEncode(
+                  entry.chineseDefinitions,
+                ),
+                'examples_json': jsonEncode(
+                  entry.examples.map((e) => e.toMap()).toList(),
+                ),
+                'synonyms_json': jsonEncode(entry.synonyms),
+                'is_high_frequency': entry.isHighFrequency ? 1 : 0,
+              }, conflictAlgorithm: ConflictAlgorithm.ignore);
+            }
+            await batch.commit(noResult: true);
+          }
         } catch (_) {}
       },
     );
   }
 
   Future<void> _createDB(Database db, int version) async {
+    // Offline dictionary
+    await db.execute('''
+      CREATE TABLE offline_dictionary (
+        word TEXT PRIMARY KEY,
+        phonetic TEXT,
+        part_of_speech TEXT,
+        definitions_json TEXT NOT NULL,
+        chinese_definitions_json TEXT NOT NULL,
+        examples_json TEXT NOT NULL,
+        synonyms_json TEXT NOT NULL,
+        is_high_frequency INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_offline_dict_word ON offline_dictionary(word)',
+    );
+
+    final batch = db.batch();
+    for (final entry in kOfflineDictionaryEntries) {
+      batch.insert('offline_dictionary', {
+        'word': entry.word.toLowerCase(),
+        'phonetic': entry.phonetic,
+        'part_of_speech': entry.partOfSpeech,
+        'definitions_json': jsonEncode(entry.definitions),
+        'chinese_definitions_json': jsonEncode(entry.chineseDefinitions),
+        'examples_json': jsonEncode(
+          entry.examples.map((e) => e.toMap()).toList(),
+        ),
+        'synonyms_json': jsonEncode(entry.synonyms),
+        'is_high_frequency': entry.isHighFrequency ? 1 : 0,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
+    await batch.commit(noResult: true);
+
     // Recent search keywords
     await db.execute('''
       CREATE TABLE recent_searches (

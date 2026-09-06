@@ -75,13 +75,12 @@ class DictionaryController extends ChangeNotifier {
       _isAiGenerating = false;
     }
     _selectedTab = index;
-    if (_selectedTab == 1 &&
-        _aiTranslationText.isEmpty &&
-        _currentEntry != null) {
+    final query = _currentEntry?.word ?? _currentQuery;
+    if (_selectedTab == 1 && _aiTranslationText.isEmpty && query.isNotEmpty) {
       _fetchAiTranslation();
     } else if (_selectedTab == 2 &&
         _aiExplanationText.isEmpty &&
-        _currentEntry != null) {
+        query.isNotEmpty) {
       _fetchAiExplanation();
     }
     notifyListeners();
@@ -128,6 +127,8 @@ class DictionaryController extends ChangeNotifier {
     bool saved = false;
     if (entry != null) {
       saved = await vocabularyRepo.isWordSaved(entry.word);
+    } else {
+      saved = await vocabularyRepo.isWordSaved(clean);
     }
     if (gen != _searchGeneration || _isDisposed) return;
 
@@ -147,39 +148,42 @@ class DictionaryController extends ChangeNotifier {
   }
 
   Future<void> toggleSaveToVocabulary() async {
-    final targetEntry = _currentEntry;
-    if (targetEntry == null || _isSaving || _isDisposed) return;
+    final targetWord = _currentEntry?.word ?? _currentQuery;
+    if (targetWord.isEmpty || _isSaving || _isDisposed) return;
     _isSaving = true;
 
     try {
       if (_isSaved) {
-        final existing = await vocabularyRepo.getWord(targetEntry.word);
+        final existing = await vocabularyRepo.getWord(targetWord);
         if (existing != null) {
           await vocabularyRepo.deleteWord(existing.id);
-          if (_currentEntry?.word == targetEntry.word && !_isDisposed) {
+          if (!_isDisposed) {
             _isSaved = false;
           }
         }
       } else {
         final newWord = VocabularyWord(
           id: const Uuid().v4(),
-          word: targetEntry.word,
-          phonetic: targetEntry.phonetic,
-          partOfSpeech: targetEntry.partOfSpeech,
-          definitionSnapshot: targetEntry.definitions.isNotEmpty
-              ? targetEntry.definitions.first
-              : '',
-          translationSnapshot: targetEntry.chineseDefinitions.isNotEmpty
-              ? targetEntry.chineseDefinitions.first
-              : '',
+          word: targetWord,
+          phonetic: _currentEntry?.phonetic ?? '',
+          partOfSpeech: _currentEntry?.partOfSpeech ?? '',
+          definitionSnapshot:
+              _currentEntry?.definitions.isNotEmpty == true
+                  ? _currentEntry!.definitions.first
+                  : (_aiExplanationText.isNotEmpty ? _aiExplanationText : ''),
+          translationSnapshot:
+              _currentEntry?.chineseDefinitions.isNotEmpty == true
+                  ? _currentEntry!.chineseDefinitions.first
+                  : (_aiTranslationText.isNotEmpty ? _aiTranslationText : ''),
           source: 'Dictionary',
-          sourceSentence: targetEntry.examples.isNotEmpty
-              ? targetEntry.examples.first.english
-              : null,
+          sourceSentence:
+              _currentEntry?.examples.isNotEmpty == true
+                  ? _currentEntry!.examples.first.english
+                  : null,
           dateAdded: DateTime.now(),
         );
         await vocabularyRepo.saveWord(newWord);
-        if (_currentEntry?.word == targetEntry.word && !_isDisposed) {
+        if (!_isDisposed) {
           _isSaved = true;
         }
       }
@@ -192,8 +196,9 @@ class DictionaryController extends ChangeNotifier {
   }
 
   Future<void> _fetchAiTranslation() async {
-    if (_currentEntry == null) return;
-    final targetWord = _currentEntry!.word;
+    final targetWord = _currentEntry?.word ?? _currentQuery;
+    if (targetWord.isEmpty) return;
+
     final gen = ++_aiGeneration;
     _activeAiHandle?.cancel();
     _activeAiHandle = null;
@@ -242,8 +247,9 @@ class DictionaryController extends ChangeNotifier {
   }
 
   Future<void> _fetchAiExplanation() async {
-    if (_currentEntry == null) return;
-    final targetWord = _currentEntry!.word;
+    final targetWord = _currentEntry?.word ?? _currentQuery;
+    if (targetWord.isEmpty) return;
+
     final gen = ++_aiGeneration;
     _activeAiHandle?.cancel();
     _activeAiHandle = null;
@@ -292,8 +298,8 @@ class DictionaryController extends ChangeNotifier {
   }
 
   Future<void> askAiAboutWord(String prompt) async {
-    if (_currentEntry == null) return;
-    final targetWord = _currentEntry!.word;
+    final targetWord = _currentEntry?.word ?? _currentQuery;
+    if (targetWord.isEmpty) return;
     final gen = ++_aiGeneration;
     _activeAiHandle?.cancel();
     _activeAiHandle = null;

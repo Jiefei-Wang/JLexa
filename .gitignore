@@ -54,6 +54,8 @@ app/android/app/release/
 .cxx/
 *.iml
 .idea/
+!.idea/runConfigurations/
+!app/.idea/runConfigurations/
 
 # iOS generated & pods
 app/ios/.symlinks/

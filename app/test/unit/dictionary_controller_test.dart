@@ -30,9 +30,30 @@ class ControllableAiEngine implements AiEngine {
   AiModelState get state => _isLoaded ? AiModelState.ready : AiModelState.noModel;
 
   @override
-  Future<void> loadModel(String modelPath, {AiGenerationSettings? settings}) async {
+  Future<void> loadModel(
+    String modelPath, {
+    AiGenerationSettings? settings,
+    LlamaRuntimeSettings? runtimeSettings,
+  }) async {
     _isLoaded = true;
     _loadedPath = modelPath;
+  }
+
+  @override
+  Future<List<LlamaBackendInfo>> getAvailableBackends() async {
+    return const [
+      LlamaBackendInfo(
+        backend: 'cpu',
+        compiled: true,
+        available: true,
+        deviceName: 'CPU (Mock)',
+      ),
+    ];
+  }
+
+  @override
+  Future<LlamaActiveBackendInfo> getActiveBackendInfo() async {
+    return const LlamaActiveBackendInfo();
   }
 
   @override

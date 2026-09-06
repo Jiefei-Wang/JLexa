@@ -27,6 +27,13 @@ class SettingsController extends ChangeNotifier {
   List<ManagedModelItem> get llmModels => modelManager.llmModels;
   List<ManagedModelItem> get whisperModels => modelManager.whisperModels;
 
+  LlamaRuntimeSettings get llamaSettings => aiService.llamaRuntimeSettings;
+  List<LlamaBackendInfo> get availableBackends => aiService.availableBackends;
+  LlamaActiveBackendInfo get activeBackendInfo => aiService.activeBackendInfo;
+  String? get llmRestorationError => aiService.llmRestorationError;
+  String? get speechRestorationError => aiService.speechRestorationError;
+  AiGenerationSettings get generationSettings => aiService.settings;
+
   @override
   void notifyListeners() {
     if (!_isDisposed) {
@@ -48,9 +55,56 @@ class SettingsController extends ChangeNotifier {
            ),
        filePicker = picker ?? PlatformModelFilePicker() {
     modelManager.addListener(_onModelManagerChanged);
+    aiService.addListener(_onAiServiceChanged);
   }
 
   void _onModelManagerChanged() {
+    if (!_isDisposed) {
+      notifyListeners();
+    }
+  }
+
+  void _onAiServiceChanged() {
+    if (!_isDisposed) {
+      notifyListeners();
+    }
+  }
+
+  Future<void> updateBackendPreference(LlamaBackendPreference pref) async {
+    final updated = llamaSettings.copyWith(backend: pref);
+    await updateLlamaSettings(updated);
+  }
+
+  Future<void> updateLlamaSettings(LlamaRuntimeSettings newSettings) async {
+    _errorMessage = null;
+    try {
+      await aiService.updateLlamaRuntimeSettings(newSettings, autoReload: true);
+    } catch (e) {
+      if (!_isDisposed) {
+        _errorMessage = 'Failed to apply llama settings: $e';
+      }
+    }
+    if (!_isDisposed) {
+      notifyListeners();
+    }
+  }
+
+  Future<void> resetLlamaSettings() async {
+    _errorMessage = null;
+    try {
+      await aiService.resetLlamaRuntimeSettings(autoReload: true);
+    } catch (e) {
+      if (!_isDisposed) {
+        _errorMessage = 'Failed to reset settings: $e';
+      }
+    }
+    if (!_isDisposed) {
+      notifyListeners();
+    }
+  }
+
+  void updateAiGenerationSettings(AiGenerationSettings settings) {
+    aiService.updateSettings(settings);
     if (!_isDisposed) {
       notifyListeners();
     }
@@ -221,6 +275,7 @@ class SettingsController extends ChangeNotifier {
   void dispose() {
     _isDisposed = true;
     modelManager.removeListener(_onModelManagerChanged);
+    aiService.removeListener(_onAiServiceChanged);
     if (_ownsManager) {
       modelManager.dispose();
     }

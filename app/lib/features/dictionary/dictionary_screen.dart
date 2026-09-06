@@ -167,24 +167,24 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
               Expanded(
                 child: _controller.isLoading
                     ? const Center(child: CircularProgressIndicator())
-                    : entry == null
+                    : _controller.currentQuery.isEmpty
                     ? Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             const Icon(
-                              Icons.search_off,
+                              Icons.search,
                               size: 48,
                               color: AppColors.textTertiary,
                             ),
                             const SizedBox(height: 12),
-                            Text(
-                              'No entry found for "${_controller.currentQuery}"',
+                            const Text(
+                              'Search any English word',
                               style: AppTypography.titleSmall,
                             ),
                             const SizedBox(height: 4),
                             const Text(
-                              'Try searching another word like "resilient", "prioritize", or "meticulous".',
+                              'Try "resilient", "meticulous", "prioritize", "endeavor", etc.',
                               style: AppTypography.bodySmall,
                               textAlign: TextAlign.center,
                             ),
@@ -205,7 +205,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                     Row(
                                       children: [
                                         Text(
-                                          entry.word,
+                                          entry?.word ?? _controller.currentQuery,
                                           style: AppTypography.wordDisplay,
                                         ),
                                         const SizedBox(width: 8),
@@ -216,61 +216,66 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                             size: 24,
                                           ),
                                           onPressed: () =>
-                                              _controller.speak(entry.word),
+                                              _controller.speak(
+                                                entry?.word ??
+                                                    _controller.currentQuery,
+                                              ),
                                           tooltip: 'Pronounce word',
                                         ),
                                       ],
                                     ),
-                                    Text(
-                                      entry.phonetic,
-                                      style: AppTypography.phonetic,
-                                    ),
+                                    if (entry != null && entry.phonetic.isNotEmpty)
+                                      Text(
+                                        entry.phonetic,
+                                        style: AppTypography.phonetic,
+                                      ),
                                   ],
                                 ),
                               ),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  if (entry.isHighFrequency)
+                              if (entry != null)
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    if (entry.isHighFrequency)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 3,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.successLight,
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: const Text(
+                                          'High Frequency',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppColors.success,
+                                          ),
+                                        ),
+                                      ),
+                                    const SizedBox(height: 4),
                                     Container(
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 8,
                                         vertical: 3,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: AppColors.successLight,
+                                        color: AppColors.warningLight,
                                         borderRadius: BorderRadius.circular(8),
                                       ),
-                                      child: const Text(
-                                        'High Frequency',
-                                        style: TextStyle(
+                                      child: Text(
+                                        entry.partOfSpeech,
+                                        style: const TextStyle(
                                           fontSize: 11,
                                           fontWeight: FontWeight.w600,
-                                          color: AppColors.success,
+                                          color: AppColors.warning,
                                         ),
                                       ),
                                     ),
-                                  const SizedBox(height: 4),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 3,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.warningLight,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      entry.partOfSpeech,
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: AppColors.warning,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                  ],
+                                ),
                             ],
                           ),
                           const SizedBox(height: 16),
@@ -294,14 +299,71 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
 
                           // Tab Content
                           if (_controller.selectedTab == 0) ...[
-                            WordDetailCard(
-                              entry: entry,
-                              onSpeak: _controller.speak,
-                              onSynonymTap: (syn) {
-                                _searchTextController.text = syn;
-                                _controller.search(syn);
-                              },
-                            ),
+                            if (entry != null)
+                              WordDetailCard(
+                                entry: entry,
+                                onSpeak: _controller.speak,
+                                onSynonymTap: (syn) {
+                                  _searchTextController.text = syn;
+                                  _controller.search(syn);
+                                },
+                              )
+                            else
+                              Container(
+                                padding: const EdgeInsets.all(20),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surface,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: AppColors.border),
+                                ),
+                                child: Column(
+                                  children: [
+                                    const Icon(
+                                      Icons.search_off,
+                                      size: 40,
+                                      color: AppColors.textTertiary,
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      'No offline dictionary entry for "${_controller.currentQuery}"',
+                                      style: AppTypography.titleSmall,
+                                      textAlign: TextAlign.center,
+                                    ),
+                                    const SizedBox(height: 6),
+                                    const Text(
+                                      'You can use the local AI model to generate contextual explanations and translations.',
+                                      style: AppTypography.bodySmall,
+                                      textAlign: TextAlign.center,
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        OutlinedButton.icon(
+                                          onPressed: () =>
+                                              _controller.setSelectedTab(1),
+                                          icon: const Icon(
+                                            Icons.translate,
+                                            size: 16,
+                                          ),
+                                          label: const Text('AI Translation'),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        FilledButton.icon(
+                                          onPressed: () =>
+                                              _controller.setSelectedTab(2),
+                                          icon: const Icon(
+                                            Icons.psychology,
+                                            size: 16,
+                                          ),
+                                          label: const Text('AI Explanation'),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
                           ] else if (_controller.selectedTab == 1) ...[
                             Container(
                               padding: const EdgeInsets.all(18),
@@ -313,37 +375,87 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Row(
+                                  Row(
                                     children: [
-                                      Icon(
+                                      const Icon(
                                         Icons.translate,
                                         color: AppColors.secondary,
                                         size: 20,
                                       ),
-                                      SizedBox(width: 8),
-                                      Text(
+                                      const SizedBox(width: 8),
+                                      const Text(
                                         'AI Translation',
                                         style: AppTypography.titleSmall,
+                                      ),
+                                      const Spacer(),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.secondaryLight,
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                        ),
+                                        child: const Text(
+                                          'AI GENERATED',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            color: AppColors.secondary,
+                                          ),
+                                        ),
                                       ),
                                     ],
                                   ),
                                   const SizedBox(height: 12),
                                   if (_controller.isAiGenerating)
-                                    const Center(
-                                      child: Padding(
-                                        padding: EdgeInsets.all(16),
-                                        child: CircularProgressIndicator(),
-                                      ),
+                                    Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        if (_controller
+                                            .aiTranslationText
+                                            .isNotEmpty)
+                                          Text(
+                                            _controller.aiTranslationText,
+                                            style: AppTypography.bodyLarge,
+                                          ),
+                                        const SizedBox(height: 12),
+                                        const Row(
+                                          children: [
+                                            SizedBox(
+                                              width: 16,
+                                              height: 16,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            ),
+                                            SizedBox(width: 8),
+                                            Text(
+                                              'Generating translation...',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: AppColors.textSecondary,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
                                     )
                                   else
                                     Text(
                                       _controller.aiTranslationText.isNotEmpty
                                           ? _controller.aiTranslationText
-                                          : (entry.chineseDefinitions.isNotEmpty
-                                                ? entry.chineseDefinitions.join(
-                                                    '\n',
-                                                  )
-                                                : 'No translation available.'),
+                                          : (entry?.chineseDefinitions
+                                                    .isNotEmpty ==
+                                                true
+                                            ? entry!.chineseDefinitions.join(
+                                                '\n',
+                                              )
+                                            : 'No translation available.'),
                                       style: AppTypography.bodyLarge,
                                     ),
                                 ],
@@ -360,34 +472,82 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Row(
+                                  Row(
                                     children: [
-                                      Icon(
+                                      const Icon(
                                         Icons.psychology,
                                         color: AppColors.accentPurple,
                                         size: 20,
                                       ),
-                                      SizedBox(width: 8),
-                                      Text(
+                                      const SizedBox(width: 8),
+                                      const Text(
                                         'AI Contextual Explanation',
                                         style: AppTypography.titleSmall,
+                                      ),
+                                      const Spacer(),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.accentPurpleLight,
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                        ),
+                                        child: const Text(
+                                          'AI GENERATED',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            color: AppColors.accentPurple,
+                                          ),
+                                        ),
                                       ),
                                     ],
                                   ),
                                   const SizedBox(height: 12),
                                   if (_controller.isAiGenerating)
-                                    const Center(
-                                      child: Padding(
-                                        padding: EdgeInsets.all(16),
-                                        child: CircularProgressIndicator(),
-                                      ),
+                                    Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        if (_controller
+                                            .aiExplanationText
+                                            .isNotEmpty)
+                                          Text(
+                                            _controller.aiExplanationText,
+                                            style: AppTypography.bodyLarge,
+                                          ),
+                                        const SizedBox(height: 12),
+                                        const Row(
+                                          children: [
+                                            SizedBox(
+                                              width: 16,
+                                              height: 16,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            ),
+                                            SizedBox(width: 8),
+                                            Text(
+                                              'Generating explanation...',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: AppColors.textSecondary,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
                                     )
                                   else
                                     Text(
                                       _controller.aiExplanationText.isNotEmpty
                                           ? _controller.aiExplanationText
-                                          : 'Load a local AI model to use AI explanation.',
-                                      style: AppTypography.bodyMedium,
+                                          : 'No explanation generated yet. Tap to request an explanation.',
+                                      style: AppTypography.bodyLarge,
                                     ),
                                 ],
                               ),
@@ -398,7 +558,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
 
                           // Ask AI about Word Section
                           AiWordActionsSection(
-                            word: entry.word,
+                            word: entry?.word ?? _controller.currentQuery,
                             onAskPrompt: _controller.askAiAboutWord,
                             isGenerating: _controller.isAiGenerating,
                           ),

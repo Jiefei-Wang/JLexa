@@ -190,8 +190,12 @@ function Capture-FailureArtifacts([string]$stepName) {
         if ($connectedDevice) {
             # Screenshot
             & $AdbBin -s $connectedDevice exec-out screencap -p > (Join-Path $destDir "screenshot.png") 2>$null
-            # Logcat
-            & $AdbBin -s $connectedDevice logcat -d > (Join-Path $destDir "logcat.txt") 2>$null
+            # Full Logcat
+            & $AdbBin -s $connectedDevice logcat -d > (Join-Path $destDir "logcat_full.txt") 2>$null
+            # Crash buffer
+            & $AdbBin -s $connectedDevice logcat -b crash -d > (Join-Path $destDir "logcat_crash.txt") 2>$null
+            # Native JLexa & llama.cpp logs
+            & $AdbBin -s $connectedDevice logcat -d -s JLexaLlama:V JLexaJNI:V JLexaSpeech:V AndroidRuntime:E DEBUG:E > (Join-Path $destDir "logcat_jlexa.txt") 2>$null
         }
         Write-Success "Artifacts saved: $destDir"
     } catch {
@@ -238,10 +242,15 @@ try {
     Push-Location $AppDir
     if ($connectedDevice) {
         flutter test integration_test/model_settings_test.dart -d $connectedDevice
+        if ($LASTEXITCODE -ne 0) { throw "Flutter model_settings_test integration test failed on $connectedDevice" }
+        flutter test integration_test/native_inference_test.dart -d $connectedDevice
+        if ($LASTEXITCODE -ne 0) { throw "Flutter native_inference_test integration test failed on $connectedDevice" }
     } else {
         flutter test integration_test/model_settings_test.dart
+        if ($LASTEXITCODE -ne 0) { throw "Flutter model_settings_test integration test failed" }
+        flutter test integration_test/native_inference_test.dart
+        if ($LASTEXITCODE -ne 0) { throw "Flutter native_inference_test integration test failed" }
     }
-    if ($LASTEXITCODE -ne 0) { throw "Flutter integration tests failed on $connectedDevice" }
     Pop-Location
     Write-Success "On-device integration tests passed!"
 

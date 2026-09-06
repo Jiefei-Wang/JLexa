@@ -21,6 +21,7 @@ void main() async {
   final audioService = AudioService();
   final waveformService = WaveformService();
   final aiService = AiService();
+  await aiService.initialize();
   final modelStorage = ModelStorage();
   final modelDownloader = DioModelDownloader();
   final modelManager = ModelManager(
@@ -28,6 +29,7 @@ void main() async {
     downloader: modelDownloader,
     aiService: aiService,
   );
+  await modelManager.initialize();
 
   runApp(
     JLexaApp(

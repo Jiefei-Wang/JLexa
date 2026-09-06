@@ -34,9 +34,39 @@ class MockAiEngine implements AiEngine {
   AiModelState get state => _isLoaded ? AiModelState.ready : AiModelState.noModel;
 
   @override
-  Future<void> loadModel(String modelPath, {AiGenerationSettings? settings}) async {
+  Future<void> loadModel(
+    String modelPath, {
+    AiGenerationSettings? settings,
+    LlamaRuntimeSettings? runtimeSettings,
+  }) async {
     _isLoaded = true;
     _loadedPath = modelPath;
+  }
+
+  @override
+  Future<List<LlamaBackendInfo>> getAvailableBackends() async {
+    return const [
+      LlamaBackendInfo(
+        backend: 'cpu',
+        compiled: true,
+        available: true,
+        deviceName: 'CPU (Mock)',
+      ),
+      LlamaBackendInfo(
+        backend: 'vulkan',
+        compiled: true,
+        available: true,
+        deviceName: 'Vulkan GPU (Mock)',
+      ),
+    ];
+  }
+
+  @override
+  Future<LlamaActiveBackendInfo> getActiveBackendInfo() async {
+    return const LlamaActiveBackendInfo(
+      backend: 'cpu',
+      deviceName: 'CPU (Mock)',
+    );
   }
 
   @override
@@ -185,7 +215,11 @@ void main() {
       expect(find.text('Settings & Local Models'), findsOneWidget);
       expect(find.text('Local Language Model (LLM)'), findsOneWidget);
       expect(find.text('Speech Recognition Model (Whisper)'), findsOneWidget);
-      expect(find.text('Inference Configuration'), findsOneWidget);
+      expect(
+        find.text('llama.cpp Runtime & Hardware Acceleration'),
+        findsOneWidget,
+      );
+      expect(find.text('Sampling & Generation Settings'), findsOneWidget);
 
       // Verify Curated Model Names
       expect(find.text('Qwen2.5 0.5B Instruct'), findsOneWidget);

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/ai/ai_models.dart';
 import '../../core/ai/ai_service.dart';
 import '../../core/ai/model_catalog.dart';
 import '../../core/ai/model_manager.dart';
@@ -128,6 +129,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
 
+              if (_controller.llmRestorationError != null ||
+                  _controller.speechRestorationError != null)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.amber.shade400),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.warning_amber_rounded, color: Colors.amber.shade800),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Startup Restoration Notice',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.amber.shade900,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_controller.llmRestorationError != null) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          _controller.llmRestorationError!,
+                          style: TextStyle(color: Colors.amber.shade900, fontSize: 13),
+                        ),
+                      ],
+                      if (_controller.speechRestorationError != null) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          _controller.speechRestorationError!,
+                          style: TextStyle(color: Colors.amber.shade900, fontSize: 13),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
               // ==========================================
               // Section 1: Local Language Model (LLM)
               // ==========================================
@@ -183,10 +229,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 24),
 
               // ==========================================
-              // Section 3: AI Inference Settings
+              // Section 3: llama.cpp Runtime & Backend Settings
               // ==========================================
               const Text(
-                'Inference Configuration',
+                'llama.cpp Runtime & Hardware Acceleration',
+                style: AppTypography.titleSmall,
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Configure hardware acceleration backend and execution engine parameters.',
+                style: AppTypography.bodySmall,
+              ),
+              const SizedBox(height: 10),
+
+              _buildLlamaRuntimeCard(),
+
+              const SizedBox(height: 24),
+
+              // ==========================================
+              // Section 4: AI Generation Settings
+              // ==========================================
+              const Text(
+                'Sampling & Generation Settings',
                 style: AppTypography.titleSmall,
               ),
               const SizedBox(height: 8),
@@ -201,36 +265,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     _buildSliderTile(
                       title: 'Temperature',
-                      subtitle: 'Controls creativity vs determinism',
-                      value: widget.aiService.settings.temperature,
+                      subtitle: 'Controls randomness vs determinism',
+                      value: _controller.generationSettings.temperature,
                       min: 0.1,
                       max: 1.5,
                       divisions: 14,
-                      displayValue: widget.aiService.settings.temperature
+                      displayValue: _controller.generationSettings.temperature
                           .toStringAsFixed(2),
                       onChanged: (val) {
-                        widget.aiService.updateSettings(
-                          widget.aiService.settings.copyWith(temperature: val),
+                        _controller.updateAiGenerationSettings(
+                          _controller.generationSettings.copyWith(temperature: val),
                         );
-                        setState(() {});
+                      },
+                    ),
+                    const Divider(height: 20),
+                    _buildSliderTile(
+                      title: 'Top-P Sampling',
+                      subtitle: 'Nucleus sampling threshold',
+                      value: _controller.generationSettings.topP,
+                      min: 0.1,
+                      max: 1.0,
+                      divisions: 18,
+                      displayValue: _controller.generationSettings.topP
+                          .toStringAsFixed(2),
+                      onChanged: (val) {
+                        _controller.updateAiGenerationSettings(
+                          _controller.generationSettings.copyWith(topP: val),
+                        );
                       },
                     ),
                     const Divider(height: 20),
                     _buildSliderTile(
                       title: 'Max Output Tokens',
-                      subtitle: 'Maximum length of generated answers',
-                      value: widget.aiService.settings.maxTokens.toDouble(),
+                      subtitle: 'Maximum response length in tokens',
+                      value: _controller.generationSettings.maxTokens.toDouble(),
                       min: 128,
                       max: 2048,
                       divisions: 15,
-                      displayValue: '${widget.aiService.settings.maxTokens}',
+                      displayValue: '${_controller.generationSettings.maxTokens}',
                       onChanged: (val) {
-                        widget.aiService.updateSettings(
-                          widget.aiService.settings.copyWith(
+                        _controller.updateAiGenerationSettings(
+                          _controller.generationSettings.copyWith(
                             maxTokens: val.round(),
                           ),
                         );
-                        setState(() {});
                       },
                     ),
                   ],
@@ -555,6 +633,385 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildLlamaRuntimeCard() {
+    final settings = _controller.llamaSettings;
+    final activeInfo = _controller.activeBackendInfo;
+    final backends = _controller.availableBackends;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Active Backend Status Card
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.primaryLight.withValues(alpha: 0.35),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: AppColors.primary.withValues(alpha: 0.3),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.memory,
+                      color: AppColors.primary,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Active Runtime Status',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primaryDark,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        activeInfo.backend.toUpperCase(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Device: ${activeInfo.deviceName.isNotEmpty ? activeInfo.deviceName : "CPU"}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Context: ${activeInfo.contextLength} tokens • Threads: ${activeInfo.threads} • Batch: ${activeInfo.batchSize}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Backend Preference Selection
+          const Text(
+            'Hardware Backend Preference',
+            style: AppTypography.labelLarge,
+          ),
+          const SizedBox(height: 8),
+          ...LlamaBackendPreference.values.map((pref) {
+            final bInfo = backends.firstWhere(
+              (b) => b.backend.toLowerCase() == pref.name.toLowerCase(),
+              orElse:
+                  () => LlamaBackendInfo(
+                    backend: pref.name,
+                    compiled:
+                        pref == LlamaBackendPreference.auto ||
+                        pref == LlamaBackendPreference.cpu,
+                    available:
+                        pref == LlamaBackendPreference.auto ||
+                        pref == LlamaBackendPreference.cpu,
+                    deviceName: pref == LlamaBackendPreference.cpu ? 'CPU' : '',
+                  ),
+            );
+
+            final isUsable =
+                pref == LlamaBackendPreference.auto ||
+                (bInfo.compiled && bInfo.available);
+
+            return InkWell(
+              onTap:
+                  isUsable
+                      ? () => _controller.updateBackendPreference(pref)
+                      : null,
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                child: Row(
+                  children: [
+                    Icon(
+                      settings.backend == pref
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                      color:
+                          isUsable
+                              ? (settings.backend == pref
+                                  ? AppColors.primary
+                                  : AppColors.textSecondary)
+                              : AppColors.textTertiary,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                pref.label,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                  color:
+                                      isUsable
+                                          ? AppColors.textPrimary
+                                          : AppColors.textTertiary,
+                                ),
+                              ),
+                              if (bInfo.deviceName.isNotEmpty &&
+                                  pref != LlamaBackendPreference.auto) ...[
+                                const SizedBox(width: 6),
+                                Text(
+                                  '(${bInfo.deviceName})',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                ),
+                              ],
+                              if (!isUsable &&
+                                  pref != LlamaBackendPreference.auto) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 1,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade200,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    !bInfo.compiled
+                                        ? 'Not Compiled'
+                                        : 'No Device',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.grey.shade700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          Text(
+                            pref.description,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color:
+                                      isUsable
+                                          ? AppColors.textSecondary
+                                          : AppColors.textTertiary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+
+          const Divider(height: 24),
+
+          // Advanced Options Expansion
+          Material(
+            color: Colors.transparent,
+            child: Theme(
+              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: EdgeInsets.zero,
+                title: const Text(
+                  'Advanced llama.cpp Parameters',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                subtitle: const Text(
+                  'Context size, threads, batch sizes, and Flash Attention',
+                  style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                ),
+                children: [
+                  const SizedBox(height: 8),
+
+                  // CPU Threads
+                _buildSliderTile(
+                  title: 'CPU Threads',
+                  subtitle:
+                      settings.threads == null
+                          ? 'Auto (Default 4)'
+                          : 'Custom: ${settings.threads} threads',
+                  value: (settings.threads ?? 4).toDouble(),
+                  min: 1,
+                  max: 16,
+                  divisions: 15,
+                  displayValue:
+                      settings.threads == null
+                          ? 'Auto'
+                          : '${settings.threads}',
+                  onChanged: (val) {
+                    _controller.updateLlamaSettings(
+                      settings.copyWith(threads: val.round()),
+                    );
+                  },
+                ),
+                const Divider(height: 16),
+
+                // Context Length
+                _buildContextSelector(settings),
+                const Divider(height: 16),
+
+                // Flash Attention
+                _buildFlashAttentionSelector(settings),
+                const Divider(height: 16),
+
+                // Reset button
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _controller.resetLlamaSettings(),
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: const Text('Reset llama.cpp Settings'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+  }
+
+  Widget _buildContextSelector(LlamaRuntimeSettings settings) {
+    const options = [512, 1024, 2048, 4096, 8192];
+    final currentCtx = settings.contextLength;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Context Length', style: AppTypography.labelLarge),
+            Text(
+              currentCtx == null ? 'Auto (2048)' : '$currentCtx tokens',
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: AppColors.primary,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Maximum tokens held in working memory (KV Cache)',
+          style: AppTypography.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: [
+            ChoiceChip(
+              label: const Text('Auto (2048)'),
+              selected: currentCtx == null,
+              onSelected: (selected) {
+                if (selected) {
+                  _controller.updateLlamaSettings(
+                    settings.copyWith(contextLength: null),
+                  );
+                }
+              },
+            ),
+            ...options.map((opt) {
+              return ChoiceChip(
+                label: Text('$opt'),
+                selected: currentCtx == opt,
+                onSelected: (selected) {
+                  if (selected) {
+                    _controller.updateLlamaSettings(
+                      settings.copyWith(contextLength: opt),
+                    );
+                  }
+                },
+              );
+            }),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFlashAttentionSelector(LlamaRuntimeSettings settings) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Flash Attention', style: AppTypography.labelLarge),
+            Text(
+              settings.flashAttention.name.toUpperCase(),
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: AppColors.primary,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Memory-efficient attention computation (if supported by model)',
+          style: AppTypography.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        SegmentedButton<LlamaFlashAttention>(
+          segments: const [
+            ButtonSegment(
+              value: LlamaFlashAttention.auto,
+              label: Text('Auto'),
+            ),
+            ButtonSegment(value: LlamaFlashAttention.on, label: Text('On')),
+            ButtonSegment(value: LlamaFlashAttention.off, label: Text('Off')),
+          ],
+          selected: {settings.flashAttention},
+          onSelectionChanged: (set) {
+            _controller.updateLlamaSettings(
+              settings.copyWith(flashAttention: set.first),
+            );
+          },
+        ),
+      ],
     );
   }
 

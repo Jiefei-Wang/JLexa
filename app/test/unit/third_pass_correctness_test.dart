@@ -59,6 +59,7 @@ class TestMockAiEngine implements AiEngine {
   Future<void> loadModel(
     String modelPath, {
     AiGenerationSettings? settings,
+    LlamaRuntimeSettings? runtimeSettings,
   }) async {
     if (modelPath.contains('invalid')) {
       throw Exception('Invalid model file');
@@ -66,6 +67,23 @@ class TestMockAiEngine implements AiEngine {
     _isLoaded = true;
     _loadedModelPath = modelPath;
     _state = AiModelState.ready;
+  }
+
+  @override
+  Future<List<LlamaBackendInfo>> getAvailableBackends() async {
+    return const [
+      LlamaBackendInfo(
+        backend: 'cpu',
+        compiled: true,
+        available: true,
+        deviceName: 'CPU (Mock)',
+      ),
+    ];
+  }
+
+  @override
+  Future<LlamaActiveBackendInfo> getActiveBackendInfo() async {
+    return const LlamaActiveBackendInfo();
   }
 
   @override

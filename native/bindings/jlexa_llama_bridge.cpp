@@ -1,11 +1,25 @@
 #include "jlexa_llama_bridge.h"
 #include "llama.h"
+#include "ggml-backend.h"
 #include <mutex>
 #include <atomic>
 #include <vector>
 #include <cstring>
 #include <chrono>
 #include <random>
+#include <algorithm>
+
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "JLexaLlama", __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, "JLexaLlama", __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "JLexaLlama", __VA_ARGS__)
+#else
+#include <cstdio>
+#define LOGI(...) do { printf("[JLexaLlama INFO] " __VA_ARGS__); printf("\n"); } while(0)
+#define LOGW(...) do { printf("[JLexaLlama WARN] " __VA_ARGS__); printf("\n"); } while(0)
+#define LOGE(...) do { fprintf(stderr, "[JLexaLlama ERROR] " __VA_ARGS__); fprintf(stderr, "\n"); } while(0)
+#endif
 
 struct JLexaLlamaBridge::Impl {
     llama_model* model = nullptr;
@@ -14,6 +28,7 @@ struct JLexaLlamaBridge::Impl {
     int n_threads = 4;
     std::mutex mtx;
     std::atomic<bool> isCancelled{false};
+    JLexaActiveBackendInfo activeInfo{"", "", 0, 0, 0, 0, 0, -1};
 
     void unloadModelLocked() {
         if (ctx) {
@@ -25,6 +40,7 @@ struct JLexaLlamaBridge::Impl {
             model = nullptr;
         }
         vocab = nullptr;
+        activeInfo = JLexaActiveBackendInfo{"", "", 0, 0, 0, 0, 0, -1};
     }
 };
 
@@ -50,7 +66,6 @@ static void process_utf8_accumulator(std::string& accum, std::string& out_valid,
             char_len = 4;
         } else {
             // Invalid leading byte (0x80..0xC1, 0xF5..0xFF)
-            // Emit U+FFFD and consume this invalid byte
             out_valid += "\xEF\xBF\xBD";
             i += 1;
             continue;
@@ -58,8 +73,6 @@ static void process_utf8_accumulator(std::string& accum, std::string& out_valid,
 
         if (i + char_len > len) {
             if (!flush_all) {
-                // Incomplete multi-byte sequence at end of chunk.
-                // Check if the prefix bytes we currently have are valid.
                 bool prefix_valid = true;
                 if (char_len == 3 && (i + 1 < len)) {
                     unsigned char c1 = static_cast<unsigned char>(accum[i + 1]);
@@ -80,17 +93,14 @@ static void process_utf8_accumulator(std::string& accum, std::string& out_valid,
                 }
 
                 if (prefix_valid) {
-                    // Retain valid incomplete prefix in accumulator for future tokens
                     break;
                 }
             }
-            // If flush_all or prefix was invalid, consume byte as U+FFFD
             out_valid += "\xEF\xBF\xBD";
             i += 1;
             continue;
         }
 
-        // Full sequence available: validate all continuation bytes and constraints
         bool valid = true;
         if (char_len == 2) {
             unsigned char c1 = static_cast<unsigned char>(accum[i + 1]);
@@ -99,18 +109,14 @@ static void process_utf8_accumulator(std::string& accum, std::string& out_valid,
             unsigned char c1 = static_cast<unsigned char>(accum[i + 1]);
             unsigned char c2 = static_cast<unsigned char>(accum[i + 2]);
             if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80) valid = false;
-            // Overlong check (E0 80..9F)
             if (c == 0xE0 && (c1 < 0xA0 || c1 > 0xBF)) valid = false;
-            // UTF-16 surrogate check (ED A0..BF)
             if (c == 0xED && (c1 < 0x80 || c1 > 0x9F)) valid = false;
         } else if (char_len == 4) {
             unsigned char c1 = static_cast<unsigned char>(accum[i + 1]);
             unsigned char c2 = static_cast<unsigned char>(accum[i + 2]);
             unsigned char c3 = static_cast<unsigned char>(accum[i + 3]);
             if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80) valid = false;
-            // Overlong check (F0 80..8F)
             if (c == 0xF0 && (c1 < 0x90 || c1 > 0xBF)) valid = false;
-            // Codepoints > U+10FFFF (F4 90..BF)
             if (c == 0xF4 && (c1 < 0x80 || c1 > 0x8F)) valid = false;
         }
 
@@ -137,6 +143,7 @@ JLexaLlamaBridge& JLexaLlamaBridge::instance() {
 
 JLexaLlamaBridge::JLexaLlamaBridge() : pImpl(new Impl()) {
     llama_backend_init();
+    LOGI("JLexaLlamaBridge initialized with llama_backend_init()");
 }
 
 JLexaLlamaBridge::~JLexaLlamaBridge() {
@@ -145,30 +152,208 @@ JLexaLlamaBridge::~JLexaLlamaBridge() {
     delete pImpl;
 }
 
+std::vector<JLexaBackendInfo> JLexaLlamaBridge::getAvailableBackends() {
+    std::vector<JLexaBackendInfo> result;
+
+    // CPU is always compiled and available
+    JLexaBackendInfo cpuInfo;
+    cpuInfo.backend = "cpu";
+    cpuInfo.compiled = true;
+    cpuInfo.available = true;
+    cpuInfo.deviceName = "CPU";
+    cpuInfo.reasonUnavailable = "";
+    result.push_back(cpuInfo);
+
+    bool vulkanFound = false;
+    std::string vulkanDevName = "";
+    bool openclFound = false;
+    std::string openclDevName = "";
+
+    const size_t dev_count = ggml_backend_dev_count();
+    for (size_t i = 0; i < dev_count; ++i) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        if (!dev) continue;
+        const char* dname = ggml_backend_dev_name(dev);
+        const char* ddesc = ggml_backend_dev_description(dev);
+        enum ggml_backend_dev_type dtype = ggml_backend_dev_type(dev);
+
+        std::string sname = dname ? dname : "";
+        std::string sdesc = ddesc ? ddesc : "";
+
+        if (sname.find("Vulkan") != std::string::npos || sname.find("vk") != std::string::npos ||
+            (dtype == GGML_BACKEND_DEVICE_TYPE_GPU && sname.find("OpenCL") == std::string::npos)) {
+            vulkanFound = true;
+            vulkanDevName = !sdesc.empty() ? sdesc : sname;
+        } else if (sname.find("OpenCL") != std::string::npos || sname.find("cl") != std::string::npos) {
+            openclFound = true;
+            openclDevName = !sdesc.empty() ? sdesc : sname;
+        }
+    }
+
+#ifdef GGML_USE_VULKAN
+    JLexaBackendInfo vkInfo;
+    vkInfo.backend = "vulkan";
+    vkInfo.compiled = true;
+    vkInfo.available = vulkanFound;
+    vkInfo.deviceName = vulkanFound ? vulkanDevName : "";
+    vkInfo.reasonUnavailable = vulkanFound ? "" : "No compatible Vulkan compute device found on this system.";
+    result.push_back(vkInfo);
+#else
+    JLexaBackendInfo vkInfo;
+    vkInfo.backend = "vulkan";
+    vkInfo.compiled = false;
+    vkInfo.available = false;
+    vkInfo.deviceName = "";
+    vkInfo.reasonUnavailable = "Vulkan backend is not compiled in this build.";
+    result.push_back(vkInfo);
+#endif
+
+#ifdef GGML_USE_OPENCL
+    JLexaBackendInfo clInfo;
+    clInfo.backend = "opencl";
+    clInfo.compiled = true;
+    clInfo.available = openclFound;
+    clInfo.deviceName = openclFound ? openclDevName : "";
+    clInfo.reasonUnavailable = openclFound ? "" : "No compatible OpenCL compute device found on this system.";
+    result.push_back(clInfo);
+#else
+    JLexaBackendInfo clInfo;
+    clInfo.backend = "opencl";
+    clInfo.compiled = false;
+    clInfo.available = false;
+    clInfo.deviceName = "";
+    clInfo.reasonUnavailable = "OpenCL backend is not compiled in this build.";
+    result.push_back(clInfo);
+#endif
+
+    return result;
+}
+
+JLexaActiveBackendInfo JLexaLlamaBridge::getActiveBackendInfo() {
+    std::lock_guard<std::mutex> lock(pImpl->mtx);
+    return pImpl->activeInfo;
+}
+
 bool JLexaLlamaBridge::loadModel(const std::string& modelPath, int contextLength, int n_threads) {
+    JLexaLlamaRuntimeConfig cfg;
+    cfg.backend = "auto";
+    cfg.contextLength = contextLength;
+    cfg.n_threads = n_threads;
+    return loadModel(modelPath, cfg);
+}
+
+bool JLexaLlamaBridge::loadModel(const std::string& modelPath, const JLexaLlamaRuntimeConfig& config) {
     std::lock_guard<std::mutex> lock(pImpl->mtx);
     pImpl->unloadModelLocked();
 
-    pImpl->n_threads = n_threads > 0 ? n_threads : 4;
+    LOGI("Loading LLM model from: %s", modelPath.c_str());
+    LOGI("Config: backend=%s, ctx=%d, threads=%d, gpuLayers=%d, batch=%d, ubatch=%d, flashAttn=%d",
+         config.backend.c_str(), config.contextLength, config.n_threads, config.gpuLayers,
+         config.batchSize, config.ubatchSize, config.flashAttention);
+
+    pImpl->n_threads = config.n_threads > 0 ? config.n_threads : 4;
 
     llama_model_params mparams = llama_model_default_params();
+
+    std::string selectedBackend = "cpu";
+    std::string activeDeviceName = "CPU";
+    int resolvedGpuLayers = 0;
+
+    ggml_backend_dev_t target_gpu_dev = nullptr;
+    const size_t dev_count = ggml_backend_dev_count();
+    for (size_t i = 0; i < dev_count; ++i) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        if (!dev) continue;
+        enum ggml_backend_dev_type dtype = ggml_backend_dev_type(dev);
+        if (dtype == GGML_BACKEND_DEVICE_TYPE_GPU || dtype == GGML_BACKEND_DEVICE_TYPE_IGPU || dtype == GGML_BACKEND_DEVICE_TYPE_ACCEL) {
+            target_gpu_dev = dev;
+            break;
+        }
+    }
+
+    if (config.backend == "cpu") {
+        selectedBackend = "cpu";
+        activeDeviceName = "CPU";
+        mparams.n_gpu_layers = 0;
+        resolvedGpuLayers = 0;
+    } else if (config.backend == "vulkan") {
+        if (!target_gpu_dev) {
+            LOGE("Explicit Vulkan backend requested but no accelerated GPU device is available");
+            return false;
+        }
+        selectedBackend = "vulkan";
+        activeDeviceName = ggml_backend_dev_description(target_gpu_dev) ? ggml_backend_dev_description(target_gpu_dev) : "Vulkan GPU";
+        mparams.n_gpu_layers = config.gpuLayers >= 0 ? config.gpuLayers : -1;
+        resolvedGpuLayers = mparams.n_gpu_layers;
+    } else if (config.backend == "opencl") {
+        if (!target_gpu_dev) {
+            LOGE("Explicit OpenCL backend requested but no OpenCL device is available");
+            return false;
+        }
+        selectedBackend = "opencl";
+        activeDeviceName = ggml_backend_dev_description(target_gpu_dev) ? ggml_backend_dev_description(target_gpu_dev) : "OpenCL GPU";
+        mparams.n_gpu_layers = config.gpuLayers >= 0 ? config.gpuLayers : -1;
+        resolvedGpuLayers = mparams.n_gpu_layers;
+    } else { // "auto"
+        if (target_gpu_dev) {
+            selectedBackend = "vulkan";
+            activeDeviceName = ggml_backend_dev_description(target_gpu_dev) ? ggml_backend_dev_description(target_gpu_dev) : "Accelerated GPU";
+            mparams.n_gpu_layers = config.gpuLayers >= 0 ? config.gpuLayers : -1;
+            resolvedGpuLayers = mparams.n_gpu_layers;
+            LOGI("Auto backend selected GPU device: %s", activeDeviceName.c_str());
+        } else {
+            selectedBackend = "cpu";
+            activeDeviceName = "CPU";
+            mparams.n_gpu_layers = 0;
+            resolvedGpuLayers = 0;
+            LOGI("Auto backend selected CPU fallback");
+        }
+    }
+
     pImpl->model = llama_model_load_from_file(modelPath.c_str(), mparams);
     if (!pImpl->model) {
+        LOGE("Failed to load llama_model from file: %s", modelPath.c_str());
         return false;
     }
 
     pImpl->vocab = llama_model_get_vocab(pImpl->model);
 
     llama_context_params cparams = llama_context_default_params();
-    cparams.n_ctx = contextLength > 0 ? contextLength : 2048;
+    cparams.n_ctx = config.contextLength > 0 ? config.contextLength : 2048;
+    cparams.n_batch = config.batchSize > 0 ? config.batchSize : 512;
+    cparams.n_ubatch = config.ubatchSize > 0 ? config.ubatchSize : 512;
     cparams.n_threads = pImpl->n_threads;
     cparams.n_threads_batch = pImpl->n_threads;
 
+    if (config.flashAttention == 1) {
+        cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    } else if (config.flashAttention == 0) {
+        cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+    } else {
+        cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
+    }
+
     pImpl->ctx = llama_init_from_model(pImpl->model, cparams);
     if (!pImpl->ctx) {
+        LOGE("Failed to initialize llama_context from model");
         pImpl->unloadModelLocked();
         return false;
     }
+
+    pImpl->activeInfo = JLexaActiveBackendInfo{
+        selectedBackend,
+        activeDeviceName,
+        resolvedGpuLayers,
+        static_cast<int>(llama_n_ctx(pImpl->ctx)),
+        pImpl->n_threads,
+        static_cast<int>(llama_n_batch(pImpl->ctx)),
+        static_cast<int>(llama_n_ubatch(pImpl->ctx)),
+        config.flashAttention
+    };
+
+    LOGI("LLM model successfully loaded! Active backend=%s, device=%s, n_ctx=%d, n_batch=%d, threads=%d",
+         pImpl->activeInfo.backend.c_str(), pImpl->activeInfo.deviceName.c_str(),
+         pImpl->activeInfo.contextLength, pImpl->activeInfo.batchSize, pImpl->activeInfo.threads);
 
     return true;
 }
@@ -319,28 +504,41 @@ void JLexaLlamaBridge::generate(
     llama_sampler_chain_add(sampler_guard.smpl, llama_sampler_init_top_p(topP > 0.0f ? topP : 0.9f, 1));
     llama_sampler_chain_add(sampler_guard.smpl, llama_sampler_init_dist(actual_seed));
 
-    // 3. Process prompt with RAII batch
+    // 3. Process prompt with RAII batch and chunking by n_batch
+    const uint32_t n_batch = llama_n_batch(pImpl->ctx);
     struct BatchGuard {
         llama_batch batch;
         bool active = false;
         ~BatchGuard() { if (active) llama_batch_free(batch); }
     } batch_guard;
 
-    batch_guard.batch = llama_batch_init(n_prompt + max_to_gen, 0, 1);
+    const int alloc_batch_size = static_cast<int>(std::max(n_batch, (uint32_t)1));
+    batch_guard.batch = llama_batch_init(alloc_batch_size, 0, 1);
     batch_guard.active = true;
 
-    for (int i = 0; i < n_prompt; ++i) {
-        batch_guard.batch.token[i] = prompt_tokens[i];
-        batch_guard.batch.pos[i] = i;
-        batch_guard.batch.n_seq_id[i] = 1;
-        batch_guard.batch.seq_id[i][0] = 0;
-        batch_guard.batch.logits[i] = (i == n_prompt - 1) ? 1 : 0;
-    }
-    batch_guard.batch.n_tokens = n_prompt;
+    for (int i = 0; i < n_prompt; i += static_cast<int>(n_batch)) {
+        if (pImpl->isCancelled.load()) {
+            if (completionCallback) completionCallback(true, "");
+            return;
+        }
 
-    if (llama_decode(pImpl->ctx, batch_guard.batch) != 0) {
-        if (completionCallback) completionCallback(false, "Failed to decode prompt");
-        return;
+        const int n_eval = std::min(static_cast<int>(n_batch), n_prompt - i);
+        batch_guard.batch.n_tokens = n_eval;
+
+        for (int j = 0; j < n_eval; ++j) {
+            const int pos = i + j;
+            batch_guard.batch.token[j] = prompt_tokens[pos];
+            batch_guard.batch.pos[j] = pos;
+            batch_guard.batch.n_seq_id[j] = 1;
+            batch_guard.batch.seq_id[j][0] = 0;
+            batch_guard.batch.logits[j] = (pos == n_prompt - 1) ? 1 : 0;
+        }
+
+        if (llama_decode(pImpl->ctx, batch_guard.batch) != 0) {
+            LOGE("Failed to decode prompt chunk at offset %d (n_eval=%d)", i, n_eval);
+            if (completionCallback) completionCallback(false, "Failed to decode prompt");
+            return;
+        }
     }
 
     // 4. Generation Loop with UTF-8 piece boundary safety
@@ -370,7 +568,6 @@ void JLexaLlamaBridge::generate(
         char* piece_ptr = piece_buf;
         std::vector<char> large_buf;
         if (n_piece < 0) {
-            // Buffer too small, retry with larger buffer
             large_buf.resize(-n_piece);
             n_piece = llama_token_to_piece(
                 pImpl->vocab,
@@ -403,6 +600,7 @@ void JLexaLlamaBridge::generate(
         n_generated++;
 
         if (llama_decode(pImpl->ctx, batch_guard.batch) != 0) {
+            LOGE("Failed to decode sampled token at pos %d", n_cur - 1);
             decode_failed = true;
             break;
         }
@@ -427,3 +625,4 @@ void JLexaLlamaBridge::generate(
         }
     }
 }
+

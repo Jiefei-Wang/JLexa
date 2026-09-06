@@ -35,9 +35,39 @@ class MockAiEngine implements AiEngine {
   Future<void> loadModel(
     String modelPath, {
     AiGenerationSettings? settings,
+    LlamaRuntimeSettings? runtimeSettings,
   }) async {
     _isLoaded = true;
     _loadedPath = modelPath;
+  }
+
+  @override
+  Future<List<LlamaBackendInfo>> getAvailableBackends() async {
+    return const [
+      LlamaBackendInfo(
+        backend: 'cpu',
+        compiled: true,
+        available: true,
+        deviceName: 'CPU (Mock)',
+      ),
+      LlamaBackendInfo(
+        backend: 'vulkan',
+        compiled: true,
+        available: true,
+        deviceName: 'Vulkan GPU (Mock)',
+      ),
+    ];
+  }
+
+  @override
+  Future<LlamaActiveBackendInfo> getActiveBackendInfo() async {
+    return const LlamaActiveBackendInfo(
+      backend: 'cpu',
+      deviceName: 'CPU (Mock)',
+      gpuLayers: 0,
+      contextLength: 2048,
+      threads: 4,
+    );
   }
 
   @override
