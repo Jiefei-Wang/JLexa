@@ -10,6 +10,7 @@ class AiExplanationCard extends StatelessWidget {
   final bool isGenerating;
   final VoidCallback onOpenQa;
   final VoidCallback onGenerate;
+  final VoidCallback? onCancel;
 
   const AiExplanationCard({
     super.key,
@@ -19,6 +20,7 @@ class AiExplanationCard extends StatelessWidget {
     required this.isGenerating,
     required this.onOpenQa,
     required this.onGenerate,
+    this.onCancel,
   });
 
   @override
@@ -72,14 +74,21 @@ class AiExplanationCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (isGenerating)
+                  if (isGenerating) ...[
+                    if (explanation.isNotEmpty)
+                      Text(explanation, style: AppTypography.bodyMedium),
                     const Center(
                       child: Padding(
                         padding: EdgeInsets.all(12),
                         child: CircularProgressIndicator(),
                       ),
-                    )
-                  else
+                    ),
+                    if (onCancel != null)
+                      TextButton(
+                        onPressed: onCancel,
+                        child: const Text('Cancel'),
+                      ),
+                  ] else
                     explanation.isNotEmpty
                         ? Text(explanation, style: AppTypography.bodyMedium)
                         : OutlinedButton.icon(
@@ -87,6 +96,12 @@ class AiExplanationCard extends StatelessWidget {
                             icon: const Icon(Icons.auto_awesome, size: 18),
                             label: const Text('Generate Explanation'),
                           ),
+                  if (!isGenerating && explanation.isNotEmpty)
+                    TextButton.icon(
+                      onPressed: onGenerate,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Generate Again'),
+                    ),
                   const SizedBox(height: 16),
 
                   // Q&A Button

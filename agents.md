@@ -225,3 +225,30 @@ At the end of every agent session after completing work:
   - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`
   - APK Signature Scheme v2: `true` (Verified)
   - Pixel 6 installation: Success (`pm install -r`, data preserved; final PID `20803`).
+
+---
+
+## Session: 2026-09-06 (Comprehensive Pixel 6 UI and Functional QA)
+- **Focus**: Exercised dictionary, sentence translation, repeater, transcription, explanations, vocabulary/review, Home navigation, chat, microphone start/stop, and local model settings on Pixel 6 (`25311FDF6004PR`, Android 16). Full findings and limitations: `docs/qa-2026-09-06.md`.
+- **Changes**:
+  - Added the licensed ECDICT learner subset (57,961 entries), isolated read-only database, reproducible build script, exact-match lookup, literal suggestions, and correct empty search history.
+  - Fixed sentence query preservation, narrow/keyboard layouts, AI-only vocabulary saving, stale query/save ownership, and repeated navigation to the same word.
+  - Simplified translation/dictionary/explanation prompts, supplied Chinese dictionary context, added native top-k/repetition penalties, and removed duplicate sampler acceptance.
+  - Fixed replay after EOF by retaining the source and resetting playback position; guarded loop resumes against a concurrent Pause.
+  - Fixed Android system-navigation overlap and long-content layouts in review, chat, settings, and word sheets; added working recent/chat history sheets and AI explanation cancellation/regeneration.
+- **Device Results**:
+  - Existing SAF models and lessons survived signed upgrades. CPU and Vulkan each generated Chinese translations; final native sampler completed generation without the previous runaway repetition on the tested word.
+  - Fresh WAV import produced automatic cuts and Whisper transcripts `Hello` and `This is a real speech recognition test`; manual/Auto MP3 transcription, repeated playback, EOF replay, and saved transcripts were exercised.
+  - Completed vocabulary review and tested microphone permission/start-stop, with no supplied microphone speech. Removed the temporary `qa-ui-audio` lesson/file after testing; original lessons and models preserved.
+  - Final APK installed successfully with `adb install -r`, launched as PID `24883`; crash buffer empty at verification. Runtime preference restored to Auto.
+  - Remaining limitation: Qwen2.5 0.5B still made incorrect word/POS and sentence-meaning claims in some samples. Generation success is not a claim of semantic accuracy. Acoustic pause cuts and Whisper Tiny also require manual correction for difficult audio.
+- **Static Analysis**: `flutter analyze` -> `No issues found!` (zero errors/warnings).
+- **Tests**: `flutter test --concurrency=1` -> `167 passed`, zero failed.
+- **Signed Release**:
+  - `flutter build apk --release` succeeded using `app/android/key.properties`.
+  - Fixed path: `release/app-release.apk` (93,129,481 bytes).
+  - APK SHA-256: `30224C3CADB3A2B953EC42F7CF0E0D3C6DAAF7E289306A42525F8FDB4E693A1B`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
+  - `apksigner verify --verbose --print-certs`: Verified, APK Signature Scheme v2 true.
+  - Build emits an upstream `flutter_tts` future Kotlin-plugin compatibility warning; current release build succeeds.
+  - Automatic approval review rejected deletion of duplicate build-output APKs (`blocked by policy`); these copies remain under `app/build/app/outputs/`. The fixed release artifact is current.

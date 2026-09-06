@@ -341,6 +341,7 @@ class AiService extends ChangeNotifier {
 
   AiGenerationHandle startDictionaryAiAnswer(
     String query, {
+    String? dictionaryContext,
     AiRequestPriority priority = AiRequestPriority.user,
   }) {
     if (!llmEngine.isLoaded) {
@@ -350,8 +351,14 @@ class AiService extends ChangeNotifier {
         onCancel: () async {},
       );
     }
-    final msgs = PromptBuilder.buildDictionaryAiAnswerMessages(query);
-    final prompt = PromptBuilder.buildDictionaryAiAnswer(query);
+    final msgs = PromptBuilder.buildDictionaryAiAnswerMessages(
+      query,
+      dictionaryContext: dictionaryContext,
+    );
+    final prompt = PromptBuilder.buildDictionaryAiAnswer(
+      query,
+      dictionaryContext: dictionaryContext,
+    );
     return llmEngine.startGeneration(
       prompt,
       settings: _settings,

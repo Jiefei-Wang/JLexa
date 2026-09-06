@@ -57,6 +57,7 @@ class MainScaffoldState extends State<MainScaffold> {
   bool _ownsModelManager = false;
   int _currentIndex = 0;
   String? _targetDictionaryWord;
+  int _dictionaryNavigationRevision = 0;
   AudioLesson? _activeLesson;
 
   @override
@@ -103,6 +104,7 @@ class MainScaffoldState extends State<MainScaffold> {
   void openDictionaryForWord(String word) {
     setState(() {
       _targetDictionaryWord = word;
+      _dictionaryNavigationRevision++;
       _currentIndex = 1; // Dictionary tab
     });
   }
@@ -254,6 +256,7 @@ class MainScaffoldState extends State<MainScaffold> {
             vocabularyRepo: widget.vocabularyRepo,
             aiService: widget.aiService,
             initialWord: _targetDictionaryWord,
+            navigationRevision: _dictionaryNavigationRevision,
           ),
           RepeaterScreen(
             key: _repeaterKey,

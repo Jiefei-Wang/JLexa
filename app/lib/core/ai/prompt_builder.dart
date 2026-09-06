@@ -35,50 +35,41 @@ class PromptBuilder {
       'Explain clearly, accurately, and concisely. When appropriate, provide natural Chinese explanations for English learners.';
 
   static const String dictionaryAiSystemPrompt =
-      'Return JSON only.\n'
-      'Do not address the user.\n'
-      'Do not include introductions.\n'
-      'Do not include conclusions.\n'
-      'Do not apologize.\n'
-      'Do not include markdown fences.\n'
-      'Do not include meta commentary.';
+      '你是英汉词典。只输出用户所给英文单词的常用词性和简明中文释义。'
+      '每行先写词性缩写（n.、v.、adj.、adv.等），再写中文释义。'
+      '只列出该词实际存在的词性。不要输出JSON、Markdown、开场白或例句。';
 
   static List<ChatMessagePayload> buildDictionaryAiAnswerMessages(
-    String query,
-  ) {
+    String query, {
+    String? dictionaryContext,
+  }) {
     final clean = query.trim();
     final isWord = !clean.contains(' ') && clean.isNotEmpty;
-    final prompt = isWord
-        ? 'Provide lexical information for the English word "$clean".\n'
-              'Format strictly as JSON:\n'
-              '{"type": "word", "senses": [{"partOfSpeech": "v.", "meaning": "..."}, {"partOfSpeech": "n.", "meaning": "..."}]}\n'
-              'Use standard abbreviated part-of-speech labels (e.g. n., v., adj., adv., prep., conj., pron., interj.).'
-        : 'Provide a concise Chinese explanation of the meaning and usage of "$clean".\n'
-              'Format strictly as JSON:\n'
-              '{"type": "phrase", "explanation": "表示……，通常用于……"}';
-
+    if (!isWord) {
+      return buildTranslationMessages(clean);
+    }
     return [
       const ChatMessagePayload(
         role: 'system',
         content: dictionaryAiSystemPrompt,
       ),
-      ChatMessagePayload(role: 'user', content: prompt),
+      ChatMessagePayload(
+        role: 'user',
+        content: dictionaryContext == null || dictionaryContext.isEmpty
+            ? clean
+            : '$clean\n参考词典释义：\n$dictionaryContext\n请简明整理上述释义，不要重复或编造释义。',
+      ),
     ];
   }
 
-  static String buildDictionaryAiAnswer(String query) {
-    final clean = query.trim();
-    final isWord = !clean.contains(' ') && clean.isNotEmpty;
-    final prompt = isWord
-        ? 'Provide lexical information for the English word "$clean".\n'
-              'Format strictly as JSON:\n'
-              '{"type": "word", "senses": [{"partOfSpeech": "v.", "meaning": "..."}, {"partOfSpeech": "n.", "meaning": "..."}]}\n'
-              'Use standard abbreviated part-of-speech labels (e.g. n., v., adj., adv., prep., conj., pron., interj.).'
-        : 'Provide a concise Chinese explanation of the meaning and usage of "$clean".\n'
-              'Format strictly as JSON:\n'
-              '{"type": "phrase", "explanation": "表示……，通常用于……"}';
-
-    return '$dictionaryAiSystemPrompt\n\n$prompt';
+  static String buildDictionaryAiAnswer(
+    String query, {
+    String? dictionaryContext,
+  }) {
+    return buildDictionaryAiAnswerMessages(
+      query,
+      dictionaryContext: dictionaryContext,
+    ).map((m) => m.content).join('\n\n');
   }
 
   static List<ChatMessagePayload> buildDictionaryExplanationMessages(
@@ -107,90 +98,47 @@ Provide:
 
   static List<ChatMessagePayload> buildTranslationMessages(String text) {
     return [
-      const ChatMessagePayload(role: 'system', content: systemPrefix),
-      ChatMessagePayload(
-        role: 'user',
-        content:
-            'Translate the following English text into natural, fluent Chinese:\n"$text"',
+      const ChatMessagePayload(
+        role: 'system',
+        content: '你是英汉翻译。把用户的英文翻译成自然、准确的简体中文。只输出中文译文，不重复英文，不输出JSON，不解释任务。',
       ),
+      ChatMessagePayload(role: 'user', content: text),
     ];
   }
 
   static String buildTranslation(String text) {
-    return '''$systemPrefix
-
-Translate the following English text into natural, fluent Chinese:
-"$text"''';
+    return buildTranslationMessages(text).map((m) => m.content).join('\n\n');
   }
 
   static List<ChatMessagePayload> buildSentenceExplanationMessages(
     SentenceContext context,
   ) {
-    final buffer = StringBuffer();
-    buffer.writeln(
-      'Explain this sentence from the audio lesson "${context.lessonTitle}":',
-    );
-    buffer.writeln('Current sentence: "${context.sentenceText}"');
-
-    if (context.previousSentence != null &&
-        context.previousSentence!.isNotEmpty) {
-      buffer.writeln('Previous context: "${context.previousSentence}"');
+    final buffer = StringBuffer('课文：${context.lessonTitle}\n');
+    buffer.writeln('当前句子：${context.sentenceText}');
+    if (context.previousSentence?.isNotEmpty == true) {
+      buffer.writeln('上文：${context.previousSentence}');
     }
-    if (context.nextSentence != null && context.nextSentence!.isNotEmpty) {
-      buffer.writeln('Following context: "${context.nextSentence}"');
+    if (context.nextSentence?.isNotEmpty == true) {
+      buffer.writeln('下文：${context.nextSentence}');
     }
     if (context.uncertainWords.isNotEmpty) {
-      buffer.writeln(
-        'Note: The speech recognizer was uncertain about words: ${context.uncertainWords.join(', ')}',
-      );
+      buffer.writeln('以下词语的语音识别可能不准确：${context.uncertainWords.join(', ')}');
     }
-
-    buffer.writeln('\nPlease format your answer with:');
-    buffer.writeln(
-      'Summary: Concise 1-sentence explanation of what the speaker means.',
-    );
-    buffer.writeln(
-      'Meaning: Nuances of key phrases and idioms in this context.',
-    );
-    buffer.writeln('Return only the explanation itself. Do not repeat these instructions.');
-
     return [
-      const ChatMessagePayload(role: 'system', content: systemPrefix),
+      const ChatMessagePayload(
+        role: 'system',
+        content:
+            '你是英语老师。用简体中文解释当前句子的意思，再简短说明其中的重点词语或用法。'
+            '上下文只供参考。直接给出讲解，不重复任务要求。',
+      ),
       ChatMessagePayload(role: 'user', content: buffer.toString()),
     ];
   }
 
   static String buildSentenceExplanation(SentenceContext context) {
-    final buffer = StringBuffer();
-    buffer.writeln(systemPrefix);
-    buffer.writeln(
-      '\nExplain this sentence from the audio lesson "${context.lessonTitle}":',
-    );
-    buffer.writeln('Current sentence: "${context.sentenceText}"');
-
-    if (context.previousSentence != null &&
-        context.previousSentence!.isNotEmpty) {
-      buffer.writeln('Previous context: "${context.previousSentence}"');
-    }
-    if (context.nextSentence != null && context.nextSentence!.isNotEmpty) {
-      buffer.writeln('Following context: "${context.nextSentence}"');
-    }
-    if (context.uncertainWords.isNotEmpty) {
-      buffer.writeln(
-        'Note: The speech recognizer was uncertain about words: ${context.uncertainWords.join(', ')}',
-      );
-    }
-
-    buffer.writeln('\nPlease format your answer with:');
-    buffer.writeln(
-      'Summary: Concise 1-sentence explanation of what the speaker means.',
-    );
-    buffer.writeln(
-      'Meaning: Nuances of key phrases and idioms in this context.',
-    );
-    buffer.writeln('Return only the explanation itself. Do not repeat these instructions.');
-
-    return buffer.toString();
+    return buildSentenceExplanationMessages(context)
+        .map((m) => m.content)
+        .join('\n\n');
   }
 
   static List<ChatMessagePayload> buildSentenceQAMessages({

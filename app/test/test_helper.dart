@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-void setupMockPlatformChannels() {
+void setupMockPlatformChannels({void Function(MethodCall)? onAudioCall}) {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   final messenger =
@@ -19,6 +19,7 @@ void setupMockPlatformChannels() {
   messenger.setMockMethodCallHandler(
     const MethodChannel('xyz.luan/audioplayers'),
     (MethodCall call) async {
+      onAudioCall?.call(call);
       if (call.arguments is Map &&
           (call.arguments as Map)['playerId'] != null) {
         final playerId = (call.arguments as Map)['playerId'] as String;

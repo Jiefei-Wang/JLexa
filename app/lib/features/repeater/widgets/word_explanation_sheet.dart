@@ -132,132 +132,156 @@ class _WordExplanationSheetState extends State<WordExplanationSheet> {
   Widget build(BuildContext context) {
     final cleanWord = TextNormalization.normalizeWord(widget.word);
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Drag handle
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.border,
-                borderRadius: BorderRadius.circular(2),
-              ),
+    return SafeArea(
+      top: false,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+        ),
+        child: SingleChildScrollView(
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: const BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
             ),
-          ),
-          const SizedBox(height: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Drag handle
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.border,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
 
-          // Header
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Text(cleanWord, style: AppTypography.wordDisplay),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    icon: const Icon(Icons.volume_up, color: AppColors.primary),
-                    onPressed: () => _speak(cleanWord),
+                // Header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              cleanWord,
+                              style: AppTypography.wordDisplay,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.volume_up,
+                              color: AppColors.primary,
+                            ),
+                            onPressed: () => _speak(cleanWord),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        _isSaved ? Icons.star : Icons.star_border,
+                        color: _isSaved
+                            ? Colors.amber
+                            : AppColors.textSecondary,
+                        size: 28,
+                      ),
+                      onPressed: _toggleSave,
+                      tooltip: 'Save to Vocabulary',
+                    ),
+                  ],
+                ),
+
+                if (_entry?.phonetic != null && _entry!.phonetic.isNotEmpty)
+                  Text(_entry!.phonetic, style: AppTypography.phonetic),
+
+                const SizedBox(height: 14),
+
+                if (_isLoading)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: CircularProgressIndicator(),
+                    ),
+                  )
+                else if (_entry != null) ...[
+                  // Offline Definition
+                  Text(
+                    _entry!.definitions.isNotEmpty
+                        ? _entry!.definitions.first
+                        : '',
+                    style: AppTypography.bodyMedium,
+                  ),
+                  if (_entry!.chineseDefinitions.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      _entry!.chineseDefinitions.first,
+                      style: AppTypography.bodyMedium.copyWith(
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ] else ...[
+                  Text(
+                    'No offline dictionary entry for "$cleanWord".',
+                    style: AppTypography.bodySmall,
                   ),
                 ],
-              ),
-              IconButton(
-                icon: Icon(
-                  _isSaved ? Icons.star : Icons.star_border,
-                  color: _isSaved ? Colors.amber : AppColors.textSecondary,
-                  size: 28,
-                ),
-                onPressed: _toggleSave,
-                tooltip: 'Save to Vocabulary',
-              ),
-            ],
-          ),
 
-          if (_entry?.phonetic != null && _entry!.phonetic.isNotEmpty)
-            Text(_entry!.phonetic, style: AppTypography.phonetic),
-
-          const SizedBox(height: 14),
-
-          if (_isLoading)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else if (_entry != null) ...[
-            // Offline Definition
-            Text(
-              _entry!.definitions.isNotEmpty ? _entry!.definitions.first : '',
-              style: AppTypography.bodyMedium,
-            ),
-            if (_entry!.chineseDefinitions.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                _entry!.chineseDefinitions.first,
-                style: AppTypography.bodyMedium.copyWith(
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
-          ] else ...[
-            Text(
-              'No offline dictionary entry for "$cleanWord".',
-              style: AppTypography.bodySmall,
-            ),
-          ],
-
-          // AI Translation / Explanation snippet if available
-          if (_aiTranslation.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppColors.primaryLight,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.translate,
-                    size: 16,
-                    color: AppColors.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _aiTranslation,
-                      style: AppTypography.bodySmall.copyWith(
-                        color: AppColors.primary,
-                      ),
+                // AI Translation / Explanation snippet if available
+                if (_aiTranslation.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryLight,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.translate,
+                          size: 16,
+                          color: AppColors.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _aiTranslation,
+                            style: AppTypography.bodySmall.copyWith(
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
-              ),
-            ),
-          ],
 
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _toggleSave,
-              icon: Icon(_isSaved ? Icons.check : Icons.add),
-              label: Text(
-                _isSaved ? 'Saved in Vocabulary' : 'Save to Vocabulary',
-              ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _toggleSave,
+                    icon: Icon(_isSaved ? Icons.check : Icons.add),
+                    label: Text(
+                      _isSaved ? 'Saved in Vocabulary' : 'Save to Vocabulary',
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-        ],
+        ),
       ),
     );
   }

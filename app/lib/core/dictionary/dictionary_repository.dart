@@ -5,6 +5,7 @@ import 'package:sqflite/sqflite.dart';
 import '../database/app_database.dart';
 import 'dictionary_models.dart';
 import 'offline_dictionary_data.dart';
+import 'bundled_dictionary.dart';
 
 abstract class IDictionaryRepository {
   Future<DictionaryEntry?> lookupWord(String word);
@@ -52,18 +53,11 @@ class DictionaryRepository implements IDictionaryRepository {
         _memoryCache[cleanWord] = entry;
         return entry;
       }
+    } catch (_) {}
 
-      // Check prefix query in DB
-      final prefixResults = await db.query(
-        'offline_dictionary',
-        where: 'word LIKE ?',
-        whereArgs: ['$cleanWord%'],
-        limit: 1,
-      );
-
-      if (prefixResults.isNotEmpty) {
-        final row = prefixResults.first;
-        final entry = _entryFromDbRow(row);
+    try {
+      final entry = await BundledDictionary.lookup(cleanWord);
+      if (entry != null) {
         _memoryCache[cleanWord] = entry;
         return entry;
       }
@@ -111,8 +105,9 @@ class DictionaryRepository implements IDictionaryRepository {
         final results = await db.query(
           'offline_dictionary',
           columns: ['word'],
-          where: 'word LIKE ?',
-          whereArgs: ['$clean%'],
+          where: 'word >= ? AND word < ?',
+          whereArgs: [clean, '$clean\uffff'],
+          orderBy: 'word',
           limit: 6,
         );
         for (final r in results) {
@@ -121,6 +116,11 @@ class DictionaryRepository implements IDictionaryRepository {
       } catch (_) {}
     }
 
+    if (suggestions.length < 6) {
+      try {
+        suggestions.addAll(await BundledDictionary.suggestions(clean));
+      } catch (_) {}
+    }
     return suggestions.take(6).toList();
   }
 
@@ -135,13 +135,9 @@ class DictionaryRepository implements IDictionaryRepository {
       );
 
       final words = results.map((r) => r['word'] as String).toList();
-      if (words.isEmpty) {
-        // Fallback default seeds from mockup
-        return ['resilient', 'meticulous', 'endeavor'];
-      }
       return words;
     } catch (_) {
-      return ['resilient', 'meticulous', 'endeavor'];
+      return [];
     }
   }
 

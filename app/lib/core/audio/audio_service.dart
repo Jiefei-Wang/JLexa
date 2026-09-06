@@ -48,12 +48,14 @@ class AudioService extends ChangeNotifier {
   int _currentSegmentIndex = 0;
 
   bool _isPlaying = false;
+  bool _completed = false;
   int _positionMs = 0;
   int _durationMs = 0;
   bool _isRepeatOne = false;
   bool _isSeeking = false;
   int _seekGeneration = 0;
   bool _loopSeekInFlight = false;
+  int _playbackGeneration = 0;
   String? _loopTargetCutId;
   bool _resumeAfterScrub = false;
   bool _hasLoadError = false;
@@ -103,7 +105,7 @@ class AudioService extends ChangeNotifier {
       }, onError: (_) {});
 
       _positionSub = player.onPositionChanged.listen((pos) {
-        if (_isSeeking) return;
+        if (_isSeeking || _completed) return;
         _positionMs = pos.inMilliseconds;
         final target = loopTarget;
         if (_isRepeatOne && target != null && _positionMs >= target.endMs) {
@@ -121,6 +123,9 @@ class AudioService extends ChangeNotifier {
         if (_isRepeatOne && target != null) {
           unawaited(_performLoop(target));
         } else {
+          _completed = true;
+          _positionMs = _durationMs;
+          _updateActiveSegment();
           notifyListeners();
         }
       }, onError: (_) {});
@@ -184,9 +189,12 @@ class AudioService extends ChangeNotifier {
         _currentSegmentIndex = -1;
         _positionMs = 0;
         _durationMs = 0;
+        _completed = false;
         _isPlaying = false;
         notifyListeners();
 
+        // Keep the native source after EOF so seeking/replaying still works.
+        await _player.setReleaseMode(ReleaseMode.stop);
         await _player.stop();
         if (loadId != _loadGeneration) {
           completer.complete();
@@ -266,13 +274,16 @@ class AudioService extends ChangeNotifier {
       return;
     }
     _loopSeekInFlight = true;
+    final playbackGeneration = _playbackGeneration;
     debugPrint(
       '[JLexaAudio] loop start cut=${target.id} '
       'bounds=${target.startMs}-${target.endMs} position=$_positionMs',
     );
     try {
       await seekTo(target.startMs, userInitiated: false);
-      if (_isRepeatOne && loopTarget?.id == target.id) {
+      if (_isRepeatOne &&
+          loopTarget?.id == target.id &&
+          playbackGeneration == _playbackGeneration) {
         await play();
         debugPrint(
           '[JLexaAudio] loop resumed cut=${target.id} at=${target.startMs}',
@@ -284,7 +295,7 @@ class AudioService extends ChangeNotifier {
   }
 
   Future<void> togglePlayPause() async {
-    if (_isPlaying) {
+    if (_isPlaying || _loopSeekInFlight) {
       await pause();
     } else {
       await play();
@@ -293,17 +304,22 @@ class AudioService extends ChangeNotifier {
 
   Future<void> play() async {
     try {
+      if (_durationMs > 0 && _positionMs >= _durationMs) {
+        await seekTo(0);
+      }
       await _player.resume();
     } catch (_) {}
   }
 
   Future<void> pause() async {
+    ++_playbackGeneration;
     try {
       await _player.pause();
     } catch (_) {}
   }
 
   Future<void> seekTo(int positionMs, {bool userInitiated = true}) async {
+    _completed = false;
     final generation = ++_seekGeneration;
     _isSeeking = true;
     _positionMs = positionMs
@@ -333,6 +349,7 @@ class AudioService extends ChangeNotifier {
   }
 
   Future<void> stop() async {
+    ++_playbackGeneration;
     try {
       await _player.stop();
       _isPlaying = false;

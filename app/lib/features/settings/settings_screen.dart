@@ -96,263 +96,273 @@ class _SettingsScreenState extends State<SettingsScreen> {
               style: AppTypography.titleMedium,
             ),
           ),
-          body: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              if (_controller.errorMessage != null)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppColors.errorLight,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.error),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.error_outline, color: AppColors.error),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _controller.errorMessage!,
-                          style: const TextStyle(
+          body: SafeArea(
+            top: false,
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                if (_controller.errorMessage != null)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.errorLight,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.error),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline, color: AppColors.error),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _controller.errorMessage!,
+                            style: const TextStyle(
+                              color: AppColors.error,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.close,
+                            size: 16,
                             color: AppColors.error,
-                            fontSize: 13,
                           ),
+                          onPressed: _controller.clearError,
                         ),
-                      ),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.close,
-                          size: 16,
-                          color: AppColors.error,
-                        ),
-                        onPressed: _controller.clearError,
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
 
-              if (_controller.llmRestorationError != null ||
-                  _controller.speechRestorationError != null)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.amber.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.amber.shade400),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.warning_amber_rounded,
-                            color: Colors.amber.shade800,
-                          ),
-                          const SizedBox(width: 8),
+                if (_controller.llmRestorationError != null ||
+                    _controller.speechRestorationError != null)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.amber.shade400),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.warning_amber_rounded,
+                              color: Colors.amber.shade800,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Startup Restoration Notice',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.amber.shade900,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (_controller.llmRestorationError != null) ...[
+                          const SizedBox(height: 6),
                           Text(
-                            'Startup Restoration Notice',
+                            _controller.llmRestorationError!,
                             style: TextStyle(
-                              fontWeight: FontWeight.bold,
                               color: Colors.amber.shade900,
-                              fontSize: 14,
+                              fontSize: 13,
                             ),
                           ),
                         ],
+                        if (_controller.speechRestorationError != null) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            _controller.speechRestorationError!,
+                            style: TextStyle(
+                              color: Colors.amber.shade900,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+
+                // ==========================================
+                // Storage Folder Configuration
+                // ==========================================
+                _buildStorageFolderCard(),
+                const SizedBox(height: 24),
+
+                if (!_controller.isStorageConfigured) ...[
+                  _buildUnconfiguredCatalogPlaceholder(),
+                  const SizedBox(height: 24),
+                ] else ...[
+                  // ==========================================
+                  // Section 1: Local Language Model (LLM)
+                  // ==========================================
+                  const Text(
+                    'Local Language Model (LLM)',
+                    style: AppTypography.titleSmall,
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Download an offline model for AI explanations, grammar insights, and translations.',
+                    style: AppTypography.bodySmall,
+                  ),
+                  const SizedBox(height: 10),
+
+                  ...llmModels.map((item) => _buildModelCard(item)),
+
+                  const SizedBox(height: 24),
+
+                  // ==========================================
+                  // Section 2: Speech Recognition Model (Whisper)
+                  // ==========================================
+                  const Text(
+                    'Speech Recognition Model (Whisper)',
+                    style: AppTypography.titleSmall,
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Select an offline speech recognition model for audio lesson transcription.',
+                    style: AppTypography.bodySmall,
+                  ),
+                  const SizedBox(height: 10),
+
+                  ...whisperModels.map((item) => _buildModelCard(item)),
+
+                  const SizedBox(height: 16),
+
+                  // Custom Models Information Card
+                  _buildCustomModelsInfoCard(),
+
+                  const SizedBox(height: 24),
+                ],
+
+                // ==========================================
+                // Section 3: llama.cpp Runtime & Backend Settings
+                // ==========================================
+                const Text(
+                  'llama.cpp Runtime & Hardware Acceleration',
+                  style: AppTypography.titleSmall,
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Configure hardware acceleration backend and execution engine parameters.',
+                  style: AppTypography.bodySmall,
+                ),
+                const SizedBox(height: 10),
+
+                _buildLlamaRuntimeCard(),
+
+                const SizedBox(height: 24),
+
+                // ==========================================
+                // Section 4: AI Generation Settings
+                // ==========================================
+                const Text(
+                  'Sampling & Generation Settings',
+                  style: AppTypography.titleSmall,
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Column(
+                    children: [
+                      _buildSliderTile(
+                        title: 'Temperature',
+                        subtitle: 'Controls randomness vs determinism',
+                        value: _controller.generationSettings.temperature,
+                        min: 0.1,
+                        max: 1.5,
+                        divisions: 14,
+                        displayValue: _controller.generationSettings.temperature
+                            .toStringAsFixed(2),
+                        onChanged: (val) {
+                          _controller.updateAiGenerationSettings(
+                            _controller.generationSettings.copyWith(
+                              temperature: val,
+                            ),
+                          );
+                        },
                       ),
-                      if (_controller.llmRestorationError != null) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          _controller.llmRestorationError!,
-                          style: TextStyle(
-                            color: Colors.amber.shade900,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                      if (_controller.speechRestorationError != null) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          _controller.speechRestorationError!,
-                          style: TextStyle(
-                            color: Colors.amber.shade900,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
+                      const Divider(height: 20),
+                      _buildSliderTile(
+                        title: 'Top-P Sampling',
+                        subtitle: 'Nucleus sampling threshold',
+                        value: _controller.generationSettings.topP,
+                        min: 0.1,
+                        max: 1.0,
+                        divisions: 18,
+                        displayValue: _controller.generationSettings.topP
+                            .toStringAsFixed(2),
+                        onChanged: (val) {
+                          _controller.updateAiGenerationSettings(
+                            _controller.generationSettings.copyWith(topP: val),
+                          );
+                        },
+                      ),
+                      const Divider(height: 20),
+                      _buildSliderTile(
+                        title: 'Max Output Tokens',
+                        subtitle: 'Maximum response length in tokens',
+                        value: _controller.generationSettings.maxTokens
+                            .toDouble(),
+                        min: 128,
+                        max: 2048,
+                        divisions: 15,
+                        displayValue:
+                            '${_controller.generationSettings.maxTokens}',
+                        onChanged: (val) {
+                          _controller.updateAiGenerationSettings(
+                            _controller.generationSettings.copyWith(
+                              maxTokens: val.round(),
+                            ),
+                          );
+                        },
+                      ),
                     ],
                   ),
                 ),
+                const SizedBox(height: 20),
 
-              // ==========================================
-              // Storage Folder Configuration
-              // ==========================================
-              _buildStorageFolderCard(),
-              const SizedBox(height: 24),
-
-              if (!_controller.isStorageConfigured) ...[
-                _buildUnconfiguredCatalogPlaceholder(),
+                // About Section
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('About JLexa', style: AppTypography.labelLarge),
+                      SizedBox(height: 4),
+                      Text(
+                        'JLexa 1.0.0 (Android-first)\nOffline Dictionary • Sentence Repeater • Spaced Repetition • Local AI Engine (llama.cpp / whisper.cpp)\nDictionary: 57,961 ECDICT learner entries (MIT) plus curated examples.',
+                        style: AppTypography.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 24),
-              ] else ...[
-                // ==========================================
-                // Section 1: Local Language Model (LLM)
-                // ==========================================
-                const Text(
-                  'Local Language Model (LLM)',
-                  style: AppTypography.titleSmall,
+                TextButton(
+                  onPressed: () => showLicensePage(
+                    context: context,
+                    applicationName: 'JLexa',
+                  ),
+                  child: const Text('Open-source licenses'),
                 ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Download an offline model for AI explanations, grammar insights, and translations.',
-                  style: AppTypography.bodySmall,
-                ),
-                const SizedBox(height: 10),
-
-                ...llmModels.map((item) => _buildModelCard(item)),
-
-                const SizedBox(height: 24),
-
-                // ==========================================
-                // Section 2: Speech Recognition Model (Whisper)
-                // ==========================================
-                const Text(
-                  'Speech Recognition Model (Whisper)',
-                  style: AppTypography.titleSmall,
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Select an offline speech recognition model for audio lesson transcription.',
-                  style: AppTypography.bodySmall,
-                ),
-                const SizedBox(height: 10),
-
-                ...whisperModels.map((item) => _buildModelCard(item)),
-
-                const SizedBox(height: 16),
-
-                // Custom Models Information Card
-                _buildCustomModelsInfoCard(),
-
-                const SizedBox(height: 24),
               ],
-
-              // ==========================================
-              // Section 3: llama.cpp Runtime & Backend Settings
-              // ==========================================
-              const Text(
-                'llama.cpp Runtime & Hardware Acceleration',
-                style: AppTypography.titleSmall,
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Configure hardware acceleration backend and execution engine parameters.',
-                style: AppTypography.bodySmall,
-              ),
-              const SizedBox(height: 10),
-
-              _buildLlamaRuntimeCard(),
-
-              const SizedBox(height: 24),
-
-              // ==========================================
-              // Section 4: AI Generation Settings
-              // ==========================================
-              const Text(
-                'Sampling & Generation Settings',
-                style: AppTypography.titleSmall,
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Column(
-                  children: [
-                    _buildSliderTile(
-                      title: 'Temperature',
-                      subtitle: 'Controls randomness vs determinism',
-                      value: _controller.generationSettings.temperature,
-                      min: 0.1,
-                      max: 1.5,
-                      divisions: 14,
-                      displayValue: _controller.generationSettings.temperature
-                          .toStringAsFixed(2),
-                      onChanged: (val) {
-                        _controller.updateAiGenerationSettings(
-                          _controller.generationSettings.copyWith(
-                            temperature: val,
-                          ),
-                        );
-                      },
-                    ),
-                    const Divider(height: 20),
-                    _buildSliderTile(
-                      title: 'Top-P Sampling',
-                      subtitle: 'Nucleus sampling threshold',
-                      value: _controller.generationSettings.topP,
-                      min: 0.1,
-                      max: 1.0,
-                      divisions: 18,
-                      displayValue: _controller.generationSettings.topP
-                          .toStringAsFixed(2),
-                      onChanged: (val) {
-                        _controller.updateAiGenerationSettings(
-                          _controller.generationSettings.copyWith(topP: val),
-                        );
-                      },
-                    ),
-                    const Divider(height: 20),
-                    _buildSliderTile(
-                      title: 'Max Output Tokens',
-                      subtitle: 'Maximum response length in tokens',
-                      value: _controller.generationSettings.maxTokens
-                          .toDouble(),
-                      min: 128,
-                      max: 2048,
-                      divisions: 15,
-                      displayValue:
-                          '${_controller.generationSettings.maxTokens}',
-                      onChanged: (val) {
-                        _controller.updateAiGenerationSettings(
-                          _controller.generationSettings.copyWith(
-                            maxTokens: val.round(),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // About Section
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('About JLexa', style: AppTypography.labelLarge),
-                    SizedBox(height: 4),
-                    Text(
-                      'JLexa 1.0.0 (Android-first)\nOffline Dictionary • Sentence Repeater • Spaced Repetition • Local AI Engine (llama.cpp / whisper.cpp)',
-                      style: AppTypography.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
-            ],
+            ),
           ),
         );
       },

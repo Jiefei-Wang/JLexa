@@ -920,6 +920,11 @@ class RepeaterController extends ChangeNotifier {
     _isAiGenerating = false;
   }
 
+  void cancelExplanation() {
+    _invalidateExplanation();
+    notifyListeners();
+  }
+
   /// Explanation generation has exactly one entry point: an explicit tap.
   Future<void> generateExplanation() async {
     final cur = currentSegment;

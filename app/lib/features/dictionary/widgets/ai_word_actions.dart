@@ -30,6 +30,7 @@ class _AiWordActionsSectionState extends State<AiWordActionsSection> {
   }
 
   void _sendCustom() {
+    if (widget.isGenerating) return;
     final text = _customQuestionController.text.trim();
     if (text.isNotEmpty) {
       widget.onAskPrompt(text);
@@ -51,9 +52,11 @@ class _AiWordActionsSectionState extends State<AiWordActionsSection> {
         children: [
           Row(
             children: [
-              Text(
-                'Ask AI about "${widget.word}"',
-                style: AppTypography.titleSmall,
+              Expanded(
+                child: Text(
+                  'Ask AI about "${widget.word}"',
+                  style: AppTypography.titleSmall,
+                ),
               ),
               const SizedBox(width: 8),
               Container(
@@ -79,6 +82,10 @@ class _AiWordActionsSectionState extends State<AiWordActionsSection> {
             child: Row(
               children: [
                 _buildPromptChip(
+                  'Translate',
+                  'Translate this text into natural Chinese, then briefly explain its meaning.',
+                ),
+                _buildPromptChip(
                   'Use in a sentence',
                   'Generate 3 natural example sentences with collocations',
                 ),
@@ -101,7 +108,7 @@ class _AiWordActionsSectionState extends State<AiWordActionsSection> {
                   controller: _customQuestionController,
                   onSubmitted: (_) => _sendCustom(),
                   decoration: InputDecoration(
-                    hintText: 'Ask anything about this word...',
+                    hintText: 'Ask about this word or sentence...',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: const BorderSide(color: AppColors.border),
@@ -156,7 +163,9 @@ class _AiWordActionsSectionState extends State<AiWordActionsSection> {
         backgroundColor: AppColors.primaryLight,
         side: BorderSide.none,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        onPressed: () => widget.onAskPrompt(prompt),
+        onPressed: widget.isGenerating
+            ? null
+            : () => widget.onAskPrompt(prompt),
       ),
     );
   }

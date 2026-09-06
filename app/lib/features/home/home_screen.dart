@@ -291,7 +291,7 @@ class HomeScreenState extends State<HomeScreen> {
                 // Quick Tools Grid
                 QuickToolsGrid(
                   onOpenDictionary: () => widget.onOpenDictionary('resilient'),
-                  onOpenTranslation: () => widget.onOpenDictionary('resilient'),
+                  onOpenTranslation: () => widget.onOpenDictionary(''),
                   onOpenAiChat: widget.onOpenAiChat,
                   onOpenSpeechToText: widget.onOpenAiChat,
                 ),

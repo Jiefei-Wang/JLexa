@@ -25,7 +25,30 @@ class RecentLookupsSection extends StatelessWidget {
           children: [
             const Text('Recent Lookups', style: AppTypography.titleSmall),
             TextButton(
-              onPressed: () {},
+              onPressed: () => showModalBottomSheet<void>(
+                context: context,
+                builder: (sheetContext) => SafeArea(
+                  child: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      const Text(
+                        'Recent Lookups',
+                        style: AppTypography.titleMedium,
+                      ),
+                      ...searches.map(
+                        (word) => ListTile(
+                          title: Text(word),
+                          leading: const Icon(Icons.history),
+                          onTap: () {
+                            Navigator.pop(sheetContext);
+                            onWordTap(word);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               child: const Text(
                 'See all',
                 style: TextStyle(color: AppColors.primary, fontSize: 13),

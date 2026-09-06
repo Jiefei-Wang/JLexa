@@ -93,151 +93,155 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
       appBar: AppBar(
         title: Text('Review (${_currentIndex + 1}/${widget.dueWords.length})'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            // Progress Bar
-            LinearProgressIndicator(
-              value: (_currentIndex + 1) / widget.dueWords.length,
-              backgroundColor: AppColors.border,
-              valueColor: const AlwaysStoppedAnimation<Color>(
-                AppColors.primary,
-              ),
-              minHeight: 6,
-            ),
-            const SizedBox(height: 24),
-
-            // Flashcard
-            Expanded(
-              child: GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _showAnswer = !_showAnswer;
-                  });
-                },
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppColors.border),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withAlpha(8),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(word.word, style: AppTypography.wordDisplay),
-                      if (word.phonetic != null &&
-                          word.phonetic!.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Text(word.phonetic!, style: AppTypography.phonetic),
-                      ],
-                      const SizedBox(height: 24),
-                      if (!_showAnswer)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.primaryLight,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Text(
-                            'Tap card to reveal answer',
-                            style: TextStyle(
-                              color: AppColors.primary,
-                              fontSize: 13,
-                            ),
-                          ),
-                        )
-                      else ...[
-                        const Divider(height: 32),
-                        Text(
-                          word.definitionSnapshot,
-                          style: AppTypography.bodyLarge,
-                          textAlign: TextAlign.center,
-                        ),
-                        if (word.sourceSentence != null &&
-                            word.sourceSentence!.isNotEmpty) ...[
-                          const SizedBox(height: 16),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: AppColors.background,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              '"${word.sourceSentence!}"',
-                              style: AppTypography.bodySmall.copyWith(
-                                fontStyle: FontStyle.italic,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ],
-                  ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            children: [
+              // Progress Bar
+              LinearProgressIndicator(
+                value: (_currentIndex + 1) / widget.dueWords.length,
+                backgroundColor: AppColors.border,
+                valueColor: const AlwaysStoppedAnimation<Color>(
+                  AppColors.primary,
                 ),
+                minHeight: 6,
               ),
-            ),
-            const SizedBox(height: 24),
+              const SizedBox(height: 24),
 
-            // Spaced Repetition Buttons
-            if (_showAnswer)
-              Row(
-                children: [
-                  _buildRatingButton(
-                    label: 'Again',
-                    subtext: 'Today',
-                    color: AppColors.error,
-                    rating: ReviewRating.again,
-                  ),
-                  const SizedBox(width: 8),
-                  _buildRatingButton(
-                    label: 'Hard',
-                    subtext: '+1d',
-                    color: AppColors.warning,
-                    rating: ReviewRating.hard,
-                  ),
-                  const SizedBox(width: 8),
-                  _buildRatingButton(
-                    label: 'Good',
-                    subtext: '+3d',
-                    color: AppColors.primary,
-                    rating: ReviewRating.good,
-                  ),
-                  const SizedBox(width: 8),
-                  _buildRatingButton(
-                    label: 'Easy',
-                    subtext: '+7d',
-                    color: AppColors.success,
-                    rating: ReviewRating.easy,
-                  ),
-                ],
-              )
-            else
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
+              // Flashcard
+              Expanded(
+                child: GestureDetector(
+                  onTap: () {
                     setState(() {
-                      _showAnswer = true;
+                      _showAnswer = !_showAnswer;
                     });
                   },
-                  child: const Text('Show Answer'),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: AppColors.border),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withAlpha(8),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(word.word, style: AppTypography.wordDisplay),
+                          if (word.phonetic != null &&
+                              word.phonetic!.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(word.phonetic!, style: AppTypography.phonetic),
+                          ],
+                          const SizedBox(height: 24),
+                          if (!_showAnswer)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.primaryLight,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: const Text(
+                                'Tap card to reveal answer',
+                                style: TextStyle(
+                                  color: AppColors.primary,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            )
+                          else ...[
+                            const Divider(height: 32),
+                            Text(
+                              word.definitionSnapshot,
+                              style: AppTypography.bodyLarge,
+                              textAlign: TextAlign.center,
+                            ),
+                            if (word.sourceSentence != null &&
+                                word.sourceSentence!.isNotEmpty) ...[
+                              const SizedBox(height: 16),
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: AppColors.background,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  '"${word.sourceSentence!}"',
+                                  style: AppTypography.bodySmall.copyWith(
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
-          ],
+              const SizedBox(height: 24),
+
+              // Spaced Repetition Buttons
+              if (_showAnswer)
+                Row(
+                  children: [
+                    _buildRatingButton(
+                      label: 'Again',
+                      subtext: 'Today',
+                      color: AppColors.error,
+                      rating: ReviewRating.again,
+                    ),
+                    const SizedBox(width: 8),
+                    _buildRatingButton(
+                      label: 'Hard',
+                      subtext: '+1d',
+                      color: AppColors.warning,
+                      rating: ReviewRating.hard,
+                    ),
+                    const SizedBox(width: 8),
+                    _buildRatingButton(
+                      label: 'Good',
+                      subtext: '+3d',
+                      color: AppColors.primary,
+                      rating: ReviewRating.good,
+                    ),
+                    const SizedBox(width: 8),
+                    _buildRatingButton(
+                      label: 'Easy',
+                      subtext: '+7d',
+                      color: AppColors.success,
+                      rating: ReviewRating.easy,
+                    ),
+                  ],
+                )
+              else
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      setState(() {
+                        _showAnswer = true;
+                      });
+                    },
+                    child: const Text('Show Answer'),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

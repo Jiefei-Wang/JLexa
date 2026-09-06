@@ -557,6 +557,11 @@ void JLexaLlamaBridge::generate(
 
     llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
     sampler_guard.smpl = llama_sampler_chain_init(sparams);
+    // Bound the candidate set before applying repetition penalties. Without
+    // history-aware sampling, small models can repeat one definition to EOF.
+    llama_sampler_chain_add(sampler_guard.smpl, llama_sampler_init_top_k(40));
+    llama_sampler_chain_add(sampler_guard.smpl, llama_sampler_init_penalties(
+        llama_vocab_n_tokens(pImpl->vocab), 64, 1.1f, 0.0f, 0.0f));
     // Zero is a valid deterministic temperature. Defaults are applied in the
     // Dart/Kotlin request layer, so native must preserve the explicit value.
     llama_sampler_chain_add(sampler_guard.smpl, llama_sampler_init_temp(temperature >= 0.0f ? temperature : 0.7f));
@@ -609,7 +614,7 @@ void JLexaLlamaBridge::generate(
 
     while (n_generated < max_to_gen && !pImpl->isCancelled && static_cast<uint32_t>(n_cur) < n_ctx) {
         const llama_token new_token_id = llama_sampler_sample(sampler_guard.smpl, pImpl->ctx, -1);
-        llama_sampler_accept(sampler_guard.smpl, new_token_id);
+        // llama_sampler_sample already accepts this token into sampler history.
 
         if (llama_vocab_is_eog(pImpl->vocab, new_token_id)) {
             break;

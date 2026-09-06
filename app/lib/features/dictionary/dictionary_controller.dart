@@ -8,7 +8,6 @@ import '../../core/ai/prompt_builder.dart';
 import '../../core/dictionary/dictionary_ai_parser.dart';
 import '../../core/dictionary/dictionary_models.dart';
 import '../../core/dictionary/dictionary_repository.dart';
-import '../../core/utils/text_normalization.dart';
 import '../../core/vocabulary/vocabulary_models.dart';
 import '../../core/vocabulary/vocabulary_repository.dart';
 
@@ -85,8 +84,8 @@ class DictionaryController extends ChangeNotifier {
   }
 
   Future<void> onQueryChanged(String query) async {
-    _currentQuery = query;
     if (query.trim().isEmpty) {
+      await search('');
       ++_queryGeneration;
       _suggestions = [];
       notifyListeners();
@@ -102,8 +101,7 @@ class DictionaryController extends ChangeNotifier {
   }
 
   Future<void> search(String word) async {
-    final clean = TextNormalization.normalizeWord(word);
-    if (clean.isEmpty) return;
+    final clean = word.trim().replaceAll(RegExp(r'\s+'), ' ');
 
     ++_queryGeneration; // Invalidate any pending suggestion queries
     final gen = ++_searchGeneration;
@@ -113,12 +111,20 @@ class DictionaryController extends ChangeNotifier {
 
     _isLoading = true;
     _currentQuery = clean;
+    _currentEntry = null;
+    _isSaved = false;
     _suggestions = [];
     _aiAnswer = null;
     _aiErrorMessage = null;
     _aiRawStreamingText = '';
     _isAiGenerating = false;
     notifyListeners();
+
+    if (clean.isEmpty) {
+      _isLoading = false;
+      notifyListeners();
+      return;
+    }
 
     final entry = await dictionaryRepo.lookupWord(clean);
     if (gen != _searchGeneration || _isDisposed) return;
@@ -147,15 +153,17 @@ class DictionaryController extends ChangeNotifier {
 
   Future<void> toggleSaveToVocabulary() async {
     final targetWord = _currentEntry?.word ?? _currentQuery;
-    if (targetWord.isEmpty || _isSaving || _isDisposed) return;
+    if (targetWord.isEmpty || _isSaving || _isLoading || _isDisposed) return;
+    final searchGeneration = _searchGeneration;
     _isSaving = true;
+    notifyListeners();
 
     try {
       if (_isSaved) {
         final existing = await vocabularyRepo.getWord(targetWord);
         if (existing != null) {
           await vocabularyRepo.deleteWord(existing.id);
-          if (!_isDisposed) {
+          if (!_isDisposed && searchGeneration == _searchGeneration) {
             _isSaved = false;
           }
         }
@@ -208,7 +216,7 @@ class DictionaryController extends ChangeNotifier {
           dateAdded: DateTime.now(),
         );
         await vocabularyRepo.saveWord(newWord);
-        if (!_isDisposed) {
+        if (!_isDisposed && searchGeneration == _searchGeneration) {
           _isSaved = true;
         }
       }
@@ -221,6 +229,7 @@ class DictionaryController extends ChangeNotifier {
   }
 
   Future<void> _fetchAiAnswer() async {
+    if (_isLoading || _isDisposed) return;
     final targetWord = _currentEntry?.word ?? _currentQuery;
     if (targetWord.isEmpty) return;
 
@@ -242,7 +251,14 @@ class DictionaryController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final handle = aiService.startDictionaryAiAnswer(targetWord);
+      final handle = aiService.startDictionaryAiAnswer(
+        targetWord,
+        dictionaryContext: _currentEntry == null
+            ? null
+            : [
+                ..._currentEntry!.chineseDefinitions.take(4),
+              ].join('\n'),
+      );
       _activeAiHandle = handle;
 
       await for (final chunk in handle.stream) {
@@ -286,7 +302,19 @@ class DictionaryController extends ChangeNotifier {
     }
   }
 
+  void cancelAiAnswer() {
+    ++_aiGeneration;
+    _activeAiHandle?.cancel();
+    _activeAiHandle = null;
+    _isAiGenerating = false;
+    _aiRawStreamingText = '';
+    notifyListeners();
+  }
+
+  Future<void> retryAiAnswer() => _fetchAiAnswer();
+
   Future<void> askAiAboutWord(String prompt) async {
+    if (_isLoading || _isDisposed || _isAiGenerating) return;
     final targetWord = _currentEntry?.word ?? _currentQuery;
     if (targetWord.isEmpty) return;
     final gen = ++_aiGeneration;

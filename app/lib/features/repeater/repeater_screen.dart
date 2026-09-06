@@ -385,6 +385,7 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                       isGenerating: _controller.isAiGenerating,
                       onOpenQa: _handleOpenQa,
                       onGenerate: _controller.generateExplanation,
+                      onCancel: _controller.cancelExplanation,
                     ),
                     const SizedBox(height: 24),
                   ],

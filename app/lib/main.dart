@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import 'core/ai/ai_service.dart';
 import 'core/ai/model_downloader.dart';
@@ -14,6 +16,11 @@ import 'features/navigation/main_scaffold.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks([
+      'ECDICT',
+    ], await rootBundle.loadString('assets/dictionary/ECDICT-LICENSE.txt'));
+  });
 
   final dictionaryRepo = DictionaryRepository();
   final vocabularyRepo = VocabularyRepository();

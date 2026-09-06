@@ -119,172 +119,224 @@ class _AiChatScreenState extends State<AiChatScreen> {
             actions: [
               IconButton(
                 icon: const Icon(Icons.history, color: AppColors.textPrimary),
-                onPressed: () {},
+                onPressed: () => showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (context) => SafeArea(
+                    child: SizedBox(
+                      height: MediaQuery.sizeOf(context).height * 0.7,
+                      child: ListView(
+                        padding: const EdgeInsets.all(16),
+                        children: [
+                          const Text(
+                            'Current conversation',
+                            style: AppTypography.titleMedium,
+                          ),
+                          const SizedBox(height: 16),
+                          if (_controller.messages.isEmpty)
+                            const Text('No messages yet.')
+                          else
+                            ..._controller.messages.map(
+                              (message) => Padding(
+                                padding: const EdgeInsets.only(bottom: 16),
+                                child: SelectableText(
+                                  '${message.role == 'user' ? 'You' : 'JLexa'}: ${message.content}',
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
                 tooltip: 'History',
               ),
             ],
           ),
-          body: Column(
-            children: [
-              // Context summary & example questions (Header area)
-              Expanded(
-                child: ListView(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    if (_controller.sentenceContext != null) ...[
-                      SentenceSummaryCard(
-                        contextData: _controller.sentenceContext!,
-                        isExpanded: _controller.isSummaryExpanded,
-                        onToggleExpand: _controller.toggleSummaryExpanded,
+          body: SafeArea(
+            top: false,
+            child: Column(
+              children: [
+                // Context summary & example questions (Header area)
+                Expanded(
+                  child: ListView(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      if (_controller.sentenceContext != null) ...[
+                        SentenceSummaryCard(
+                          contextData: _controller.sentenceContext!,
+                          isExpanded: _controller.isSummaryExpanded,
+                          onToggleExpand: _controller.toggleSummaryExpanded,
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+
+                      // Example Questions
+                      const Text(
+                        'Example Questions',
+                        style: AppTypography.titleSmall,
                       ),
+                      const SizedBox(height: 8),
+                      if (_controller.sentenceContext == null) ...[
+                        _buildExampleQuestionTile(
+                          'Explain the difference between "say" and "tell" in Chinese.',
+                        ),
+                        _buildExampleQuestionTile(
+                          'Translate "I look forward to hearing from you" into Chinese.',
+                        ),
+                        _buildExampleQuestionTile(
+                          'Give me three useful English phrases for daily conversation.',
+                        ),
+                      ] else ...[
+                        _buildExampleQuestionTile('Why is this phrase used?'),
+                        _buildExampleQuestionTile(
+                          'Explain this sentence in Chinese.',
+                        ),
+                        _buildExampleQuestionTile(
+                          'What does "prioritize" mean here?',
+                        ),
+                        _buildExampleQuestionTile(
+                          'Give me another example sentence.',
+                        ),
+                        _buildExampleQuestionTile(
+                          'Is the transcription correct?',
+                        ),
+                      ],
                       const SizedBox(height: 16),
-                    ],
 
-                    // Example Questions
-                    const Text(
-                      'Example Questions',
-                      style: AppTypography.titleSmall,
-                    ),
-                    const SizedBox(height: 8),
-                    _buildExampleQuestionTile('Why is this phrase used?'),
-                    _buildExampleQuestionTile(
-                      'Explain this sentence in Chinese.',
-                    ),
-                    _buildExampleQuestionTile(
-                      'What does "prioritize" mean here?',
-                    ),
-                    _buildExampleQuestionTile(
-                      'Give me another example sentence.',
-                    ),
-                    _buildExampleQuestionTile('Is the transcription correct?'),
-                    const SizedBox(height: 16),
-
-                    // Chat messages list
-                    const Divider(height: 24),
-                    ..._controller.messages.map(
-                      (msg) =>
-                          ChatBubble(message: msg, onSpeak: _controller.speak),
-                    ),
-
-                    if (_controller.isGenerating)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 8.0),
-                        child: Center(
-                          child: SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(strokeWidth: 2.5),
-                          ),
+                      // Chat messages list
+                      const Divider(height: 24),
+                      ..._controller.messages.map(
+                        (msg) => ChatBubble(
+                          message: msg,
+                          onSpeak: _controller.speak,
                         ),
                       ),
-                  ],
-                ),
-              ),
 
-              // Recording Status Banner if active
-              if (_controller.isRecording)
-                Container(
-                  color: AppColors.primaryLight,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
+                      if (_controller.isGenerating)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 8.0),
+                          child: Center(
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.mic, color: AppColors.primary, size: 20),
-                          SizedBox(width: 8),
-                          Text(
-                            'Listening...',
+                ),
+
+                // Recording Status Banner if active
+                if (_controller.isRecording)
+                  Container(
+                    color: AppColors.primaryLight,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.mic, color: AppColors.primary, size: 20),
+                            SizedBox(width: 8),
+                            Text(
+                              'Listening...',
+                              style: TextStyle(
+                                color: AppColors.primary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        TextButton(
+                          onPressed: _toggleVoiceRecording,
+                          child: const Text(
+                            'Tap to stop',
                             style: TextStyle(
                               color: AppColors.primary,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // Bottom Input Bar
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  decoration: const BoxDecoration(
+                    color: AppColors.surface,
+                    border: Border(top: BorderSide(color: AppColors.border)),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: Icon(
+                              _controller.isRecording
+                                  ? Icons.stop
+                                  : Icons.mic_none,
+                              color: _controller.isRecording
+                                  ? AppColors.error
+                                  : AppColors.textSecondary,
+                            ),
+                            onPressed: _toggleVoiceRecording,
+                            tooltip: 'Voice Input',
+                          ),
+                          Expanded(
+                            child: TextField(
+                              controller: _inputController,
+                              onSubmitted: (_) => _send(),
+                              decoration: InputDecoration(
+                                hintText: _controller.sentenceContext == null
+                                    ? 'Ask an English learning question...'
+                                    : 'Ask anything about this audio...',
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                              ),
+                            ),
+                          ),
+                          IconButton.filled(
+                            onPressed: _controller.isGenerating ? null : _send,
+                            icon: const Icon(Icons.send, size: 18),
+                            style: IconButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
                         ],
                       ),
-                      TextButton(
-                        onPressed: _toggleVoiceRecording,
-                        child: const Text(
-                          'Tap to stop',
-                          style: TextStyle(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.bold,
-                          ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'AI responses may be imperfect. Please verify important information.',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: AppColors.textTertiary,
                         ),
                       ),
                     ],
                   ),
                 ),
-
-              // Bottom Input Bar
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
-                ),
-                decoration: const BoxDecoration(
-                  color: AppColors.surface,
-                  border: Border(top: BorderSide(color: AppColors.border)),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        IconButton(
-                          icon: Icon(
-                            _controller.isRecording
-                                ? Icons.stop
-                                : Icons.mic_none,
-                            color: _controller.isRecording
-                                ? AppColors.error
-                                : AppColors.textSecondary,
-                          ),
-                          onPressed: _toggleVoiceRecording,
-                          tooltip: 'Voice Input',
-                        ),
-                        Expanded(
-                          child: TextField(
-                            controller: _inputController,
-                            onSubmitted: (_) => _send(),
-                            decoration: const InputDecoration(
-                              hintText: 'Ask anything about this audio...',
-                              border: InputBorder.none,
-                              enabledBorder: InputBorder.none,
-                              focusedBorder: InputBorder.none,
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 10,
-                              ),
-                            ),
-                          ),
-                        ),
-                        IconButton.filled(
-                          onPressed: _controller.isGenerating ? null : _send,
-                          icon: const Icon(Icons.send, size: 18),
-                          style: IconButton.styleFrom(
-                            backgroundColor: AppColors.primary,
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'AI responses may be imperfect. Please verify important information.',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: AppColors.textTertiary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },

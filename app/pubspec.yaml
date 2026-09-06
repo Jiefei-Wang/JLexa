@@ -33,3 +33,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/dictionary/ecdict-v1.db
+    - assets/dictionary/ECDICT-LICENSE.txt

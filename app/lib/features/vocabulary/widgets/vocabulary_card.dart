@@ -62,14 +62,18 @@ class VocabularyCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    Text(word.word, style: AppTypography.titleSmall),
-                    if (word.phonetic != null && word.phonetic!.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      Text(word.phonetic!, style: AppTypography.bodySmall),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(word.word, style: AppTypography.titleSmall),
+                      if (word.phonetic != null &&
+                          word.phonetic!.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Text(word.phonetic!, style: AppTypography.bodySmall),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(

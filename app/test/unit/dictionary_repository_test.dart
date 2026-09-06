@@ -4,6 +4,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
   setUpAll(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   });
@@ -13,6 +14,39 @@ void main() {
 
     setUp(() {
       repository = DictionaryRepository();
+    });
+
+    test(
+      'Bundled dictionary covers everyday words beyond curated seeds',
+      () async {
+        for (final word in [
+          'hello',
+          'apple',
+          'beautiful',
+          'computer',
+          'listen',
+        ]) {
+          final entry = await repository.lookupWord(word);
+          expect(entry?.word, word);
+          expect(entry?.chineseDefinitions, isNotEmpty);
+        }
+      },
+    );
+
+    test(
+      'Partial spelling and SQL wildcards never select another word',
+      () async {
+        expect(await repository.lookupWord('resilie'), isNull);
+        expect(await repository.lookupWord('%'), isNull);
+        expect(await repository.searchSuggestions('%'), isEmpty);
+        expect(await repository.searchSuggestions('appl'), contains('apple'));
+      },
+    );
+
+    test('Clearing history leaves it empty', () async {
+      await repository.addRecentSearch('hello');
+      await repository.clearRecentSearches();
+      expect(await repository.getRecentSearches(), isEmpty);
     });
 
     test('Look up existing word "resilient"', () async {

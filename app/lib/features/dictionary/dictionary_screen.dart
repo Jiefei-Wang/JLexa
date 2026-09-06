@@ -15,6 +15,7 @@ class DictionaryScreen extends StatefulWidget {
   final VocabularyRepository vocabularyRepo;
   final AiService aiService;
   final String? initialWord;
+  final int navigationRevision;
 
   const DictionaryScreen({
     super.key,
@@ -22,6 +23,7 @@ class DictionaryScreen extends StatefulWidget {
     required this.vocabularyRepo,
     required this.aiService,
     this.initialWord,
+    this.navigationRevision = 0,
   });
 
   @override
@@ -42,15 +44,18 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
       initialWord: widget.initialWord ?? 'resilient',
     );
     _searchTextController.text = widget.initialWord ?? 'resilient';
+    if (widget.initialWord == '') _controller.setSelectedTab(1);
   }
 
   @override
   void didUpdateWidget(covariant DictionaryScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.initialWord != null &&
-        widget.initialWord != oldWidget.initialWord) {
+        (widget.initialWord != oldWidget.initialWord ||
+            widget.navigationRevision != oldWidget.navigationRevision)) {
       _searchTextController.text = widget.initialWord!;
       _controller.search(widget.initialWord!);
+      if (widget.initialWord == '') _controller.setSelectedTab(1);
     }
   }
 
@@ -82,7 +87,11 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                       ? Colors.amber
                       : AppColors.textPrimary,
                 ),
-                onPressed: _controller.currentEntry != null
+                onPressed:
+                    !_controller.isLoading &&
+                        !_controller.isSaving &&
+                        (_controller.currentEntry != null ||
+                            _controller.aiAnswer != null)
                     ? () async {
                         await _controller.toggleSaveToVocabulary();
                         if (context.mounted) {
@@ -115,9 +124,13 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                 child: TextField(
                   controller: _searchTextController,
                   onChanged: _controller.onQueryChanged,
-                  onSubmitted: _controller.search,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (query) {
+                    FocusScope.of(context).unfocus();
+                    _controller.search(query);
+                  },
                   decoration: InputDecoration(
-                    hintText: 'Search word...',
+                    hintText: 'Search a word or sentence...',
                     prefixIcon: const Icon(
                       Icons.search,
                       color: AppColors.textSecondary,
@@ -143,20 +156,26 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
               if (_controller.suggestions.isNotEmpty)
                 Container(
                   color: AppColors.surface,
-                  child: Column(
+                  constraints: const BoxConstraints(maxHeight: 180),
+                  child: ListView(
+                    shrinkWrap: true,
                     children: _controller.suggestions.map((s) {
-                      return ListTile(
-                        leading: const Icon(
-                          Icons.search,
-                          size: 18,
-                          color: AppColors.textSecondary,
+                      return Material(
+                        color: AppColors.surface,
+                        child: ListTile(
+                          leading: const Icon(
+                            Icons.search,
+                            size: 18,
+                            color: AppColors.textSecondary,
+                          ),
+                          title: Text(s, style: AppTypography.bodyMedium),
+                          dense: true,
+                          onTap: () {
+                            FocusScope.of(context).unfocus();
+                            _searchTextController.text = s;
+                            _controller.search(s);
+                          },
                         ),
-                        title: Text(s, style: AppTypography.bodyMedium),
-                        dense: true,
-                        onTap: () {
-                          _searchTextController.text = s;
-                          _controller.search(s);
-                        },
                       );
                     }).toList(),
                   ),
@@ -180,7 +199,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                             ),
                             const SizedBox(height: 12),
                             const Text(
-                              'Search any English word',
+                              'Search a word or sentence',
                               style: AppTypography.titleSmall,
                             ),
                             const SizedBox(height: 4),
@@ -205,10 +224,12 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                   children: [
                                     Row(
                                       children: [
-                                        Text(
-                                          entry?.word ??
-                                              _controller.currentQuery,
-                                          style: AppTypography.wordDisplay,
+                                        Expanded(
+                                          child: Text(
+                                            entry?.word ??
+                                                _controller.currentQuery,
+                                            style: AppTypography.wordDisplay,
+                                          ),
                                         ),
                                         const SizedBox(width: 8),
                                         IconButton(
@@ -234,7 +255,9 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                   ],
                                 ),
                               ),
-                              if (entry != null)
+                              if (entry != null &&
+                                  (entry.isHighFrequency ||
+                                      entry.partOfSpeech.isNotEmpty))
                                 Column(
                                   crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
@@ -413,6 +436,10 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                             ),
                                           ],
                                         ),
+                                        TextButton(
+                                          onPressed: _controller.cancelAiAnswer,
+                                          child: const Text('Cancel'),
+                                        ),
                                       ],
                                     )
                                   else if (_controller.aiErrorMessage != null)
@@ -437,6 +464,15 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                       style: TextStyle(
                                         color: AppColors.textSecondary,
                                         fontSize: 13,
+                                      ),
+                                    ),
+                                  if (!_controller.isAiGenerating)
+                                    TextButton(
+                                      onPressed: _controller.retryAiAnswer,
+                                      child: Text(
+                                        _controller.aiAnswer == null
+                                            ? 'Try again'
+                                            : 'Regenerate',
                                       ),
                                     ),
                                 ],
@@ -467,22 +503,26 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                 child: const Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.check_circle,
-                          color: AppColors.success,
-                          size: 16,
-                        ),
-                        SizedBox(width: 6),
-                        Text(
-                          'Offline dictionary available',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.textSecondary,
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            color: AppColors.success,
+                            size: 16,
                           ),
-                        ),
-                      ],
+                          SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              'Offline dictionary available',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     Icon(
                       Icons.menu_book,
