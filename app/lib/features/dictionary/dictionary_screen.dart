@@ -206,7 +206,8 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                     Row(
                                       children: [
                                         Text(
-                                          entry?.word ?? _controller.currentQuery,
+                                          entry?.word ??
+                                              _controller.currentQuery,
                                           style: AppTypography.wordDisplay,
                                         ),
                                         const SizedBox(width: 8),
@@ -216,16 +217,16 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                             color: AppColors.primary,
                                             size: 24,
                                           ),
-                                          onPressed: () =>
-                                              _controller.speak(
-                                                entry?.word ??
-                                                    _controller.currentQuery,
-                                              ),
+                                          onPressed: () => _controller.speak(
+                                            entry?.word ??
+                                                _controller.currentQuery,
+                                          ),
                                           tooltip: 'Pronounce word',
                                         ),
                                       ],
                                     ),
-                                    if (entry != null && entry.phonetic.isNotEmpty)
+                                    if (entry != null &&
+                                        entry.phonetic.isNotEmpty)
                                       Text(
                                         entry.phonetic,
                                         style: AppTypography.phonetic,
@@ -245,7 +246,9 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                         ),
                                         decoration: BoxDecoration(
                                           color: AppColors.successLight,
-                                          borderRadius: BorderRadius.circular(8),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
                                         ),
                                         child: const Text(
                                           'High Frequency',
@@ -525,44 +528,40 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
     if (answer is DictionaryWordAnswer) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children:
-            answer.senses.map((sense) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (sense.partOfSpeech.isNotEmpty) ...[
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        margin: const EdgeInsets.only(right: 8, top: 2),
-                        decoration: BoxDecoration(
-                          color: AppColors.primaryLight,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          sense.partOfSpeech,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.primary,
-                          ),
-                        ),
-                      ),
-                    ],
-                    Expanded(
-                      child: Text(
-                        sense.meaning,
-                        style: AppTypography.bodyLarge,
+        children: answer.senses.map((sense) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (sense.partOfSpeech.isNotEmpty) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    margin: const EdgeInsets.only(right: 8, top: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryLight,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      sense.partOfSpeech,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primary,
                       ),
                     ),
-                  ],
+                  ),
+                ],
+                Expanded(
+                  child: Text(sense.meaning, style: AppTypography.bodyLarge),
                 ),
-              );
-            }).toList(),
+              ],
+            ),
+          );
+        }).toList(),
       );
     } else if (answer is DictionaryPhraseAnswer) {
       return Text(answer.explanation, style: AppTypography.bodyLarge);

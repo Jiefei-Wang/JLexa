@@ -165,14 +165,12 @@ class DictionaryController extends ChangeNotifier {
         String pos = _currentEntry?.partOfSpeech ?? '';
 
         if (_currentEntry != null) {
-          defSnap =
-              _currentEntry!.definitions.isNotEmpty
-                  ? _currentEntry!.definitions.first
-                  : '';
-          transSnap =
-              _currentEntry!.chineseDefinitions.isNotEmpty
-                  ? _currentEntry!.chineseDefinitions.first
-                  : '';
+          defSnap = _currentEntry!.definitions.isNotEmpty
+              ? _currentEntry!.definitions.first
+              : '';
+          transSnap = _currentEntry!.chineseDefinitions.isNotEmpty
+              ? _currentEntry!.chineseDefinitions.first
+              : '';
         }
 
         if (defSnap.isEmpty && transSnap.isEmpty && _aiAnswer != null) {
@@ -204,10 +202,9 @@ class DictionaryController extends ChangeNotifier {
           definitionSnapshot: defSnap,
           translationSnapshot: transSnap,
           source: 'Dictionary',
-          sourceSentence:
-              _currentEntry?.examples.isNotEmpty == true
-                  ? _currentEntry!.examples.first.english
-                  : null,
+          sourceSentence: _currentEntry?.examples.isNotEmpty == true
+              ? _currentEntry!.examples.first.english
+              : null,
           dateAdded: DateTime.now(),
         );
         await vocabularyRepo.saveWord(newWord);
@@ -390,4 +387,3 @@ class DictionaryController extends ChangeNotifier {
     super.dispose();
   }
 }
-

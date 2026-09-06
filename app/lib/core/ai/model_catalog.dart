@@ -1,9 +1,6 @@
 import 'dart:math';
 
-enum ModelType {
-  llm,
-  whisper,
-}
+enum ModelType { llm, whisper }
 
 enum ModelDownloadState {
   notDownloaded,
@@ -31,7 +28,8 @@ class ModelProgress {
   String get percentageString => '${(progress * 100).toStringAsFixed(0)}%';
 
   @override
-  String toString() => '$formattedReceived / $formattedTotal ($percentageString)';
+  String toString() =>
+      '$formattedReceived / $formattedTotal ($percentageString)';
 }
 
 class DownloadableModel {
@@ -98,11 +96,9 @@ class ModelCatalog {
       modelType: ModelType.llm,
       repository: 'Qwen/Qwen2.5-0.5B-Instruct-GGUF',
       filename: 'qwen2.5-0.5b-instruct-q4_k_m.gguf',
-      downloadUrl:
-          'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf',
+      downloadUrl: 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf',
       expectedSizeBytes: 491400032,
-      description:
-          'Ultra-fast and minimal RAM footprint. Great for quick sentence lookups on budget phones.',
+      description: 'Ultra-fast and minimal RAM footprint. Great for quick sentence lookups on budget phones.',
       parameterCount: '0.5B',
       quantization: 'Q4_K_M',
       isRecommended: false,
@@ -116,11 +112,9 @@ class ModelCatalog {
       modelType: ModelType.llm,
       repository: 'Qwen/Qwen2.5-1.5B-Instruct-GGUF',
       filename: 'qwen2.5-1.5b-instruct-q4_k_m.gguf',
-      downloadUrl:
-          'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf',
+      downloadUrl: 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf',
       expectedSizeBytes: 1117320736,
-      description:
-          'Optimal balance of accuracy, grammar insights, and speed. Highly recommended for daily practice.',
+      description: 'Optimal balance of accuracy, grammar insights, and speed. Highly recommended for daily practice.',
       parameterCount: '1.5B',
       quantization: 'Q4_K_M',
       isRecommended: true,
@@ -134,11 +128,9 @@ class ModelCatalog {
       modelType: ModelType.llm,
       repository: 'Qwen/Qwen2.5-3B-Instruct-GGUF',
       filename: 'qwen2.5-3b-instruct-q4_k_m.gguf',
-      downloadUrl:
-          'https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf',
+      downloadUrl: 'https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf',
       expectedSizeBytes: 2104932768,
-      description:
-          'Highest quality explanations and nuanced reasoning. Recommended for devices with 6GB+ RAM.',
+      description: 'Highest quality explanations and nuanced reasoning. Recommended for devices with 6GB+ RAM.',
       parameterCount: '3B',
       quantization: 'Q4_K_M',
       isRecommended: false,
@@ -152,11 +144,9 @@ class ModelCatalog {
       modelType: ModelType.llm,
       repository: 'HuggingFaceTB/SmolLM2-360M-Instruct-GGUF',
       filename: 'smollm2-360m-instruct-q8_0.gguf',
-      downloadUrl:
-          'https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct-GGUF/resolve/main/smollm2-360m-instruct-q8_0.gguf',
+      downloadUrl: 'https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct-GGUF/resolve/main/smollm2-360m-instruct-q8_0.gguf',
       expectedSizeBytes: 386404992,
-      description:
-          'Compact model optimized for low-end mobile hardware with fast response times.',
+      description: 'Compact model optimized for low-end mobile hardware with fast response times.',
       parameterCount: '360M',
       quantization: 'Q8_0',
       isRecommended: false,
@@ -173,11 +163,9 @@ class ModelCatalog {
       modelType: ModelType.whisper,
       repository: 'ggerganov/whisper.cpp',
       filename: 'ggml-tiny.en.bin',
-      downloadUrl:
-          'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin',
+      downloadUrl: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin',
       expectedSizeBytes: 77704715,
-      description:
-          'Fastest speech transcription with minimal battery and memory consumption.',
+      description: 'Fastest speech transcription with minimal battery and memory consumption.',
       parameterCount: '39M',
       quantization: 'F16',
       isRecommended: false,
@@ -191,11 +179,9 @@ class ModelCatalog {
       modelType: ModelType.whisper,
       repository: 'ggerganov/whisper.cpp',
       filename: 'ggml-base.en.bin',
-      downloadUrl:
-          'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin',
+      downloadUrl: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin',
       expectedSizeBytes: 147964211,
-      description:
-          'Recommended speech model for high accuracy and fast transcription on Android.',
+      description: 'Recommended speech model for high accuracy and fast transcription on Android.',
       parameterCount: '74M',
       quantization: 'F16',
       isRecommended: true,
@@ -209,11 +195,9 @@ class ModelCatalog {
       modelType: ModelType.whisper,
       repository: 'ggerganov/whisper.cpp',
       filename: 'ggml-small.en.bin',
-      downloadUrl:
-          'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin',
+      downloadUrl: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin',
       expectedSizeBytes: 487614201,
-      description:
-          'Best transcription accuracy for challenging accents, background noise, and fast speech.',
+      description: 'Best transcription accuracy for challenging accents, background noise, and fast speech.',
       parameterCount: '244M',
       quantization: 'F16',
       isRecommended: false,
@@ -255,7 +239,9 @@ class ModelCatalog {
     final i = (log(bytes) / log(1024)).floor().clamp(0, suffixes.length - 1);
     final value = bytes / pow(1024, i);
     if (i == 0) return '$bytes B';
-    if (value == value.roundToDouble()) return '${value.toInt()} ${suffixes[i]}';
+    if (value == value.roundToDouble()) {
+      return '${value.toInt()} ${suffixes[i]}';
+    }
     return '${value.toStringAsFixed(value >= 100 ? 0 : (value >= 10 ? 1 : 2))} ${suffixes[i]}';
   }
 }

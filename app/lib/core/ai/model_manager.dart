@@ -160,10 +160,12 @@ class ModelManager extends ChangeNotifier {
   }
 
   Future<bool> changeStorageFolder() async {
-    final previousLlmPath =
-        aiService.llmEngine.isLoaded ? aiService.llmEngine.loadedModelPath : null;
-    final previousSpeechPath =
-        aiService.speechEngine.isLoaded ? aiService.speechEngine.loadedModelPath : null;
+    final previousLlmPath = aiService.llmEngine.isLoaded
+        ? aiService.llmEngine.loadedModelPath
+        : null;
+    final previousSpeechPath = aiService.speechEngine.isLoaded
+        ? aiService.speechEngine.loadedModelPath
+        : null;
 
     final success = await storage.chooseBaseFolder();
     if (!success) return false;
@@ -209,16 +211,18 @@ class ModelManager extends ChangeNotifier {
     }
 
     final downloadedLlmEntries = await storage.listModelFiles(ModelType.llm);
-    final downloadedWhisperEntries = await storage.listModelFiles(ModelType.whisper);
+    final downloadedWhisperEntries = await storage.listModelFiles(
+      ModelType.whisper,
+    );
 
     // Build curated LLM items
     final llmItems = <ManagedModelItem>[];
     final knownLlmLocations = <String>{};
 
     for (final catalog in ModelCatalog.curatedLlmModels) {
-      final matchingFile = downloadedLlmEntries.where(
-        (f) => f.name.toLowerCase() == catalog.filename.toLowerCase(),
-      ).firstOrNull;
+      final matchingFile = downloadedLlmEntries
+          .where((f) => f.name.toLowerCase() == catalog.filename.toLowerCase())
+          .firstOrNull;
 
       final exists = matchingFile != null && matchingFile.sizeBytes > 0;
       final fileLoc = matchingFile?.location;
@@ -299,8 +303,8 @@ class ModelManager extends ChangeNotifier {
             state: isCurrentlyLoaded
                 ? ModelDownloadState.loaded
                 : (isLoading
-                    ? ModelDownloadState.loading
-                    : ModelDownloadState.downloaded),
+                      ? ModelDownloadState.loading
+                      : ModelDownloadState.downloaded),
             description: 'Custom model in storage folder',
             memoryHint: 'Custom',
             speedHint: 'Custom',
@@ -314,9 +318,9 @@ class ModelManager extends ChangeNotifier {
     final knownWhisperLocations = <String>{};
 
     for (final catalog in ModelCatalog.curatedWhisperModels) {
-      final matchingFile = downloadedWhisperEntries.where(
-        (f) => f.name.toLowerCase() == catalog.filename.toLowerCase(),
-      ).firstOrNull;
+      final matchingFile = downloadedWhisperEntries
+          .where((f) => f.name.toLowerCase() == catalog.filename.toLowerCase())
+          .firstOrNull;
 
       final exists = matchingFile != null && matchingFile.sizeBytes > 0;
       final fileLoc = matchingFile?.location;
@@ -397,8 +401,8 @@ class ModelManager extends ChangeNotifier {
             state: isCurrentlyLoaded
                 ? ModelDownloadState.loaded
                 : (isLoading
-                    ? ModelDownloadState.loading
-                    : ModelDownloadState.downloaded),
+                      ? ModelDownloadState.loading
+                      : ModelDownloadState.downloaded),
             description: 'Custom model in storage folder',
             memoryHint: 'Custom',
             speedHint: 'Custom',
@@ -417,7 +421,9 @@ class ModelManager extends ChangeNotifier {
 
   Future<void> downloadModel(DownloadableModel catalogModel) async {
     if (!storage.isConfigured) {
-      throw const ModelValidationException('Storage folder has not been configured.');
+      throw const ModelValidationException(
+        'Storage folder has not been configured.',
+      );
     }
     final modelId = catalogModel.id;
     _modelErrors.remove(modelId);
@@ -537,10 +543,9 @@ class ModelManager extends ChangeNotifier {
 
     try {
       if (item.type == ModelType.llm) {
-        final previousLoadedPath =
-            aiService.llmEngine.isLoaded
-                ? aiService.llmEngine.loadedModelPath
-                : null;
+        final previousLoadedPath = aiService.llmEngine.isLoaded
+            ? aiService.llmEngine.loadedModelPath
+            : null;
 
         try {
           await aiService.loadLlmModel(item.localPath!);
@@ -563,10 +568,9 @@ class ModelManager extends ChangeNotifier {
           rethrow;
         }
       } else {
-        final previousLoadedPath =
-            aiService.speechEngine.isLoaded
-                ? aiService.speechEngine.loadedModelPath
-                : null;
+        final previousLoadedPath = aiService.speechEngine.isLoaded
+            ? aiService.speechEngine.loadedModelPath
+            : null;
 
         try {
           await aiService.loadSpeechModel(item.localPath!);

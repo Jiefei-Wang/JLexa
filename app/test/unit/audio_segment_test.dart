@@ -16,7 +16,7 @@ void main() {
       expect(segment.containsPosition(3000), isTrue);
       expect(segment.containsPosition(4999), isTrue);
       expect(segment.containsPosition(5000), isFalse);
-      expect(segment.containsPosition(5000, isLast: true), isTrue);
+      expect(segment.containsPosition(5000, isLast: true), isFalse);
       expect(segment.containsPosition(999), isFalse);
       expect(segment.containsPosition(5001), isFalse);
       expect(segment.durationMs, equals(4000));

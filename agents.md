@@ -23,6 +23,32 @@ At the end of every agent session after completing work:
 
 ---
 
+## Session: 2026-09-06 (Pass 3)
+- **Focus**: Completed the audio-cut/repeater correctness implementation and fixed Android SAF model downloads, resumability, finalization, native content-URI model loading, and startup restoration.
+- **Key Fixes**:
+  1. Added revision-safe independent cut editing, symmetric overlap compression, strict half-open active ranges, atomic persistence, real looping, adaptive VAD, and waveform-based boundary controls.
+  2. Hardened AI/transcription ownership and cancellation, prevented stale cross-lesson updates, added manual repeater explanations, and improved waveform cache identity and cleanup.
+  3. Fixed SAF downloads by retaining resumable `.part` files, using HTTP Range requests, extending read timeouts, validating exact sizes, and falling back to stream-copy finalization when a document provider cannot rename files.
+  4. Added detailed Android platform error reporting and seven-day stale-part cleanup without deleting active/recent partial downloads.
+  5. Added native `FILE*` loaders for llama.cpp and whisper.cpp so `/proc/self/fd/<fd>` SAF documents remain loadable for the full model lifetime.
+  6. Fixed startup restoration of persisted `content://` model paths; native ContentResolver loading now performs the authoritative validation instead of `dart:io File.exists()` rejecting valid SAF URIs.
+  7. Compiled and exposed the Vulkan backend, reported OpenCL accurately as not compiled, and caught native Vulkan driver exceptions so unsupported compute pipelines return an error instead of terminating the process. CPU remains the verified safe backend on the tested Honor device.
+- **Physical Device Verification**:
+  - Honor PTP-AN00: downloaded Qwen2.5 1.5B (1,117,320,736 bytes) into the selected SAF folder, verified SHA-256 `6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e`, loaded it through a content URI, and completed native CPU generation.
+  - Pixel 6 (`25311FDF6004PR`, Android 16): installed the signed release through a staged ADB push plus `pm install`; app launched successfully as PID 12801 with ABI `arm64-v8a`, minSdk 28, and targetSdk 36.
+- **Static Analysis**:
+  - `flutter analyze` -> `No issues found!` (0 errors, 0 warnings).
+- **Test Suite**:
+  - `flutter test --concurrency=1` -> `153 passed, 0 failed`.
+- **Fixed Signed Release APK Location**:
+  - Path: `release/app-release.apk` (88,508,239 bytes)
+  - APK SHA-256: `7D0EBCFF5A7CD91CE3B839F066D8CFFEF2D198D3603555CAF09BF4F5C815901D`
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`
+  - APK Signature Scheme v2: `true` (Verified)
+  - Result: Success
+
+---
+
 ## Session: 2026-09-01
 - **Focus**: Functional correctness & bug-fix pass on local model management, lifecycle ownership, transactional rollbacks, download validation, cancellation semantics, Dictionary AI state handling, and signed release APK build pipeline.
 - **Bugs Fixed**:
@@ -149,4 +175,3 @@ At the end of every agent session after completing work:
   - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`
   - APK Signature Scheme v2: `true` (Verified)
   - Result: Success
-

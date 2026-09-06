@@ -44,6 +44,7 @@ class AudioLesson {
   final DateTime lastOpenedAt;
   final TranscriptStatus transcriptStatus;
   final String? waveformCachePath;
+  final bool cutsInitialized;
 
   const AudioLesson({
     required this.id,
@@ -56,6 +57,7 @@ class AudioLesson {
     required this.lastOpenedAt,
     this.transcriptStatus = TranscriptStatus.none,
     this.waveformCachePath,
+    this.cutsInitialized = false,
   });
 
   double get progressPercentage {
@@ -77,6 +79,7 @@ class AudioLesson {
     DateTime? lastOpenedAt,
     TranscriptStatus? transcriptStatus,
     String? waveformCachePath,
+    bool? cutsInitialized,
   }) {
     return AudioLesson(
       id: id ?? this.id,
@@ -89,6 +92,7 @@ class AudioLesson {
       lastOpenedAt: lastOpenedAt ?? this.lastOpenedAt,
       transcriptStatus: transcriptStatus ?? this.transcriptStatus,
       waveformCachePath: waveformCachePath ?? this.waveformCachePath,
+      cutsInitialized: cutsInitialized ?? this.cutsInitialized,
     );
   }
 
@@ -104,6 +108,7 @@ class AudioLesson {
       'last_opened_at': lastOpenedAt.millisecondsSinceEpoch,
       'transcript_status': transcriptStatus.toDbString(),
       'waveform_cache_path': waveformCachePath,
+      'cuts_initialized': cutsInitialized ? 1 : 0,
     };
   }
 
@@ -123,6 +128,8 @@ class AudioLesson {
         map['transcript_status'] as String?,
       ),
       waveformCachePath: map['waveform_cache_path'] as String?,
+      cutsInitialized:
+          map['cuts_initialized'] == 1 || map['cuts_initialized'] == true,
     );
   }
 }
@@ -172,6 +179,13 @@ class AudioSegment {
   final bool isUserEdited;
   final List<TranscriptToken> tokens;
 
+  /// Monotonically increasing content version for this cut. Any boundary
+  /// change invalidates transcript/explanation data created for an older
+  /// revision.
+  final int revision;
+  final int? transcriptCutRevision;
+  final String? transcriptModelId;
+
   const AudioSegment({
     required this.id,
     required this.lessonId,
@@ -181,16 +195,19 @@ class AudioSegment {
     this.confidence = 1.0,
     this.isUserEdited = false,
     this.tokens = const [],
+    this.revision = 0,
+    this.transcriptCutRevision,
+    this.transcriptModelId,
   });
 
   int get durationMs => endMs - startMs;
 
-  bool containsPosition(int positionMs, {bool isLast = false}) {
-    if (isLast || startMs == endMs) {
-      return positionMs >= startMs && positionMs <= endMs;
-    }
-    return positionMs >= startMs && positionMs < endMs;
-  }
+  bool containsPosition(int positionMs, {bool isLast = false}) =>
+      positionMs >= startMs && positionMs < endMs;
+
+  bool get hasValidTranscript =>
+      text.trim().isNotEmpty &&
+      (transcriptCutRevision == null || transcriptCutRevision == revision);
 
   AudioSegment copyWith({
     String? id,
@@ -201,16 +218,27 @@ class AudioSegment {
     double? confidence,
     bool? isUserEdited,
     List<TranscriptToken>? tokens,
+    int? revision,
+    int? transcriptCutRevision,
+    String? transcriptModelId,
+    bool clearTranscript = false,
   }) {
     return AudioSegment(
       id: id ?? this.id,
       lessonId: lessonId ?? this.lessonId,
       startMs: startMs ?? this.startMs,
       endMs: endMs ?? this.endMs,
-      text: text ?? this.text,
-      confidence: confidence ?? this.confidence,
+      text: clearTranscript ? '' : (text ?? this.text),
+      confidence: clearTranscript ? -1.0 : (confidence ?? this.confidence),
       isUserEdited: isUserEdited ?? this.isUserEdited,
-      tokens: tokens ?? this.tokens,
+      tokens: clearTranscript ? const [] : (tokens ?? this.tokens),
+      revision: revision ?? this.revision,
+      transcriptCutRevision: clearTranscript
+          ? null
+          : (transcriptCutRevision ?? this.transcriptCutRevision),
+      transcriptModelId: clearTranscript
+          ? null
+          : (transcriptModelId ?? this.transcriptModelId),
     );
   }
 
@@ -224,6 +252,9 @@ class AudioSegment {
       'confidence': confidence,
       'is_user_edited': isUserEdited ? 1 : 0,
       'tokens_json': jsonEncode(tokens.map((t) => t.toMap()).toList()),
+      'revision': revision,
+      'transcript_cut_revision': transcriptCutRevision,
+      'transcript_model_id': transcriptModelId,
     };
   }
 
@@ -249,6 +280,9 @@ class AudioSegment {
       confidence: (map['confidence'] as num?)?.toDouble() ?? 1.0,
       isUserEdited: map['is_user_edited'] == 1 || map['is_user_edited'] == true,
       tokens: parsedTokens,
+      revision: map['revision'] as int? ?? 0,
+      transcriptCutRevision: map['transcript_cut_revision'] as int?,
+      transcriptModelId: map['transcript_model_id'] as String?,
     );
   }
 }

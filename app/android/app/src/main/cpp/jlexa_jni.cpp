@@ -177,6 +177,16 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeTranscribe(
 
     env->ReleaseFloatArrayElements(samples, pcm_data, JNI_ABORT);
 
+    const std::string inferenceError = JLexaWhisperBridge::instance().getLastError();
+    if (!inferenceError.empty()) {
+        jclass exceptionClass = env->FindClass("java/lang/RuntimeException");
+        if (exceptionClass && !env->ExceptionCheck()) {
+            env->ThrowNew(exceptionClass, inferenceError.c_str());
+        }
+        if (exceptionClass) env->DeleteLocalRef(exceptionClass);
+        return nullptr;
+    }
+
     // Build Java List<Map<String, Object>>
     jclass arrayListClass = env->FindClass("java/util/ArrayList");
     if (!arrayListClass || clearPendingException(env)) return nullptr;

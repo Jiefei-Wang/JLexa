@@ -28,12 +28,12 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
     chineseDefinitions: ['有弹性的；能迅速恢复的', '有韧性的；适应力强的'],
     examples: [
       ExampleSentence(
-        english:
-            'Babies are generally more resilient than new parents might imagine.',
+        english: 'Babies are generally more resilient than new parents might imagine.',
         chinese: '婴儿通常比初为人父母者想象的更有韧性。',
       ),
       ExampleSentence(
-        english: 'The local economy proved remarkably resilient during the crisis.',
+        english:
+            'The local economy proved remarkably resilient during the crisis.',
         chinese: '当地经济在危机期间表现出了惊人的韧性。',
       ),
     ],
@@ -140,11 +140,13 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
     chineseDefinitions: ['一丝不苟的；周密的；注意细节的'],
     examples: [
       ExampleSentence(
-        english: 'He kept meticulous records of all his financial transactions.',
+        english:
+            'He kept meticulous records of all his financial transactions.',
         chinese: '他对所有的财务交易都做了详尽细致的记录。',
       ),
       ExampleSentence(
-        english: 'The research required meticulous preparation and verification.',
+        english:
+            'The research required meticulous preparation and verification.',
         chinese: '这项研究需要周密的准备和验证。',
       ),
     ],
@@ -162,7 +164,8 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
     chineseDefinitions: ['按优先顺序处理；优先考虑'],
     examples: [
       ExampleSentence(
-        english: 'You need to prioritize your tasks to meet the project deadline.',
+        english:
+            'You need to prioritize your tasks to meet the project deadline.',
         chinese: '你需要合理规划任务的优先级以赶上项目截止时间。',
       ),
     ],
@@ -184,7 +187,8 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
         chinese: '她力图通过每天的沉浸式练习掌握英语。',
       ),
       ExampleSentence(
-        english: 'Scientific endeavor has expanded human understanding of nature.',
+        english:
+            'Scientific endeavor has expanded human understanding of nature.',
         chinese: '科学探索拓展了人类对自然的认知。',
       ),
     ],
@@ -195,9 +199,7 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
     word: 'ephemeral',
     phonetic: '/ɪˈfemərəl/',
     partOfSpeech: 'Adjective',
-    definitions: [
-      'Lasting for a very short time; transitory; fleeting.',
-    ],
+    definitions: ['Lasting for a very short time; transitory; fleeting.'],
     chineseDefinitions: ['短暂的；朝生暮死的；转瞬即逝的'],
     examples: [
       ExampleSentence(
@@ -218,7 +220,8 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
     chineseDefinitions: ['务实的；实事求是的；注重实际的'],
     examples: [
       ExampleSentence(
-        english: 'We need a pragmatic approach to solve this engineering challenge.',
+        english:
+            'We need a pragmatic approach to solve this engineering challenge.',
         chinese: '我们需要一种务实的方法来解决这个工程挑战。',
       ),
     ],
@@ -229,9 +232,7 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
     word: 'ubiquitous',
     phonetic: '/juːˈbɪkwɪtəs/',
     partOfSpeech: 'Adjective',
-    definitions: [
-      'Present, appearing, or found everywhere at the same time.',
-    ],
+    definitions: ['Present, appearing, or found everywhere at the same time.'],
     chineseDefinitions: ['普遍存在的；到处都有的；无所不在的'],
     examples: [
       ExampleSentence(
@@ -252,7 +253,8 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
     chineseDefinitions: ['意外发现珍奇事物的本领；意外机缘；巧合'],
     examples: [
       ExampleSentence(
-        english: 'A stroke of serendipity led the researchers to the breakthrough.',
+        english:
+            'A stroke of serendipity led the researchers to the breakthrough.',
         chinese: '一次意外的机缘让研究人员获得了突破。',
       ),
     ],
@@ -385,9 +387,7 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
     word: 'facilitate',
     phonetic: '/fəˈsɪlɪteɪt/',
     partOfSpeech: 'Verb',
-    definitions: [
-      'Make (an action or process) easy or easier.',
-    ],
+    definitions: ['Make (an action or process) easy or easier.'],
     chineseDefinitions: ['促进；促成；使便利'],
     examples: [
       ExampleSentence(
@@ -444,7 +444,8 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
     chineseDefinitions: ['强壮的；健壮的；稳健的；强健的'],
     examples: [
       ExampleSentence(
-        english: 'The app is designed with a robust offline-first architecture.',
+        english:
+            'The app is designed with a robust offline-first architecture.',
         chinese: '该应用采用稳健的离线优先架构设计。',
       ),
     ],
@@ -461,7 +462,8 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
     chineseDefinitions: ['分析；解析；研究'],
     examples: [
       ExampleSentence(
-        english: 'The AI model analyzes the grammatical structure of each sentence.',
+        english:
+            'The AI model analyzes the grammatical structure of each sentence.',
         chinese: '该AI模型分析每个句子的语法结构。',
       ),
     ],
@@ -472,13 +474,12 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
     word: 'concept',
     phonetic: '/ˈkɒnsept/',
     partOfSpeech: 'Noun',
-    definitions: [
-      'An abstract idea; a general notion or plan.',
-    ],
+    definitions: ['An abstract idea; a general notion or plan.'],
     chineseDefinitions: ['概念；观念；设想'],
     examples: [
       ExampleSentence(
-        english: 'Spaced repetition is a proven concept in cognitive psychology.',
+        english:
+            'Spaced repetition is a proven concept in cognitive psychology.',
         chinese: '间隔重复是认知心理学中一个经过验证的概念。',
       ),
     ],
@@ -489,9 +490,7 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
     word: 'evaluate',
     phonetic: '/ɪˈvæljueɪt/',
     partOfSpeech: 'Verb',
-    definitions: [
-      'Form an idea of the amount, number, or value of; assess.',
-    ],
+    definitions: ['Form an idea of the amount, number, or value of; assess.'],
     chineseDefinitions: ['评估；评价；估价'],
     examples: [
       ExampleSentence(
@@ -530,7 +529,8 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
     chineseDefinitions: ['视角；观点；看法；透视法'],
     examples: [
       ExampleSentence(
-        english: 'Traveling offers a broader perspective on cultural differences.',
+        english:
+            'Traveling offers a broader perspective on cultural differences.',
         chinese: '旅行能够提供看待文化差异更开阔的视角。',
       ),
     ],
@@ -547,7 +547,8 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
     chineseDefinitions: ['加强；强化；巩固；加固'],
     examples: [
       ExampleSentence(
-        english: 'Listening to native audio repeatedly reinforces natural phrasing.',
+        english:
+            'Listening to native audio repeatedly reinforces natural phrasing.',
         chinese: '反复听原声录音可以强化地道的表达习惯。',
       ),
     ],
@@ -558,9 +559,7 @@ final List<DictionaryEntry> kOfflineDictionaryEntries = [
     word: 'unprecedented',
     phonetic: '/ʌnˈpresɪdentɪd/',
     partOfSpeech: 'Adjective',
-    definitions: [
-      'Never done or known before.',
-    ],
+    definitions: ['Never done or known before.'],
     chineseDefinitions: ['空前的；前所未有的；史无前例的'],
     examples: [
       ExampleSentence(

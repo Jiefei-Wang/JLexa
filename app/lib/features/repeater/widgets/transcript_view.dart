@@ -6,39 +6,30 @@ import '../../../core/theme/app_typography.dart';
 
 class TranscriptView extends StatelessWidget {
   final AudioSegment? segment;
+  final bool auto;
+  final ValueChanged<bool> onAutoChanged;
+  final VoidCallback? onTranscribe;
   final ValueChanged<String> onWordTap;
   final VoidCallback? onPlaySentence;
-
   const TranscriptView({
     super.key,
     required this.segment,
+    required this.auto,
+    required this.onAutoChanged,
+    this.onTranscribe,
     required this.onWordTap,
     this.onPlaySentence,
   });
 
-  Color _getTokenColor(TranscriptToken token) {
-    if (token.confidence >= 0.85) {
-      return AppColors.textPrimary;
-    } else if (token.confidence >= 0.65) {
-      return AppColors.warning; // Amber/Orange
-    } else {
-      return AppColors.error; // Red
-    }
-  }
+  List<String> _displayParts(String text) => RegExp(
+    r"[A-Za-zÀ-ÖØ-öø-ÿ]+(?:['’\-][A-Za-zÀ-ÖØ-öø-ÿ]+)*|[^A-Za-zÀ-ÖØ-öø-ÿ\s]+",
+  ).allMatches(text).map((m) => m.group(0)!).toList();
+  bool _isWord(String s) => RegExp(r'[A-Za-zÀ-ÖØ-öø-ÿ]').hasMatch(s);
 
   @override
   Widget build(BuildContext context) {
-    final text = segment?.text ?? 'No transcript available for this segment.';
-    final double confidence = segment?.confidence ?? 1.0;
-    final int confidencePercent = (confidence * 100).round();
-
-    final List<TranscriptToken> tokens = segment?.tokens.isNotEmpty == true
-        ? segment!.tokens
-        : text
-              .split(' ')
-              .map((w) => TranscriptToken(text: w, confidence: 1.0))
-              .toList();
-
+    final text = segment?.text.trim() ?? '';
+    final confidence = segment?.confidence ?? -1;
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -49,120 +40,85 @@ class TranscriptView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header with AI Confidence Badge
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 6,
             children: [
               const Text('Transcript', style: AppTypography.titleSmall),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: confidence >= 0.85
-                      ? AppColors.successLight
-                      : AppColors.warningLight,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  'AI Confidence $confidencePercent%',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: confidence >= 0.85
-                        ? AppColors.success
-                        : AppColors.warning,
-                  ),
-                ),
+              Checkbox(
+                value: auto,
+                onChanged: (v) => onAutoChanged(v ?? false),
+                visualDensity: VisualDensity.compact,
               ),
+              const Text('Auto', style: AppTypography.bodySmall),
+              TextButton.icon(
+                onPressed: onTranscribe,
+                icon: const Icon(Icons.subtitles, size: 17),
+                label: const Text('Transcribe'),
+              ),
+              if (confidence >= 0 && confidence <= 1)
+                Chip(
+                  visualDensity: VisualDensity.compact,
+                  label: Text('Confidence ${(confidence * 100).round()}%'),
+                ),
             ],
           ),
-          const SizedBox(height: 12),
-
-          // Interactive Word-by-Word Tokens
-          Wrap(
-            spacing: 4,
-            runSpacing: 6,
-            children: tokens.map((token) {
-              final color = _getTokenColor(token);
-              final isUncertain = token.isUncertain;
-
-              return InkWell(
-                onTap: () => onWordTap(token.text),
-                borderRadius: BorderRadius.circular(4),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 3,
-                    vertical: 1,
-                  ),
-                  decoration: isUncertain
-                      ? BoxDecoration(
-                          color: color.withAlpha(25),
-                          borderRadius: BorderRadius.circular(4),
-                        )
-                      : null,
+          const SizedBox(height: 10),
+          if (text.isEmpty)
+            const Text(
+              'No transcript is displayed for the active cut.',
+              style: AppTypography.bodySmall,
+            )
+          else
+            Wrap(
+              spacing: 4,
+              runSpacing: 6,
+              children: _displayParts(text)
+                  .map(
+                    (part) => _isWord(part)
+                        ? InkWell(
+                            onTap: () => onWordTap(part),
+                            borderRadius: BorderRadius.circular(4),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 2,
+                                vertical: 1,
+                              ),
+                              child: Text(
+                                part,
+                                style: AppTypography.transcript,
+                              ),
+                            ),
+                          )
+                        : Text(part, style: AppTypography.transcript),
+                  )
+                  .toList(),
+            ),
+          if (text.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Expanded(
                   child: Text(
-                    token.text,
-                    style: AppTypography.transcript.copyWith(
-                      color: color,
-                      fontWeight: isUncertain
-                          ? FontWeight.w600
-                          : FontWeight.w500,
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 12),
-
-          // Footer helper
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  const Icon(
-                    Icons.touch_app,
-                    size: 14,
-                    color: AppColors.textTertiary,
-                  ),
-                  const SizedBox(width: 4),
-                  const Text(
-                    'Tap a word to see explanation',
+                    'Tap a word to see its explanation',
                     style: TextStyle(
                       fontSize: 12,
                       color: AppColors.textTertiary,
                     ),
                   ),
-                ],
-              ),
-              if (onPlaySentence != null)
-                InkWell(
-                  onTap: onPlaySentence,
-                  borderRadius: BorderRadius.circular(6),
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.volume_up_outlined,
-                          size: 16,
-                          color: AppColors.primary,
-                        ),
-                        SizedBox(width: 4),
-                        Text(
-                          'Listen',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
+                ),
+                if (onPlaySentence != null)
+                  IconButton(
+                    tooltip: 'Play this cut',
+                    onPressed: onPlaySentence,
+                    icon: const Icon(
+                      Icons.volume_up_outlined,
+                      color: AppColors.primary,
                     ),
                   ),
-                ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ],
       ),
     );

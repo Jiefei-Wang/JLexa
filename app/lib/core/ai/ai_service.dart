@@ -86,9 +86,9 @@ class AiService extends ChangeNotifier {
 
       if (map.containsKey('ai_generation_settings')) {
         try {
-          final decoded =
-              jsonDecode(map['ai_generation_settings']!)
-                  as Map<String, dynamic>;
+          final decoded = jsonDecode(
+            map['ai_generation_settings']!,
+          ) as Map<String, dynamic>;
           _settings = AiGenerationSettings.fromMap(decoded);
         } catch (_) {}
       }
@@ -96,9 +96,9 @@ class AiService extends ChangeNotifier {
       // Load & migrate LlamaRuntimeSettings
       if (map.containsKey('llama_runtime_settings')) {
         try {
-          final decoded =
-              jsonDecode(map['llama_runtime_settings']!)
-                  as Map<String, dynamic>;
+          final decoded = jsonDecode(
+            map['llama_runtime_settings']!,
+          ) as Map<String, dynamic>;
           _llamaRuntimeSettings = LlamaRuntimeSettings.fromMap(decoded);
         } catch (_) {}
       } else {
@@ -126,8 +126,7 @@ class AiService extends ChangeNotifier {
 
       // 1. Independent LLM restoration
       if (_configuredLlmPath != null && _configuredLlmPath!.isNotEmpty) {
-        final llmFile = File(_configuredLlmPath!);
-        if (await llmFile.exists()) {
+        if (await _modelPathExists(_configuredLlmPath!)) {
           try {
             await llmEngine.loadModel(
               _configuredLlmPath!,
@@ -147,8 +146,7 @@ class AiService extends ChangeNotifier {
 
       // 2. Independent Whisper restoration
       if (_configuredSpeechPath != null && _configuredSpeechPath!.isNotEmpty) {
-        final whisperFile = File(_configuredSpeechPath!);
-        if (await whisperFile.exists()) {
+        if (await _modelPathExists(_configuredSpeechPath!)) {
           try {
             await speechEngine.loadModel(_configuredSpeechPath!);
           } catch (e) {
@@ -163,13 +161,24 @@ class AiService extends ChangeNotifier {
 
       _initState =
           (_llmRestorationError != null || _speechRestorationError != null)
-              ? AiServiceInitState.readyWithWarnings
-              : AiServiceInitState.ready;
+          ? AiServiceInitState.readyWithWarnings
+          : AiServiceInitState.ready;
       notifyListeners();
     } catch (e) {
       _initState = AiServiceInitState.readyWithWarnings;
       notifyListeners();
     }
+  }
+
+  Future<bool> _modelPathExists(String path) {
+    // Android's Storage Access Framework exposes documents as content URIs,
+    // not filesystem paths. The native bridges validate/open these URIs via
+    // ContentResolver and surface a useful restoration error if permission was
+    // revoked or the document was removed.
+    if (path.startsWith('content://')) {
+      return Future.value(true);
+    }
+    return File(path).exists();
   }
 
   Future<void> saveSetting(String key, String value) async {

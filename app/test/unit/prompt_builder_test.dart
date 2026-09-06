@@ -38,7 +38,8 @@ void main() {
       );
       expect(prompt, contains('schedule'));
       expect(prompt, contains('Summary:'));
-      expect(prompt, contains('Possible correction:'));
+      expect(prompt, isNot(contains('Possible correction:')));
+      expect(prompt, contains('Do not repeat these instructions.'));
     });
 
     test('buildSentenceQA includes user question and chat history', () {

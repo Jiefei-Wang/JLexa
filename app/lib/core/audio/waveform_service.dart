@@ -26,11 +26,82 @@ abstract class IWaveformService {
   });
 }
 
+class SpeechRegion {
+  final int startMs;
+  final int endMs;
+  const SpeechRegion(this.startMs, this.endMs);
+}
+
 class WaveformService implements IWaveformService {
   static const MethodChannel _whisperChannel = MethodChannel(
     'com.jlexa.app/whisper',
   );
   final Map<String, List<double>> _memoryCache = {};
+
+  /// Adaptive energy VAD over peaks produced from the fully decoded PCM
+  /// timeline (normally one peak per 50 ms). Pauses up to 300 ms are merged.
+  List<SpeechRegion> detectSpeechRegions({
+    required List<double> peaks,
+    required int durationMs,
+    int mergeGapMs = 300,
+    int minimumSpeechMs = 180,
+  }) {
+    if (peaks.isEmpty || durationMs <= 0) return const [];
+    final sorted = [...peaks]..sort();
+    final percentile = (sorted.length * 0.2).floor().clamp(
+      0,
+      sorted.length - 1,
+    );
+    final noise = sorted[percentile];
+    final onThreshold = max(0.025, noise * 2.8);
+    final offThreshold = max(0.018, onThreshold * 0.62);
+    final msPerPeak = durationMs / peaks.length;
+    final raw = <SpeechRegion>[];
+    int? start;
+    var quietFrames = 0;
+    final releaseFrames = max(1, (120 / msPerPeak).round());
+    for (var i = 0; i < peaks.length; i++) {
+      if (start == null) {
+        if (peaks[i] >= onThreshold) {
+          start = i;
+          quietFrames = 0;
+        }
+      } else if (peaks[i] < offThreshold) {
+        quietFrames++;
+        if (quietFrames >= releaseFrames) {
+          final endFrame = i - quietFrames + 1;
+          raw.add(
+            SpeechRegion(
+              max(0, (start * msPerPeak).floor() - 80),
+              min(durationMs, (endFrame * msPerPeak).ceil() + 80),
+            ),
+          );
+          start = null;
+          quietFrames = 0;
+        }
+      } else {
+        quietFrames = 0;
+      }
+    }
+    if (start != null) {
+      raw.add(
+        SpeechRegion(max(0, (start * msPerPeak).floor() - 80), durationMs),
+      );
+    }
+    final merged = <SpeechRegion>[];
+    for (final region in raw.where(
+      (r) => r.endMs - r.startMs >= minimumSpeechMs,
+    )) {
+      if (merged.isNotEmpty &&
+          region.startMs - merged.last.endMs <= mergeGapMs) {
+        final previous = merged.removeLast();
+        merged.add(SpeechRegion(previous.startMs, region.endMs));
+      } else {
+        merged.add(region);
+      }
+    }
+    return merged;
+  }
 
   String _buildCacheKey(String lessonId, int? fileSize, int? lastModified) {
     return '${lessonId}_${fileSize ?? 0}_${lastModified ?? 0}';

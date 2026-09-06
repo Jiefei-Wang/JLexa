@@ -122,7 +122,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.close, size: 16, color: AppColors.error),
+                        icon: const Icon(
+                          Icons.close,
+                          size: 16,
+                          color: AppColors.error,
+                        ),
                         onPressed: _controller.clearError,
                       ),
                     ],
@@ -144,7 +148,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.warning_amber_rounded, color: Colors.amber.shade800),
+                          Icon(
+                            Icons.warning_amber_rounded,
+                            color: Colors.amber.shade800,
+                          ),
                           const SizedBox(width: 8),
                           Text(
                             'Startup Restoration Notice',
@@ -160,14 +167,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const SizedBox(height: 6),
                         Text(
                           _controller.llmRestorationError!,
-                          style: TextStyle(color: Colors.amber.shade900, fontSize: 13),
+                          style: TextStyle(
+                            color: Colors.amber.shade900,
+                            fontSize: 13,
+                          ),
                         ),
                       ],
                       if (_controller.speechRestorationError != null) ...[
                         const SizedBox(height: 6),
                         Text(
                           _controller.speechRestorationError!,
-                          style: TextStyle(color: Colors.amber.shade900, fontSize: 13),
+                          style: TextStyle(
+                            color: Colors.amber.shade900,
+                            fontSize: 13,
+                          ),
                         ),
                       ],
                     ],
@@ -272,7 +285,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           .toStringAsFixed(2),
                       onChanged: (val) {
                         _controller.updateAiGenerationSettings(
-                          _controller.generationSettings.copyWith(temperature: val),
+                          _controller.generationSettings.copyWith(
+                            temperature: val,
+                          ),
                         );
                       },
                     ),
@@ -296,11 +311,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _buildSliderTile(
                       title: 'Max Output Tokens',
                       subtitle: 'Maximum response length in tokens',
-                      value: _controller.generationSettings.maxTokens.toDouble(),
+                      value: _controller.generationSettings.maxTokens
+                          .toDouble(),
                       min: 128,
                       max: 2048,
                       divisions: 15,
-                      displayValue: '${_controller.generationSettings.maxTokens}',
+                      displayValue:
+                          '${_controller.generationSettings.maxTokens}',
                       onChanged: (val) {
                         _controller.updateAiGenerationSettings(
                           _controller.generationSettings.copyWith(
@@ -368,7 +385,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(
-                item.type == ModelType.llm ? Icons.psychology : Icons.record_voice_over,
+                item.type == ModelType.llm
+                    ? Icons.psychology
+                    : Icons.record_voice_over,
                 color: isLoaded ? AppColors.primary : AppColors.textSecondary,
                 size: 24,
               ),
@@ -425,10 +444,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           if (item.description.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(
-              item.description,
-              style: AppTypography.bodySmall,
-            ),
+            Text(item.description, style: AppTypography.bodySmall),
           ],
           if (isDownloading) ...[
             const SizedBox(height: 12),
@@ -439,7 +455,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   item.progress != null
                       ? 'Downloading: ${item.progress!.formattedReceived} / ${item.progress!.formattedTotal}'
                       : 'Downloading...',
-                  style: const TextStyle(fontSize: 12, color: AppColors.primary),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.primary,
+                  ),
                 ),
                 Text(
                   item.progress?.percentageString ?? '0%',
@@ -595,11 +614,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       child: Text(
         label,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-          color: fg,
-        ),
+        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: fg),
       ),
     );
   }
@@ -630,20 +645,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  isConfigured ? 'Model Storage Directory' : 'Storage Directory Required',
+                  isConfigured
+                      ? 'Model Storage Directory'
+                      : 'Storage Directory Required',
                   style: AppTypography.labelLarge.copyWith(
-                    color: isConfigured ? AppColors.textPrimary : Colors.amber.shade900,
+                    color: isConfigured
+                        ? AppColors.textPrimary
+                        : Colors.amber.shade900,
                   ),
                 ),
               ),
               if (isConfigured)
                 OutlinedButton.icon(
-                  onPressed: _controller.isLoading ? null : _controller.changeStorageFolder,
+                  onPressed: _controller.isLoading
+                      ? null
+                      : _controller.changeStorageFolder,
                   icon: const Icon(Icons.edit_outlined, size: 14),
                   label: const Text('Change'),
                   style: OutlinedButton.styleFrom(
                     visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                   ),
                 ),
             ],
@@ -665,7 +689,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 12),
             FilledButton.icon(
-              onPressed: _controller.isLoading ? null : _controller.chooseStorageFolder,
+              onPressed: _controller.isLoading
+                  ? null
+                  : _controller.chooseStorageFolder,
               icon: const Icon(Icons.folder_open, size: 18),
               label: const Text('Select Storage Folder'),
             ),
@@ -830,17 +856,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ...LlamaBackendPreference.values.map((pref) {
             final bInfo = backends.firstWhere(
               (b) => b.backend.toLowerCase() == pref.name.toLowerCase(),
-              orElse:
-                  () => LlamaBackendInfo(
-                    backend: pref.name,
-                    compiled:
-                        pref == LlamaBackendPreference.auto ||
-                        pref == LlamaBackendPreference.cpu,
-                    available:
-                        pref == LlamaBackendPreference.auto ||
-                        pref == LlamaBackendPreference.cpu,
-                    deviceName: pref == LlamaBackendPreference.cpu ? 'CPU' : '',
-                  ),
+              orElse: () => LlamaBackendInfo(
+                backend: pref.name,
+                compiled:
+                    pref == LlamaBackendPreference.auto ||
+                    pref == LlamaBackendPreference.cpu,
+                available:
+                    pref == LlamaBackendPreference.auto ||
+                    pref == LlamaBackendPreference.cpu,
+                deviceName: pref == LlamaBackendPreference.cpu ? 'CPU' : '',
+              ),
             );
 
             final isUsable =
@@ -848,10 +873,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 (bInfo.compiled && bInfo.available);
 
             return InkWell(
-              onTap:
-                  isUsable
-                      ? () => _controller.updateBackendPreference(pref)
-                      : null,
+              onTap: isUsable
+                  ? () => _controller.updateBackendPreference(pref)
+                  : null,
               borderRadius: BorderRadius.circular(10),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
@@ -861,12 +885,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       settings.backend == pref
                           ? Icons.radio_button_checked
                           : Icons.radio_button_unchecked,
-                      color:
-                          isUsable
-                              ? (settings.backend == pref
-                                  ? AppColors.primary
-                                  : AppColors.textSecondary)
-                              : AppColors.textTertiary,
+                      color: isUsable
+                          ? (settings.backend == pref
+                                ? AppColors.primary
+                                : AppColors.textSecondary)
+                          : AppColors.textTertiary,
                       size: 20,
                     ),
                     const SizedBox(width: 8),
@@ -881,10 +904,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 style: TextStyle(
                                   fontWeight: FontWeight.w600,
                                   fontSize: 14,
-                                  color:
-                                      isUsable
-                                          ? AppColors.textPrimary
-                                          : AppColors.textTertiary,
+                                  color: isUsable
+                                      ? AppColors.textPrimary
+                                      : AppColors.textTertiary,
                                 ),
                               ),
                               if (bInfo.deviceName.isNotEmpty &&
@@ -927,10 +949,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             pref.description,
                             style: TextStyle(
                               fontSize: 11,
-                              color:
-                                      isUsable
-                                          ? AppColors.textSecondary
-                                          : AppColors.textTertiary,
+                              color: isUsable
+                                  ? AppColors.textSecondary
+                                  : AppColors.textTertiary,
                             ),
                           ),
                         ],
@@ -948,7 +969,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Material(
             color: Colors.transparent,
             child: Theme(
-              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+              data: Theme.of(context)
+                  .copyWith(dividerColor: Colors.transparent),
               child: ExpansionTile(
                 tilePadding: EdgeInsets.zero,
                 childrenPadding: EdgeInsets.zero,
@@ -958,58 +980,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 subtitle: const Text(
                   'Context size, threads, batch sizes, and Flash Attention',
-                  style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.textSecondary,
+                  ),
                 ),
                 children: [
                   const SizedBox(height: 8),
 
                   // CPU Threads
-                _buildSliderTile(
-                  title: 'CPU Threads',
-                  subtitle:
-                      settings.threads == null
-                          ? 'Auto (Default 4)'
-                          : 'Custom: ${settings.threads} threads',
-                  value: (settings.threads ?? 4).toDouble(),
-                  min: 1,
-                  max: 16,
-                  divisions: 15,
-                  displayValue:
-                      settings.threads == null
-                          ? 'Auto'
-                          : '${settings.threads}',
-                  onChanged: (val) {
-                    _controller.updateLlamaSettings(
-                      settings.copyWith(threads: val.round()),
-                    );
-                  },
-                ),
-                const Divider(height: 16),
-
-                // Context Length
-                _buildContextSelector(settings),
-                const Divider(height: 16),
-
-                // Flash Attention
-                _buildFlashAttentionSelector(settings),
-                const Divider(height: 16),
-
-                // Reset button
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: OutlinedButton.icon(
-                    onPressed: () => _controller.resetLlamaSettings(),
-                    icon: const Icon(Icons.refresh, size: 16),
-                    label: const Text('Reset llama.cpp Settings'),
+                  _buildSliderTile(
+                    title: 'CPU Threads',
+                    subtitle: settings.threads == null
+                        ? 'Auto (Default 4)'
+                        : 'Custom: ${settings.threads} threads',
+                    value: (settings.threads ?? 4).toDouble(),
+                    min: 1,
+                    max: 16,
+                    divisions: 15,
+                    displayValue: settings.threads == null
+                        ? 'Auto'
+                        : '${settings.threads}',
+                    onChanged: (val) {
+                      _controller.updateLlamaSettings(
+                        settings.copyWith(threads: val.round()),
+                      );
+                    },
                   ),
-                ),
-              ],
+                  const Divider(height: 16),
+
+                  // Context Length
+                  _buildContextSelector(settings),
+                  const Divider(height: 16),
+
+                  // Flash Attention
+                  _buildFlashAttentionSelector(settings),
+                  const Divider(height: 16),
+
+                  // Reset button
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _controller.resetLlamaSettings(),
+                      icon: const Icon(Icons.refresh, size: 16),
+                      label: const Text('Reset llama.cpp Settings'),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
   }
 
   Widget _buildContextSelector(LlamaRuntimeSettings settings) {
@@ -1096,10 +1119,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 8),
         SegmentedButton<LlamaFlashAttention>(
           segments: const [
-            ButtonSegment(
-              value: LlamaFlashAttention.auto,
-              label: Text('Auto'),
-            ),
+            ButtonSegment(value: LlamaFlashAttention.auto, label: Text('Auto')),
             ButtonSegment(value: LlamaFlashAttention.on, label: Text('On')),
             ButtonSegment(value: LlamaFlashAttention.off, label: Text('Off')),
           ],

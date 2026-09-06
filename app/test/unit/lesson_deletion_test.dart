@@ -53,7 +53,8 @@ void main() {
             created_at INTEGER NOT NULL,
             last_opened_at INTEGER NOT NULL,
             transcript_status TEXT NOT NULL DEFAULT 'none',
-            waveform_cache_path TEXT
+            waveform_cache_path TEXT,
+            cuts_initialized INTEGER NOT NULL DEFAULT 0
           )
         ''');
         await d.execute('''
@@ -66,6 +67,9 @@ void main() {
             confidence REAL NOT NULL DEFAULT 1.0,
             is_user_edited INTEGER NOT NULL DEFAULT 0,
             tokens_json TEXT,
+            revision INTEGER NOT NULL DEFAULT 0,
+            transcript_cut_revision INTEGER,
+            transcript_model_id TEXT,
             FOREIGN KEY (lesson_id) REFERENCES audio_lessons (id) ON DELETE CASCADE
           )
         ''');

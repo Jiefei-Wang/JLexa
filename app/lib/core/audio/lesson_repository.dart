@@ -19,6 +19,14 @@ abstract class ILessonRepository implements Listenable {
   Future<List<AudioSegment>> getSegmentsForLesson(String lessonId);
   Future<void> saveSegments(String lessonId, List<AudioSegment> segments);
   Future<void> updateSegment(AudioSegment segment);
+  Future<void> commitCutSet(
+    String lessonId,
+    Map<String, int> expectedRevisions,
+    List<AudioSegment> cuts,
+  );
+  Future<void> setCutsInitialized(String lessonId, bool initialized);
+  Future<String?> getSetting(String key);
+  Future<void> setSetting(String key, String value);
 }
 
 class LessonRepository extends ChangeNotifier implements ILessonRepository {
@@ -144,91 +152,7 @@ class LessonRepository extends ChangeNotifier implements ILessonRepository {
       orderBy: 'start_ms ASC',
     );
 
-    if (results.isEmpty && lessonId == 'lesson_ted_power_of_habit') {
-      // Seed sample segments matching the mockup
-      final seedSegments = _createSeedSegmentsForTedTalk(lessonId);
-      await saveSegments(lessonId, seedSegments);
-      return seedSegments;
-    }
-
     return results.map((e) => AudioSegment.fromMap(e)).toList();
-  }
-
-  List<AudioSegment> _createSeedSegmentsForTedTalk(String lessonId) {
-    return [
-      AudioSegment(
-        id: 'seg_1',
-        lessonId: lessonId,
-        startMs: 490000, // 08:10.000
-        endMs: 501300, // 08:21.300
-        text: 'Most people think they never have enough time to finish their daily work.',
-        confidence: 0.95,
-        tokens: const [
-          TranscriptToken(text: 'Most', confidence: 0.98),
-          TranscriptToken(text: 'people', confidence: 0.99),
-          TranscriptToken(text: 'think', confidence: 0.96),
-          TranscriptToken(text: 'they', confidence: 0.97),
-          TranscriptToken(text: 'never', confidence: 0.95),
-          TranscriptToken(text: 'have', confidence: 0.98),
-          TranscriptToken(text: 'enough', confidence: 0.92),
-          TranscriptToken(text: 'time', confidence: 0.99),
-          TranscriptToken(text: 'to', confidence: 0.98),
-          TranscriptToken(text: 'finish', confidence: 0.95),
-          TranscriptToken(text: 'their', confidence: 0.97),
-          TranscriptToken(text: 'daily', confidence: 0.94),
-          TranscriptToken(text: 'work.', confidence: 0.96),
-        ],
-      ),
-      AudioSegment(
-        id: 'seg_2',
-        lessonId: lessonId,
-        startMs: 501300, // 08:21.300
-        endMs: 511300, // 08:31.300 (10s)
-        text: 'The key is not to prioritize what\'s on your schedule , but to schedule your priorities .',
-        confidence: 0.78,
-        tokens: const [
-          TranscriptToken(text: 'The', confidence: 0.98),
-          TranscriptToken(text: 'key', confidence: 0.95),
-          TranscriptToken(text: 'is', confidence: 0.99),
-          TranscriptToken(text: 'not', confidence: 0.97),
-          TranscriptToken(text: 'to', confidence: 0.98),
-          TranscriptToken(text: 'prioritize', confidence: 0.88),
-          TranscriptToken(text: "what's", confidence: 0.91),
-          TranscriptToken(text: 'on', confidence: 0.72),
-          TranscriptToken(text: 'your', confidence: 0.70),
-          TranscriptToken(text: 'schedule', confidence: 0.68),
-          TranscriptToken(text: ',', confidence: 0.99),
-          TranscriptToken(text: 'but', confidence: 0.96),
-          TranscriptToken(text: 'to', confidence: 0.98),
-          TranscriptToken(text: 'schedule', confidence: 0.94),
-          TranscriptToken(text: 'your', confidence: 0.96),
-          TranscriptToken(text: 'priorities', confidence: 0.74),
-          TranscriptToken(text: '.', confidence: 0.99),
-        ],
-      ),
-      AudioSegment(
-        id: 'seg_3',
-        lessonId: lessonId,
-        startMs: 511300, // 08:31.300
-        endMs: 524000, // 08:44.000
-        text: 'When you build a resilient mindset, you focus completely on high-impact endeavors.',
-        confidence: 0.92,
-        tokens: const [
-          TranscriptToken(text: 'When', confidence: 0.98),
-          TranscriptToken(text: 'you', confidence: 0.97),
-          TranscriptToken(text: 'build', confidence: 0.95),
-          TranscriptToken(text: 'a', confidence: 0.99),
-          TranscriptToken(text: 'resilient', confidence: 0.94),
-          TranscriptToken(text: 'mindset,', confidence: 0.93),
-          TranscriptToken(text: 'you', confidence: 0.97),
-          TranscriptToken(text: 'focus', confidence: 0.96),
-          TranscriptToken(text: 'completely', confidence: 0.91),
-          TranscriptToken(text: 'on', confidence: 0.98),
-          TranscriptToken(text: 'high-impact', confidence: 0.89),
-          TranscriptToken(text: 'endeavors.', confidence: 0.92),
-        ],
-      ),
-    ];
   }
 
   @override
@@ -254,6 +178,13 @@ class LessonRepository extends ChangeNotifier implements ILessonRepository {
       );
     }
 
+    batch.update(
+      'audio_lessons',
+      {'cuts_initialized': 1},
+      where: 'id = ?',
+      whereArgs: [lessonId],
+    );
+
     await batch.commit(noResult: true);
     notifyListeners();
   }
@@ -268,5 +199,79 @@ class LessonRepository extends ChangeNotifier implements ILessonRepository {
       whereArgs: [segment.id],
     );
     notifyListeners();
+  }
+
+  @override
+  Future<void> setCutsInitialized(String lessonId, bool initialized) async {
+    final db = await AppDatabase.instance.database;
+    await db.update(
+      'audio_lessons',
+      {'cuts_initialized': initialized ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [lessonId],
+    );
+  }
+
+  /// Atomically replaces the cut set after verifying the gesture/request
+  /// snapshot. A failed or stale commit changes nothing.
+  @override
+  Future<void> commitCutSet(
+    String lessonId,
+    Map<String, int> expectedRevisions,
+    List<AudioSegment> cuts,
+  ) async {
+    final db = await AppDatabase.instance.database;
+    await db.transaction((txn) async {
+      final current = await txn.query(
+        'audio_segments',
+        columns: ['id', 'revision'],
+        where: 'lesson_id = ?',
+        whereArgs: [lessonId],
+      );
+      final revisions = <String, int>{
+        for (final row in current)
+          row['id'] as String: row['revision'] as int? ?? 0,
+      };
+      if (revisions.length != expectedRevisions.length ||
+          expectedRevisions.entries.any((e) => revisions[e.key] != e.value)) {
+        throw StateError('Cuts changed before the edit could be saved.');
+      }
+      await txn.delete(
+        'audio_segments',
+        where: 'lesson_id = ?',
+        whereArgs: [lessonId],
+      );
+      for (final cut in cuts) {
+        await txn.insert('audio_segments', cut.toMap());
+      }
+      await txn.update(
+        'audio_lessons',
+        {'cuts_initialized': 1},
+        where: 'id = ?',
+        whereArgs: [lessonId],
+      );
+    });
+    notifyListeners();
+  }
+
+  @override
+  Future<String?> getSetting(String key) async {
+    final db = await AppDatabase.instance.database;
+    final rows = await db.query(
+      'app_settings',
+      where: 'key = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first['value'] as String?;
+  }
+
+  @override
+  Future<void> setSetting(String key, String value) async {
+    final db = await AppDatabase.instance.database;
+    await db.insert('app_settings', {
+      'key': key,
+      'value': value,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 }

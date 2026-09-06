@@ -527,6 +527,15 @@ void main() {
           lastOpenedAt: DateTime.now(),
         );
         await lessonRepo.saveLesson(lesson);
+        await lessonRepo.saveSegments('transcribe_lesson', [
+          const AudioSegment(
+            id: 'cut_transcribe',
+            lessonId: 'transcribe_lesson',
+            startMs: 0,
+            endMs: 5000,
+            text: '',
+          ),
+        ]);
 
         final controller = RepeaterController(
           lessonRepo: lessonRepo,
@@ -809,6 +818,15 @@ void main() {
 
       await lessonRepo.saveLesson(lessonA);
       await lessonRepo.saveLesson(lessonB);
+      await lessonRepo.saveSegments('lesson_trans_A', [
+        const AudioSegment(
+          id: 'cut_trans_a',
+          lessonId: 'lesson_trans_A',
+          startMs: 0,
+          endMs: 5000,
+          text: '',
+        ),
+      ]);
 
       final controller = RepeaterController(
         lessonRepo: lessonRepo,
@@ -1191,6 +1209,15 @@ void main() {
       );
 
       await lessonRepo.saveLesson(lesson);
+      await lessonRepo.saveSegments('lesson_del_delayed', [
+        const AudioSegment(
+          id: 'cut_del_delayed',
+          lessonId: 'lesson_del_delayed',
+          startMs: 0,
+          endMs: 4000,
+          text: '',
+        ),
+      ]);
 
       final delayedSpeech = TestFourthPassSpeechEngine();
       final transCompleter = Completer<List<AudioSegment>>();
@@ -1268,6 +1295,15 @@ void main() {
 
       await lessonRepo.saveLesson(lessonA);
       await lessonRepo.saveLesson(lessonB);
+      await lessonRepo.saveSegments('lesson_bg_del_A', [
+        const AudioSegment(
+          id: 'cut_bg_del_a',
+          lessonId: 'lesson_bg_del_A',
+          startMs: 0,
+          endMs: 3000,
+          text: '',
+        ),
+      ]);
 
       final delayedSpeech = TestFourthPassSpeechEngine();
       final transCompleterA = Completer<List<AudioSegment>>();
@@ -1328,6 +1364,15 @@ void main() {
         lastOpenedAt: DateTime.now(),
       );
       await lessonRepo.saveLesson(lesson);
+      await lessonRepo.saveSegments('lesson_busy_test', [
+        const AudioSegment(
+          id: 'cut_busy',
+          lessonId: 'lesson_busy_test',
+          startMs: 0,
+          endMs: 3000,
+          text: '',
+        ),
+      ]);
 
       final controller = RepeaterController(
         lessonRepo: lessonRepo,

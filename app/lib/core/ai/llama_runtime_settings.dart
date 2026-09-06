@@ -174,7 +174,8 @@ class LlamaRuntimeSettings {
   final LlamaBackendPreference backend;
   final int? threads; // null = auto
   final int? contextLength; // null = auto (default 2048)
-  final int? gpuLayers; // null = auto (-1 when accelerated), 0 = none, >0 = custom
+  final int?
+  gpuLayers; // null = auto (-1 when accelerated), 0 = none, >0 = custom
   final int? batchSize; // null = auto (512)
   final int? microBatchSize; // null = auto (512)
   final LlamaFlashAttention flashAttention; // default auto

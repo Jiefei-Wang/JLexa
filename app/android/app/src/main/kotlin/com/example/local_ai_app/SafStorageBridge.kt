@@ -238,10 +238,10 @@ class SafStorageBridge(private val context: Context) : MethodChannel.MethodCallH
                             ?: throw IllegalStateException("Cannot create subfolder $type")
 
                         val partName = "$filename.part"
-                        val existingPart = subDir.findFile(partName)
-                        existingPart?.delete()
-
-                        val partDoc = subDir.createFile("application/octet-stream", partName)
+                        // Keep an interrupted partial file so the next attempt can
+                        // resume with an HTTP Range request instead of starting over.
+                        val partDoc = subDir.findFile(partName)
+                            ?: subDir.createFile("application/octet-stream", partName)
                             ?: throw IllegalStateException("Failed to create partial download file")
 
                         withContext(Dispatchers.Main) {
@@ -277,30 +277,62 @@ class SafStorageBridge(private val context: Context) : MethodChannel.MethodCallH
 
                     try {
                         val targetUri = Uri.parse(targetUriStr)
-                        val out = context.contentResolver.openOutputStream(targetUri, "wt")
-                            ?: throw IllegalStateException("Cannot open output stream for $targetUriStr")
-                        outStream = out
+                        val targetDoc = DocumentFile.fromSingleUri(context, targetUri)
+                            ?: throw IllegalStateException("Cannot access partial download file")
+                        var resumeOffset = targetDoc.length().coerceAtLeast(0L)
 
                         val url = URL(urlStr)
                         conn = (url.openConnection() as HttpURLConnection).apply {
                             connectTimeout = 30000
-                            readTimeout = 60000
+                            readTimeout = 300000
                             instanceFollowRedirects = true
                             requestMethod = "GET"
+                            if (resumeOffset > 0L) {
+                                setRequestProperty("Range", "bytes=$resumeOffset-")
+                            }
                         }
                         activeDownloads[requestId] = conn
                         conn.connect()
 
                         val code = conn.responseCode
+                        if (code == 416 &&
+                            expectedSizeBytes > 0L && resumeOffset == expectedSizeBytes) {
+                            sendDownloadEvent(
+                                mapOf(
+                                    "requestId" to requestId,
+                                    "type" to "done",
+                                    "bytesReceived" to resumeOffset,
+                                    "totalBytes" to expectedSizeBytes
+                                )
+                            )
+                            return@launch
+                        }
                         if (code !in 200..299) {
                             throw IllegalStateException("Server returned HTTP $code")
                         }
 
-                        val totalBytes = if (conn.contentLengthLong > 0) conn.contentLengthLong else expectedSizeBytes
+                        // A server may ignore Range and return 200. In that case
+                        // truncate safely; append only after a real 206 response.
+                        val append = code == HttpURLConnection.HTTP_PARTIAL && resumeOffset > 0L
+                        if (!append) resumeOffset = 0L
+                        val out = context.contentResolver.openOutputStream(
+                            targetUri,
+                            if (append) "wa" else "wt"
+                        ) ?: throw IllegalStateException("Cannot open output stream for partial download")
+                        outStream = out
+
+                        val responseBytes = conn.contentLengthLong
+                        val totalBytes = if (expectedSizeBytes > 0L) {
+                            expectedSizeBytes
+                        } else if (responseBytes > 0L) {
+                            resumeOffset + responseBytes
+                        } else {
+                            0L
+                        }
                         inStream = conn.inputStream
 
                         val buffer = ByteArray(64 * 1024)
-                        var bytesReceived = 0L
+                        var bytesReceived = resumeOffset
                         var lastProgressReportTime = 0L
 
                         while (true) {
@@ -366,7 +398,7 @@ class SafStorageBridge(private val context: Context) : MethodChannel.MethodCallH
                                 mapOf(
                                     "requestId" to requestId,
                                     "type" to "error",
-                                    "message" to (e.message ?: "Download failed")
+                                "message" to "${e.javaClass.simpleName}: ${e.message ?: "Download failed"}. Partial download was kept for retry."
                                 )
                             )
                         }
@@ -429,20 +461,51 @@ class SafStorageBridge(private val context: Context) : MethodChannel.MethodCallH
                         val existingFinal = subDir.findFile(filename)
                         existingFinal?.delete()
 
-                        val renamed = partDoc.renameTo(filename)
-                        if (!renamed) {
-                            throw IllegalStateException("Failed to rename partial download to $filename")
+                        // Some Android document providers do not implement rename.
+                        // Prefer it, then fall back to a verified stream copy.
+                        val finalUri = try {
+                            if (!partDoc.renameTo(filename)) {
+                                throw IllegalStateException("Document provider does not support rename")
+                            }
+                            (subDir.findFile(filename)?.uri ?: partDoc.uri)
+                        } catch (_: Throwable) {
+                            val finalDoc = subDir.createFile("application/octet-stream", filename)
+                                ?: throw IllegalStateException("Document provider cannot create the final model file")
+                            try {
+                                context.contentResolver.openInputStream(partDoc.uri).use { input ->
+                                    if (input == null) throw IllegalStateException("Cannot reopen completed partial file")
+                                    context.contentResolver.openOutputStream(finalDoc.uri, "wt").use { output ->
+                                        if (output == null) throw IllegalStateException("Cannot open final model file for writing")
+                                        input.copyTo(output, 256 * 1024)
+                                        output.flush()
+                                    }
+                                }
+                                val copiedSize = finalDoc.length()
+                                if (copiedSize != size) {
+                                    finalDoc.delete()
+                                    throw IllegalStateException("Final copy validation failed: expected $size bytes, got $copiedSize bytes")
+                                }
+                                if (!partDoc.delete()) {
+                                    // The final file is valid; stale .part cleanup can
+                                    // remove the source later if the provider refuses now.
+                                }
+                                finalDoc.uri
+                            } catch (copyError: Throwable) {
+                                try { finalDoc.delete() } catch (_: Throwable) {}
+                                throw copyError
+                            }
                         }
-
-                        val finalFile = subDir.findFile(filename)
-                        val finalUri = finalFile?.uri ?: partDoc.uri
 
                         withContext(Dispatchers.Main) {
                             result.success(mapOf("finalUri" to finalUri.toString()))
                         }
                     } catch (e: Throwable) {
                         withContext(Dispatchers.Main) {
-                            result.error("FINALIZE_ERROR", e.message, null)
+                            result.error(
+                                "FINALIZE_ERROR",
+                                "${e.javaClass.simpleName}: ${e.message ?: "Unable to finalize model file"}",
+                                null
+                            )
                         }
                     }
                 }
@@ -469,6 +532,7 @@ class SafStorageBridge(private val context: Context) : MethodChannel.MethodCallH
             "cleanStalePartFiles" -> {
                 val activeList = call.argument<List<String>>("activeUris") ?: emptyList()
                 val activeSet = activeList.toSet()
+                val staleBefore = System.currentTimeMillis() - 7L * 24L * 60L * 60L * 1000L
 
                 scope.launch {
                     try {
@@ -478,7 +542,12 @@ class SafStorageBridge(private val context: Context) : MethodChannel.MethodCallH
                             for (f in subDir.listFiles()) {
                                 if (f.name?.endsWith(".part", ignoreCase = true) == true) {
                                     if (!activeSet.contains(f.uri.toString())) {
-                                        try { f.delete() } catch (_: Throwable) {}
+                                        // Recent partials are resumable downloads, not
+                                        // garbage. Only age out abandoned files.
+                                        val modified = f.lastModified()
+                                        if (modified > 0L && modified < staleBefore) {
+                                            try { f.delete() } catch (_: Throwable) {}
+                                        }
                                     }
                                 }
                             }

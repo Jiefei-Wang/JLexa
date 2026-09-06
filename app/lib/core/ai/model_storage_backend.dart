@@ -9,7 +9,8 @@ import 'model_downloader.dart';
 import 'model_storage.dart';
 
 class ModelFileEntry {
-  final String location; // content:// URI on SAF, filesystem path on desktop/tests
+  final String
+  location; // content:// URI on SAF, filesystem path on desktop/tests
   final String name;
   final int sizeBytes;
   final DateTime? lastModified;
@@ -22,7 +23,8 @@ class ModelFileEntry {
   });
 
   @override
-  String toString() => 'ModelFileEntry(name: $name, size: $sizeBytes, location: $location)';
+  String toString() =>
+      'ModelFileEntry(name: $name, size: $sizeBytes, location: $location)';
 }
 
 abstract class ModelStorageBackend {
@@ -73,12 +75,13 @@ class FileSystemModelStorageBackend implements ModelStorageBackend {
     Future<Directory?> Function()? folderPicker,
     Future<Directory> Function()? baseDirProvider,
     ModelDownloader? downloader,
-  })  : _baseDir = baseDir,
-        _isConfigured = isConfigured || baseDir != null || baseDirProvider != null,
-        // ignore: prefer_initializing_formals
-        _folderPicker = folderPicker,
-        _baseDirProvider = baseDirProvider,
-        _downloader = downloader ?? DioModelDownloader() {
+  }) : _baseDir = baseDir,
+       _isConfigured =
+           isConfigured || baseDir != null || baseDirProvider != null,
+       // ignore: prefer_initializing_formals
+       _folderPicker = folderPicker,
+       _baseDirProvider = baseDirProvider,
+       _downloader = downloader ?? DioModelDownloader() {
     if (_baseDir != null && _isConfigured) {
       _ensureSubdirectoriesSync(_baseDir!);
     }
@@ -92,7 +95,8 @@ class FileSystemModelStorageBackend implements ModelStorageBackend {
   }
 
   @override
-  bool get isConfigured => (_isConfigured && _baseDir != null) || _baseDirProvider != null;
+  bool get isConfigured =>
+      (_isConfigured && _baseDir != null) || _baseDirProvider != null;
 
   @override
   String? get baseLocationDisplay => _baseDir?.path;
@@ -108,12 +112,16 @@ class FileSystemModelStorageBackend implements ModelStorageBackend {
       _ensureSubdirectoriesSync(dir);
       return dir;
     }
-    throw const ModelValidationException('Storage base directory has not been configured.');
+    throw const ModelValidationException(
+      'Storage base directory has not been configured.',
+    );
   }
 
   Directory get baseDir {
     if (_baseDir == null) {
-      throw const ModelValidationException('Storage base directory has not been configured.');
+      throw const ModelValidationException(
+        'Storage base directory has not been configured.',
+      );
     }
     return _baseDir!;
   }
@@ -135,7 +143,9 @@ class FileSystemModelStorageBackend implements ModelStorageBackend {
       return false;
     }
     // Default fallback if no custom picker injected: use system temp directory for tests
-    final defaultDir = Directory(p.join(Directory.systemTemp.path, 'jlexa_models'));
+    final defaultDir = Directory(
+      p.join(Directory.systemTemp.path, 'jlexa_models'),
+    );
     configureWithDirectory(defaultDir);
     return true;
   }
@@ -255,7 +265,9 @@ class FileSystemModelStorageBackend implements ModelStorageBackend {
   }) async {
     final partFile = File(partLocation);
     if (!await partFile.exists()) {
-      throw const ModelValidationException('Download failed: partial file does not exist.');
+      throw const ModelValidationException(
+        'Download failed: partial file does not exist.',
+      );
     }
 
     final size = await partFile.length();
@@ -263,7 +275,9 @@ class FileSystemModelStorageBackend implements ModelStorageBackend {
       try {
         await partFile.delete();
       } catch (_) {}
-      throw const ModelValidationException('Download failed: downloaded file is empty (0 bytes).');
+      throw const ModelValidationException(
+        'Download failed: downloaded file is empty (0 bytes).',
+      );
     }
 
     if (expectedSizeBytes != null && expectedSizeBytes > 0) {
@@ -303,9 +317,13 @@ class FileSystemModelStorageBackend implements ModelStorageBackend {
   }
 
   @override
-  Future<void> cleanStalePartFiles({Set<String> activeLocations = const {}}) async {
+  Future<void> cleanStalePartFiles({
+    Set<String> activeLocations = const {},
+  }) async {
     if (!isConfigured) return;
-    final activeCanonical = activeLocations.map((l) => p.canonicalize(l)).toSet();
+    final activeCanonical = activeLocations
+        .map((l) => p.canonicalize(l))
+        .toSet();
     for (final type in ModelType.values) {
       try {
         final dir = await _getTypeDir(type);
@@ -362,8 +380,12 @@ class FileSystemModelStorageBackend implements ModelStorageBackend {
 /// Android Storage Access Framework (SAF) backend.
 /// Communicates through `com.jlexa.app/saf_storage` platform channel.
 class AndroidSafModelStorageBackend implements ModelStorageBackend {
-  static const MethodChannel _channel = MethodChannel('com.jlexa.app/saf_storage');
-  static const EventChannel _downloadEventChannel = EventChannel('com.jlexa.app/saf_download_stream');
+  static const MethodChannel _channel = MethodChannel(
+    'com.jlexa.app/saf_storage',
+  );
+  static const EventChannel _downloadEventChannel = EventChannel(
+    'com.jlexa.app/saf_download_stream',
+  );
 
   bool _isConfigured = false;
   String? _treeUri;
@@ -408,7 +430,9 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
   Future<bool> restorePersistedFolderAccess() async {
     if (!Platform.isAndroid) return false;
     try {
-      final Map? res = await _channel.invokeMapMethod('restorePersistedFolderAccess');
+      final Map? res = await _channel.invokeMapMethod(
+        'restorePersistedFolderAccess',
+      );
       if (res != null && res['treeUri'] != null) {
         _treeUri = res['treeUri'] as String;
         _displayName = res['displayName'] as String? ?? 'Models';
@@ -438,10 +462,9 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
   Future<List<ModelFileEntry>> listModelFiles(ModelType type) async {
     if (!isConfigured || !Platform.isAndroid) return [];
     try {
-      final List? list = await _channel.invokeListMethod(
-        'listModelFiles',
-        {'type': type.name},
-      );
+      final List? list = await _channel.invokeListMethod('listModelFiles', {
+        'type': type.name,
+      });
       if (list == null) return [];
       return list.map((item) {
         final map = item as Map;
@@ -450,7 +473,9 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
           name: map['name'] as String,
           sizeBytes: (map['size'] as num?)?.toInt() ?? 0,
           lastModified: map['lastModified'] != null
-              ? DateTime.fromMillisecondsSinceEpoch((map['lastModified'] as num).toInt())
+              ? DateTime.fromMillisecondsSinceEpoch(
+                  (map['lastModified'] as num).toInt(),
+                )
               : null,
         );
       }).toList();
@@ -464,14 +489,16 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
     if (!isConfigured || !Platform.isAndroid) {
       throw const ModelValidationException('Storage not configured.');
     }
-    final Map? res = await _channel.invokeMapMethod(
-      'prepareDownloadPart',
-      {'type': type.name, 'filename': filename},
-    );
+    final Map? res = await _channel.invokeMapMethod('prepareDownloadPart', {
+      'type': type.name,
+      'filename': filename,
+    });
     if (res != null && res['partUri'] != null) {
       return res['partUri'] as String;
     }
-    throw const ModelValidationException('Failed to create partial download file in SAF storage.');
+    throw const ModelValidationException(
+      'Failed to create partial download file in SAF storage.',
+    );
   }
 
   @override
@@ -494,7 +521,9 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
           final type = event['type'] as String?;
           if (type == 'progress') {
             final received = (event['bytesReceived'] as num).toInt();
-            final total = (event['totalBytes'] as num?)?.toInt() ?? model.expectedSizeBytes;
+            final total =
+                (event['totalBytes'] as num?)?.toInt() ??
+                model.expectedSizeBytes;
             final pct = total > 0 ? (received / total).clamp(0.0, 1.0) : 0.0;
             onProgress(
               ModelProgress(
@@ -573,14 +602,18 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
     if (res != null && res['finalUri'] != null) {
       return res['finalUri'] as String;
     }
-    throw const ModelValidationException('Failed to finalize download in SAF storage.');
+    throw const ModelValidationException(
+      'Failed to finalize download in SAF storage.',
+    );
   }
 
   @override
   Future<bool> deleteModel(String location) async {
     if (!isConfigured || !Platform.isAndroid) return false;
     try {
-      final bool? res = await _channel.invokeMethod('deleteModelFile', {'uri': location});
+      final bool? res = await _channel.invokeMethod('deleteModelFile', {
+        'uri': location,
+      });
       return res == true;
     } catch (_) {
       return false;
@@ -588,7 +621,9 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
   }
 
   @override
-  Future<void> cleanStalePartFiles({Set<String> activeLocations = const {}}) async {
+  Future<void> cleanStalePartFiles({
+    Set<String> activeLocations = const {},
+  }) async {
     if (!isConfigured || !Platform.isAndroid) return;
     try {
       await _channel.invokeMethod('cleanStalePartFiles', {
@@ -625,7 +660,9 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
   Future<int> getFileSize(String location) async {
     if (!Platform.isAndroid) return 0;
     try {
-      final int? size = await _channel.invokeMethod('getFileSize', {'uri': location});
+      final int? size = await _channel.invokeMethod('getFileSize', {
+        'uri': location,
+      });
       return size ?? 0;
     } catch (_) {
       return 0;
@@ -636,7 +673,9 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
   Future<bool> fileExists(String location) async {
     if (!Platform.isAndroid) return false;
     try {
-      final bool? exists = await _channel.invokeMethod('fileExists', {'uri': location});
+      final bool? exists = await _channel.invokeMethod('fileExists', {
+        'uri': location,
+      });
       return exists == true;
     } catch (_) {
       return false;

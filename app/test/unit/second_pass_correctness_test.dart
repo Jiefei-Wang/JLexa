@@ -41,7 +41,7 @@ void main() {
       expect(segB.containsPosition(1000), isTrue);
 
       // Last segment allows exact endpoint match
-      expect(segB.containsPosition(2000, isLast: true), isTrue);
+      expect(segB.containsPosition(2000, isLast: true), isFalse);
     });
 
     test('AiGenerationSettings copyWith, toMap, fromMap boundary clamping', () {

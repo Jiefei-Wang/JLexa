@@ -304,6 +304,7 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
   String? _activeRequestId;
   bool _isCancelling = false;
   Completer<void>? _activeTranscriptionCompleter;
+  Map<String, Object?>? _cutRequestArgs;
 
   NativeWhisperEngine() {
     _initStream();
@@ -399,6 +400,7 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
         'lessonId': lessonId,
         'requestId': reqId,
         'threads': nThreads,
+        ...?_cutRequestArgs,
       });
 
       if (onProgress != null) {
@@ -431,6 +433,38 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
         _isCancelling = false;
         _activeTranscriptionCompleter = null;
       }
+    }
+  }
+
+  Future<List<AudioSegment>> transcribeCut({
+    required String audioPath,
+    required String lessonId,
+    required String cutId,
+    required int cutRevision,
+    required int startMs,
+    required int endMs,
+    required String modelId,
+    String? requestId,
+    int nThreads = 4,
+    void Function(double progress)? onProgress,
+  }) async {
+    _cutRequestArgs = {
+      'cutId': cutId,
+      'cutRevision': cutRevision,
+      'cutStartMs': startMs,
+      'cutEndMs': endMs,
+      'modelId': modelId,
+    };
+    try {
+      return await transcribeAudio(
+        audioPath: audioPath,
+        lessonId: lessonId,
+        requestId: requestId,
+        nThreads: nThreads,
+        onProgress: onProgress,
+      );
+    } finally {
+      _cutRequestArgs = null;
     }
   }
 

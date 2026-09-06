@@ -41,6 +41,7 @@ class AudioService extends ChangeNotifier {
   StreamSubscription? _positionSub;
   StreamSubscription? _playerStateSub;
   StreamSubscription? _durationSub;
+  StreamSubscription? _completeSub;
 
   AudioLesson? _currentLesson;
   List<AudioSegment> _segments = [];
@@ -51,6 +52,10 @@ class AudioService extends ChangeNotifier {
   int _durationMs = 0;
   bool _isRepeatOne = false;
   bool _isSeeking = false;
+  int _seekGeneration = 0;
+  bool _loopSeekInFlight = false;
+  String? _loopTargetCutId;
+  bool _resumeAfterScrub = false;
   bool _hasLoadError = false;
   String? _loadErrorMessage;
   int _loadGeneration = 0;
@@ -75,6 +80,13 @@ class AudioService extends ChangeNotifier {
     return _segments[_currentSegmentIndex];
   }
 
+  AudioSegment? get loopTarget => _loopTargetCutId == null
+      ? null
+      : _segments.cast<AudioSegment?>().firstWhere(
+          (s) => s?.id == _loopTargetCutId,
+          orElse: () => null,
+        );
+
   AudioService();
 
   AudioPlayer _createPlayer() {
@@ -93,18 +105,24 @@ class AudioService extends ChangeNotifier {
       _positionSub = player.onPositionChanged.listen((pos) {
         if (_isSeeking) return;
         _positionMs = pos.inMilliseconds;
-
-        // Handle Repeat One segment boundary
-        if (_isRepeatOne && currentSegment != null) {
-          if (_positionMs >= currentSegment!.endMs) {
-            seekTo(currentSegment!.startMs);
-            return;
-          }
+        final target = loopTarget;
+        if (_isRepeatOne && target != null && _positionMs >= target.endMs) {
+          unawaited(_performLoop(target));
+          return;
         }
-
-        // Sync active segment if normal playback
         _updateActiveSegment();
+        _syncLoopTargetToActiveCut();
         notifyListeners();
+      }, onError: (_) {});
+
+      _completeSub = player.onPlayerComplete.listen((_) {
+        _isPlaying = false;
+        final target = loopTarget;
+        if (_isRepeatOne && target != null) {
+          unawaited(_performLoop(target));
+        } else {
+          notifyListeners();
+        }
       }, onError: (_) {});
 
       _durationSub = player.onDurationChanged.listen((dur) {
@@ -135,6 +153,7 @@ class AudioService extends ChangeNotifier {
       _positionMs = 0;
       _durationMs = 0;
       _isPlaying = false;
+      _loopTargetCutId = null;
       _hasLoadError = false;
       _loadErrorMessage = null;
       notifyListeners();
@@ -223,6 +242,7 @@ class AudioService extends ChangeNotifier {
   void updateSegments(List<AudioSegment> newSegments) {
     _segments = List.from(newSegments);
     _updateActiveSegment();
+    _syncLoopTargetToActiveCut();
     notifyListeners();
   }
 
@@ -232,22 +252,25 @@ class AudioService extends ChangeNotifier {
       return;
     }
 
-    final index = _segments.indexWhere(
-      (s) => s.containsPosition(_positionMs, isLast: s == _segments.last),
+    _currentSegmentIndex = _segments.indexWhere(
+      (s) => s.containsPosition(_positionMs),
     );
-    if (index != -1) {
-      _currentSegmentIndex = index;
-    } else {
-      // Find nearest preceding segment
-      int nearest = 0;
-      for (int i = 0; i < _segments.length; i++) {
-        if (_segments[i].startMs <= _positionMs) {
-          nearest = i;
-        } else {
-          break;
-        }
-      }
-      _currentSegmentIndex = nearest;
+  }
+
+  void _syncLoopTargetToActiveCut() {
+    _loopTargetCutId = _isRepeatOne ? currentSegment?.id : null;
+  }
+
+  Future<void> _performLoop(AudioSegment target) async {
+    if (_loopSeekInFlight || !_isRepeatOne || loopTarget?.id != target.id) {
+      return;
+    }
+    _loopSeekInFlight = true;
+    try {
+      await seekTo(target.startMs, userInitiated: false);
+      if (_isRepeatOne && loopTarget?.id == target.id) await play();
+    } finally {
+      _loopSeekInFlight = false;
     }
   }
 
@@ -271,20 +294,33 @@ class AudioService extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> seekTo(int positionMs) async {
+  Future<void> seekTo(int positionMs, {bool userInitiated = true}) async {
+    final generation = ++_seekGeneration;
     _isSeeking = true;
     _positionMs = positionMs
         .clamp(0, _durationMs > 0 ? _durationMs : positionMs)
         .toInt();
     _updateActiveSegment();
+    if (userInitiated) _syncLoopTargetToActiveCut();
     notifyListeners();
 
     try {
-      await _player.seek(Duration(milliseconds: _positionMs));
+      final target = _positionMs;
+      await _player.seek(Duration(milliseconds: target));
     } catch (_) {
     } finally {
-      _isSeeking = false;
+      if (generation == _seekGeneration) _isSeeking = false;
     }
+  }
+
+  Future<void> beginScrub() async {
+    _resumeAfterScrub = _isPlaying;
+    if (_isPlaying) await pause();
+  }
+
+  Future<void> endScrub() async {
+    if (_resumeAfterScrub) await play();
+    _resumeAfterScrub = false;
   }
 
   Future<void> stop() async {
@@ -297,27 +333,22 @@ class AudioService extends ChangeNotifier {
 
   void toggleRepeatOne() {
     _isRepeatOne = !_isRepeatOne;
+    _syncLoopTargetToActiveCut();
     notifyListeners();
   }
 
   Future<void> previousSentence() async {
     if (_segments.isEmpty) return;
-    if (_currentSegmentIndex > 0) {
-      _currentSegmentIndex--;
-      await seekTo(_segments[_currentSegmentIndex].startMs);
-    } else {
-      await seekTo(_segments.first.startMs);
-    }
+    final before = _segments.where((s) => s.startMs < _positionMs).toList();
+    final target = before.isEmpty ? _segments.first : before.last;
+    await seekTo(target.startMs);
   }
 
   Future<void> nextSentence() async {
     if (_segments.isEmpty) return;
-    if (_currentSegmentIndex < _segments.length - 1) {
-      _currentSegmentIndex++;
-      await seekTo(_segments[_currentSegmentIndex].startMs);
-    } else {
-      await seekTo(_segments.last.startMs);
-    }
+    final after = _segments.where((s) => s.startMs > _positionMs).toList();
+    final target = after.isEmpty ? _segments.last : after.first;
+    await seekTo(target.startMs);
   }
 
   Future<void> repeatCurrentSentence() async {
@@ -333,6 +364,7 @@ class AudioService extends ChangeNotifier {
     _positionSub?.cancel();
     _playerStateSub?.cancel();
     _durationSub?.cancel();
+    _completeSub?.cancel();
     _playerInstance?.dispose();
     super.dispose();
   }

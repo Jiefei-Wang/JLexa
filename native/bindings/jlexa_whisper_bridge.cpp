@@ -3,11 +3,30 @@
 #include <mutex>
 #include <atomic>
 #include <iostream>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#ifdef __ANDROID__
+#include <unistd.h>
+#endif
+
+static size_t jlexa_whisper_file_read(void* ctx, void* output, size_t size) {
+    return std::fread(output, 1, size, static_cast<FILE*>(ctx));
+}
+
+static bool jlexa_whisper_file_eof(void* ctx) {
+    return std::feof(static_cast<FILE*>(ctx)) != 0;
+}
+
+static void jlexa_whisper_file_close(void* ctx) {
+    std::fclose(static_cast<FILE*>(ctx));
+}
 
 struct JLexaWhisperBridge::Impl {
     whisper_context* ctx = nullptr;
     std::mutex mtx;
     std::atomic<bool> isCancelled{false};
+    std::string lastError;
 
     void unloadModelLocked() {
         if (ctx != nullptr) {
@@ -36,7 +55,33 @@ bool JLexaWhisperBridge::loadModel(const std::string& modelPath) {
     whisper_context_params cparams = whisper_context_default_params();
     cparams.use_gpu = false; // CPU fallback on mobile for stability
 
-    pImpl->ctx = whisper_init_from_file_with_params(modelPath.c_str(), cparams);
+    constexpr const char* procFdPrefix = "/proc/self/fd/";
+    if (modelPath.rfind(procFdPrefix, 0) == 0) {
+#ifdef __ANDROID__
+        const char* fdText = modelPath.c_str() + std::strlen(procFdPrefix);
+        char* end = nullptr;
+        const long sourceFd = std::strtol(fdText, &end, 10);
+        if (end == fdText || *end != '\0' || sourceFd < 0) return false;
+        const int ownedFd = dup(static_cast<int>(sourceFd));
+        if (ownedFd < 0) return false;
+        FILE* file = fdopen(ownedFd, "rb");
+        if (!file) {
+            close(ownedFd);
+            return false;
+        }
+        whisper_model_loader loader = {
+            file,
+            jlexa_whisper_file_read,
+            jlexa_whisper_file_eof,
+            jlexa_whisper_file_close,
+        };
+        pImpl->ctx = whisper_init_with_params(&loader, cparams);
+#else
+        pImpl->ctx = whisper_init_from_file_with_params(modelPath.c_str(), cparams);
+#endif
+    } else {
+        pImpl->ctx = whisper_init_from_file_with_params(modelPath.c_str(), cparams);
+    }
     return pImpl->ctx != nullptr;
 }
 
@@ -58,6 +103,11 @@ void JLexaWhisperBridge::resetCancellation() {
     pImpl->isCancelled = false;
 }
 
+std::string JLexaWhisperBridge::getLastError() {
+    std::lock_guard<std::mutex> lock(pImpl->mtx);
+    return pImpl->lastError;
+}
+
 std::vector<JLexaAudioSegment> JLexaWhisperBridge::transcribe(
     const float* samples,
     size_t n_samples,
@@ -67,8 +117,10 @@ std::vector<JLexaAudioSegment> JLexaWhisperBridge::transcribe(
 ) {
     std::vector<JLexaAudioSegment> results;
     std::lock_guard<std::mutex> lock(pImpl->mtx);
+    pImpl->lastError.clear();
 
     if (pImpl->ctx == nullptr || samples == nullptr || n_samples == 0) {
+        pImpl->lastError = "Whisper inference received no model or audio samples";
         return results;
     }
 
@@ -101,6 +153,9 @@ std::vector<JLexaAudioSegment> JLexaWhisperBridge::transcribe(
     }
 
     if (whisper_full(pImpl->ctx, wparams, samples, static_cast<int>(n_samples)) != 0) {
+        if (!pImpl->isCancelled.load()) {
+            pImpl->lastError = "whisper_full inference failed";
+        }
         return results;
     }
 
@@ -128,6 +183,10 @@ std::vector<JLexaAudioSegment> JLexaWhisperBridge::transcribe(
         int token_count = 0;
 
         for (int j = 0; j < n_tokens; ++j) {
+            const whisper_token token_id = whisper_full_get_token_id(pImpl->ctx, i, j);
+            // Timestamp, language and other control tokens all live at or
+            // above EOT in the current whisper.cpp vocabulary.
+            if (token_id >= whisper_token_eot(pImpl->ctx)) continue;
             const char* token_str = whisper_full_get_token_text(pImpl->ctx, i, j);
             if (!token_str) continue;
 
@@ -146,7 +205,7 @@ std::vector<JLexaAudioSegment> JLexaWhisperBridge::transcribe(
             token_count++;
         }
 
-        segment.confidence = token_count > 0 ? (total_prob / token_count) : 1.0f;
+        segment.confidence = token_count > 0 ? (total_prob / token_count) : -1.0f;
         results.push_back(segment);
     }
 

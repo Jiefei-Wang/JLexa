@@ -77,22 +77,18 @@ class DictionaryRepository implements IDictionaryRepository {
       word: row['word'] as String,
       phonetic: row['phonetic'] as String? ?? '',
       partOfSpeech: row['part_of_speech'] as String? ?? '',
-      definitions:
-          (jsonDecode(row['definitions_json'] as String) as List)
-              .map((e) => e.toString())
-              .toList(),
-      chineseDefinitions:
-          (jsonDecode(row['chinese_definitions_json'] as String) as List)
-              .map((e) => e.toString())
-              .toList(),
-      examples:
-          (jsonDecode(row['examples_json'] as String) as List)
-              .map((e) => ExampleSentence.fromMap(e as Map<String, dynamic>))
-              .toList(),
-      synonyms:
-          (jsonDecode(row['synonyms_json'] as String) as List)
-              .map((e) => e.toString())
-              .toList(),
+      definitions: (jsonDecode(row['definitions_json'] as String) as List)
+          .map((e) => e.toString())
+          .toList(),
+      chineseDefinitions: (jsonDecode(
+        row['chinese_definitions_json'] as String,
+      ) as List).map((e) => e.toString()).toList(),
+      examples: (jsonDecode(row['examples_json'] as String) as List)
+          .map((e) => ExampleSentence.fromMap(e as Map<String, dynamic>))
+          .toList(),
+      synonyms: (jsonDecode(row['synonyms_json'] as String) as List)
+          .map((e) => e.toString())
+          .toList(),
       isHighFrequency: row['is_high_frequency'] == 1,
     );
   }

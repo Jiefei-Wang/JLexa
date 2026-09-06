@@ -47,7 +47,10 @@ android {
 
     defaultConfig {
         applicationId = "com.example.local_ai_app"
-        minSdk = flutter.minSdkVersion
+        // Vulkan 1.1 loader entry points used by current ggml are exported by
+        // Android's platform loader from API 28 onward (verified against the
+        // NDK symbol stubs used by this build).
+        minSdk = 28
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

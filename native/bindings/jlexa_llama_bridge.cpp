@@ -8,6 +8,12 @@
 #include <chrono>
 #include <random>
 #include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#ifdef __ANDROID__
+#include <unistd.h>
+#endif
 
 #ifdef __ANDROID__
 #include <android/log.h>
@@ -24,6 +30,7 @@
 struct JLexaLlamaBridge::Impl {
     llama_model* model = nullptr;
     llama_context* ctx = nullptr;
+    FILE* modelFile = nullptr;
     const llama_vocab* vocab = nullptr;
     int n_threads = 4;
     std::mutex mtx;
@@ -39,10 +46,25 @@ struct JLexaLlamaBridge::Impl {
             llama_model_free(model);
             model = nullptr;
         }
+        if (modelFile) {
+            std::fclose(modelFile);
+            modelFile = nullptr;
+        }
         vocab = nullptr;
         activeInfo = JLexaActiveBackendInfo{"", "", 0, 0, 0, 0, 0, -1};
     }
 };
+
+static std::string jlexa_backend_name(ggml_backend_dev_t dev) {
+    if (!dev) return "";
+    ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
+    std::string name = reg && ggml_backend_reg_name(reg) ? ggml_backend_reg_name(reg) : "";
+    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
+    if (name.find("vulkan") != std::string::npos) return "vulkan";
+    if (name.find("opencl") != std::string::npos) return "opencl";
+    if (name.find("cpu") != std::string::npos) return "cpu";
+    return name;
+}
 
 static void process_utf8_accumulator(std::string& accum, std::string& out_valid, bool flush_all = false) {
     size_t i = 0;
@@ -173,24 +195,20 @@ std::vector<JLexaBackendInfo> JLexaLlamaBridge::getAvailableBackends() {
     for (size_t i = 0; i < dev_count; ++i) {
         ggml_backend_dev_t dev = ggml_backend_dev_get(i);
         if (!dev) continue;
-        const char* dname = ggml_backend_dev_name(dev);
         const char* ddesc = ggml_backend_dev_description(dev);
-        enum ggml_backend_dev_type dtype = ggml_backend_dev_type(dev);
-
-        std::string sname = dname ? dname : "";
+        std::string sname = jlexa_backend_name(dev);
         std::string sdesc = ddesc ? ddesc : "";
 
-        if (sname.find("Vulkan") != std::string::npos || sname.find("vk") != std::string::npos ||
-            (dtype == GGML_BACKEND_DEVICE_TYPE_GPU && sname.find("OpenCL") == std::string::npos)) {
+        if (sname == "vulkan") {
             vulkanFound = true;
             vulkanDevName = !sdesc.empty() ? sdesc : sname;
-        } else if (sname.find("OpenCL") != std::string::npos || sname.find("cl") != std::string::npos) {
+        } else if (sname == "opencl") {
             openclFound = true;
             openclDevName = !sdesc.empty() ? sdesc : sname;
         }
     }
 
-#ifdef GGML_USE_VULKAN
+#ifdef JLEXA_HAS_VULKAN
     JLexaBackendInfo vkInfo;
     vkInfo.backend = "vulkan";
     vkInfo.compiled = true;
@@ -259,17 +277,17 @@ bool JLexaLlamaBridge::loadModel(const std::string& modelPath, const JLexaLlamaR
     std::string activeDeviceName = "CPU";
     int resolvedGpuLayers = 0;
 
-    ggml_backend_dev_t target_gpu_dev = nullptr;
+    ggml_backend_dev_t vulkan_dev = nullptr;
+    ggml_backend_dev_t opencl_dev = nullptr;
     const size_t dev_count = ggml_backend_dev_count();
     for (size_t i = 0; i < dev_count; ++i) {
         ggml_backend_dev_t dev = ggml_backend_dev_get(i);
         if (!dev) continue;
-        enum ggml_backend_dev_type dtype = ggml_backend_dev_type(dev);
-        if (dtype == GGML_BACKEND_DEVICE_TYPE_GPU || dtype == GGML_BACKEND_DEVICE_TYPE_IGPU || dtype == GGML_BACKEND_DEVICE_TYPE_ACCEL) {
-            target_gpu_dev = dev;
-            break;
-        }
+        const std::string backend = jlexa_backend_name(dev);
+        if (backend == "vulkan" && !vulkan_dev) vulkan_dev = dev;
+        if (backend == "opencl" && !opencl_dev) opencl_dev = dev;
     }
+    ggml_backend_dev_t target_gpu_dev = nullptr;
 
     if (config.backend == "cpu") {
         selectedBackend = "cpu";
@@ -277,6 +295,7 @@ bool JLexaLlamaBridge::loadModel(const std::string& modelPath, const JLexaLlamaR
         mparams.n_gpu_layers = 0;
         resolvedGpuLayers = 0;
     } else if (config.backend == "vulkan") {
+        target_gpu_dev = vulkan_dev;
         if (!target_gpu_dev) {
             LOGE("Explicit Vulkan backend requested but no accelerated GPU device is available");
             return false;
@@ -286,6 +305,7 @@ bool JLexaLlamaBridge::loadModel(const std::string& modelPath, const JLexaLlamaR
         mparams.n_gpu_layers = config.gpuLayers >= 0 ? config.gpuLayers : -1;
         resolvedGpuLayers = mparams.n_gpu_layers;
     } else if (config.backend == "opencl") {
+        target_gpu_dev = opencl_dev;
         if (!target_gpu_dev) {
             LOGE("Explicit OpenCL backend requested but no OpenCL device is available");
             return false;
@@ -295,8 +315,9 @@ bool JLexaLlamaBridge::loadModel(const std::string& modelPath, const JLexaLlamaR
         mparams.n_gpu_layers = config.gpuLayers >= 0 ? config.gpuLayers : -1;
         resolvedGpuLayers = mparams.n_gpu_layers;
     } else { // "auto"
+        target_gpu_dev = vulkan_dev ? vulkan_dev : opencl_dev;
         if (target_gpu_dev) {
-            selectedBackend = "vulkan";
+            selectedBackend = jlexa_backend_name(target_gpu_dev);
             activeDeviceName = ggml_backend_dev_description(target_gpu_dev) ? ggml_backend_dev_description(target_gpu_dev) : "Accelerated GPU";
             mparams.n_gpu_layers = config.gpuLayers >= 0 ? config.gpuLayers : -1;
             resolvedGpuLayers = mparams.n_gpu_layers;
@@ -310,7 +331,42 @@ bool JLexaLlamaBridge::loadModel(const std::string& modelPath, const JLexaLlamaR
         }
     }
 
-    pImpl->model = llama_model_load_from_file(modelPath.c_str(), mparams);
+    ggml_backend_dev_t selected_devices[] = {target_gpu_dev, nullptr};
+    if (target_gpu_dev) mparams.devices = selected_devices;
+
+    constexpr const char* procFdPrefix = "/proc/self/fd/";
+    if (modelPath.rfind(procFdPrefix, 0) == 0) {
+#ifdef __ANDROID__
+        const char* fdText = modelPath.c_str() + std::strlen(procFdPrefix);
+        char* end = nullptr;
+        const long sourceFd = std::strtol(fdText, &end, 10);
+        if (end == fdText || *end != '\0' || sourceFd < 0) {
+            LOGE("Invalid SAF file descriptor path: %s", modelPath.c_str());
+            return false;
+        }
+        const int ownedFd = dup(static_cast<int>(sourceFd));
+        if (ownedFd < 0) {
+            LOGE("Could not duplicate SAF model file descriptor");
+            return false;
+        }
+        FILE* file = fdopen(ownedFd, "rb");
+        if (!file) {
+            close(ownedFd);
+            LOGE("Could not create FILE stream for SAF model descriptor");
+            return false;
+        }
+        pImpl->model = llama_model_load_from_file_ptr(file, mparams);
+        if (pImpl->model) {
+            pImpl->modelFile = file;
+        } else {
+            std::fclose(file);
+        }
+#else
+        pImpl->model = llama_model_load_from_file(modelPath.c_str(), mparams);
+#endif
+    } else {
+        pImpl->model = llama_model_load_from_file(modelPath.c_str(), mparams);
+    }
     if (!pImpl->model) {
         LOGE("Failed to load llama_model from file: %s", modelPath.c_str());
         return false;
@@ -387,6 +443,7 @@ void JLexaLlamaBridge::generate(
     std::function<void(bool cancelled, const std::string& errorMsg)> completionCallback
 ) {
     std::lock_guard<std::mutex> lock(pImpl->mtx);
+    try {
     if (pImpl->isCancelled.load()) {
         if (completionCallback) completionCallback(true, "");
         return;
@@ -500,7 +557,9 @@ void JLexaLlamaBridge::generate(
 
     llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
     sampler_guard.smpl = llama_sampler_chain_init(sparams);
-    llama_sampler_chain_add(sampler_guard.smpl, llama_sampler_init_temp(temperature > 0.0f ? temperature : 0.7f));
+    // Zero is a valid deterministic temperature. Defaults are applied in the
+    // Dart/Kotlin request layer, so native must preserve the explicit value.
+    llama_sampler_chain_add(sampler_guard.smpl, llama_sampler_init_temp(temperature >= 0.0f ? temperature : 0.7f));
     llama_sampler_chain_add(sampler_guard.smpl, llama_sampler_init_top_p(topP > 0.0f ? topP : 0.9f, 1));
     llama_sampler_chain_add(sampler_guard.smpl, llama_sampler_init_dist(actual_seed));
 
@@ -624,5 +683,18 @@ void JLexaLlamaBridge::generate(
             completionCallback(false, "");
         }
     }
+    } catch (const std::exception& error) {
+        LOGE("Native inference exception: %s", error.what());
+        if (completionCallback) {
+            completionCallback(
+                false,
+                std::string("Native inference failed: ") + error.what()
+            );
+        }
+    } catch (...) {
+        LOGE("Native inference failed with an unknown exception");
+        if (completionCallback) {
+            completionCallback(false, "Native inference failed unexpectedly");
+        }
+    }
 }
-

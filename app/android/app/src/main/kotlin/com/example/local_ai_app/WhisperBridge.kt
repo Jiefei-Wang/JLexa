@@ -233,6 +233,11 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
                 val lessonId = call.argument<String>("lessonId") ?: UUID.randomUUID().toString()
                 val requestId = call.argument<String>("requestId") ?: UUID.randomUUID().toString()
                 val threads = call.argument<Int>("threads") ?: 4
+                val cutStartMs = call.argument<Int>("cutStartMs")
+                val cutEndMs = call.argument<Int>("cutEndMs")
+                val cutId = call.argument<String>("cutId")
+                val cutRevision = call.argument<Int>("cutRevision")
+                val modelId = call.argument<String>("modelId")
 
                 if (audioPath == null) {
                     result.error("INVALID_ARGS", "audioPath is required", null)
@@ -265,9 +270,23 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
                             return@launch
                         }
 
+                        val rangeStartSample = ((cutStartMs ?: 0).toLong() * 16L)
+                            .coerceIn(0L, pcm.validSampleCount.toLong()).toInt()
+                        val rangeEndSample = ((cutEndMs ?: (pcm.validSampleCount / 16)).toLong() * 16L)
+                            .coerceIn(rangeStartSample.toLong(), pcm.validSampleCount.toLong()).toInt()
+                        if (rangeEndSample <= rangeStartSample) {
+                            withContext(Dispatchers.Main) {
+                                result.error("INVALID_RANGE", "Cut has no decodable audio", null)
+                            }
+                            return@launch
+                        }
+                        val targetSamples = if (cutId != null) {
+                            pcm.samples.copyOfRange(rangeStartSample, rangeEndSample)
+                        } else pcm.samples
+                        val absoluteOffsetMs = if (cutId != null) cutStartMs ?: 0 else 0
                         val rawSegments = nativeTranscribe(
-                            pcm.samples,
-                            pcm.validSampleCount,
+                            targetSamples,
+                            targetSamples.size,
                             threads,
                             "en",
                             ProgressCallback(this@WhisperBridge, requestId)
@@ -282,11 +301,11 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
 
                         val formattedList = mutableListOf<Map<String, Any>>()
                         rawSegments?.forEachIndexed { index, seg ->
-                            val segId = "${lessonId}_seg_$index"
-                            val startMs = (seg["start_ms"] as? Number)?.toInt() ?: 0
-                            val endMs = (seg["end_ms"] as? Number)?.toInt() ?: 0
+                            val segId = cutId ?: "${lessonId}_seg_$index"
+                            val startMs = ((seg["start_ms"] as? Number)?.toInt() ?: 0) + absoluteOffsetMs
+                            val endMs = ((seg["end_ms"] as? Number)?.toInt() ?: 0) + absoluteOffsetMs
                             val text = seg["text"] as? String ?: ""
-                            val confidence = (seg["confidence"] as? Number)?.toDouble() ?: 1.0
+                            val confidence = (seg["confidence"] as? Number)?.toDouble() ?: -1.0
                             val rawTokens = seg["tokens"] as? List<Map<String, Any>> ?: emptyList()
 
                             formattedList.add(
@@ -298,7 +317,10 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
                                     "text" to text,
                                     "confidence" to confidence,
                                     "is_user_edited" to 0,
-                                    "tokens_json" to buildTokensJson(rawTokens)
+                                    "tokens_json" to buildTokensJson(rawTokens, absoluteOffsetMs),
+                                    "revision" to (cutRevision ?: 0),
+                                    "transcript_cut_revision" to (cutRevision ?: 0),
+                                    "transcript_model_id" to (modelId ?: "")
                                 )
                             )
                         }
@@ -334,14 +356,14 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
         }
     }
 
-    private fun buildTokensJson(tokens: List<Map<String, Any>>): String {
+    private fun buildTokensJson(tokens: List<Map<String, Any>>, offsetMs: Int = 0): String {
         val jsonArray = JSONArray()
         for (tok in tokens) {
             val obj = JSONObject()
             obj.put("text", tok["text"] as? String ?: "")
-            obj.put("start_ms", (tok["start_ms"] as? Number)?.toInt() ?: 0)
-            obj.put("end_ms", (tok["end_ms"] as? Number)?.toInt() ?: 0)
-            obj.put("confidence", (tok["confidence"] as? Number)?.toDouble() ?: 1.0)
+            obj.put("start_ms", ((tok["start_ms"] as? Number)?.toInt() ?: 0) + offsetMs)
+            obj.put("end_ms", ((tok["end_ms"] as? Number)?.toInt() ?: 0) + offsetMs)
+            obj.put("confidence", (tok["confidence"] as? Number)?.toDouble() ?: -1.0)
             jsonArray.put(obj)
         }
         return jsonArray.toString()
@@ -363,4 +385,3 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
         eventSink = null
     }
 }
-

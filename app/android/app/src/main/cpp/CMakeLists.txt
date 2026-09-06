@@ -17,6 +17,34 @@ set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "No examples" FORCE)
 set(LLAMA_BUILD_SERVER OFF CACHE BOOL "No server" FORCE)
 set(GGML_BACKEND_DL OFF CACHE BOOL "No dynamic backend" FORCE)
 
+# Android's NDK ships Vulkan headers, loader stubs and the host glslc tool.
+# Keep x86_64 emulator builds CPU-only; the physical ARM64 build includes the
+# backend and still retains the CPU fallback.
+if(ANDROID AND ANDROID_ABI STREQUAL "arm64-v8a")
+    include(FetchContent)
+    FetchContent_Declare(vulkan_headers
+        GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+        GIT_TAG vulkan-sdk-1.3.290.0
+        GIT_SHALLOW TRUE)
+    FetchContent_GetProperties(vulkan_headers)
+    if(NOT vulkan_headers_POPULATED)
+        FetchContent_Populate(vulkan_headers)
+    endif()
+    set(Vulkan_INCLUDE_DIR "${vulkan_headers_SOURCE_DIR}/include" CACHE PATH "Pinned Vulkan-Headers" FORCE)
+    if(CMAKE_HOST_WIN32)
+        set(Vulkan_GLSLC_EXECUTABLE "${ANDROID_NDK}/shader-tools/windows-x86_64/glslc.exe" CACHE FILEPATH "NDK glslc" FORCE)
+    else()
+        set(Vulkan_GLSLC_EXECUTABLE "${ANDROID_NDK}/shader-tools/linux-x86_64/glslc" CACHE FILEPATH "NDK glslc" FORCE)
+    endif()
+    set(GGML_VULKAN ON CACHE BOOL "Enable Vulkan on Android ARM64" FORCE)
+    set(SPIRV-Headers_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cmake" CACHE PATH "Bundled NDK SPIR-V headers" FORCE)
+    include_directories(SYSTEM
+        "${ANDROID_NDK}/sources/third_party/shaderc/third_party/spirv-tools/external/spirv-headers/include")
+else()
+    set(GGML_VULKAN OFF CACHE BOOL "CPU-only non-ARM64 build" FORCE)
+endif()
+set(GGML_OPENCL OFF CACHE BOOL "Android OpenCL SDK/ABI is not bundled" FORCE)
+
 add_subdirectory("${WHISPER_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/whisper_build" EXCLUDE_FROM_ALL)
 add_subdirectory("${LLAMA_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/llama_build" EXCLUDE_FROM_ALL)
 
@@ -39,3 +67,7 @@ target_link_libraries(jlexa_native PRIVATE
     llama
     log
 )
+
+if(GGML_VULKAN)
+    target_compile_definitions(jlexa_native PRIVATE JLEXA_HAS_VULKAN=1)
+endif()

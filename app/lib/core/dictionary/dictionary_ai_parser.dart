@@ -14,8 +14,14 @@ class DictionaryAiParser {
   );
 
   static final List<RegExp> _conversationalFilterRegexes = [
-    RegExp(r'^(?:Sure|Certainly|Here is|Here are|Of course|Hello|Hi)[^:\n]*:?\s*', caseSensitive: false),
-    RegExp(r'(?:I hope this helps|Let me know if you need anything else).*$', caseSensitive: false),
+    RegExp(
+      r'^(?:Sure|Certainly|Here is|Here are|Of course|Hello|Hi)[^:\n]*:?\s*',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'(?:I hope this helps|Let me know if you need anything else).*$',
+      caseSensitive: false,
+    ),
   ];
 
   /// Parses the raw AI response text into a typed [DictionaryAiAnswer].
@@ -52,10 +58,7 @@ class DictionaryAiParser {
                   final meaning = item['meaning']?.toString().trim() ?? '';
                   if (pos.isNotEmpty || meaning.isNotEmpty) {
                     senses.add(
-                      DictionaryWordSense(
-                        partOfSpeech: pos,
-                        meaning: meaning,
-                      ),
+                      DictionaryWordSense(partOfSpeech: pos, meaning: meaning),
                     );
                   }
                 }
@@ -80,7 +83,10 @@ class DictionaryAiParser {
     return _buildFallback(trimmed, query: query);
   }
 
-  static DictionaryAiAnswer _buildFallback(String rawText, {required String query}) {
+  static DictionaryAiAnswer _buildFallback(
+    String rawText, {
+    required String query,
+  }) {
     var cleaned = rawText;
     for (final filter in _conversationalFilterRegexes) {
       cleaned = cleaned.replaceAll(filter, '').trim();
@@ -90,7 +96,10 @@ class DictionaryAiParser {
 
     if (isSingleWord) {
       // Look for lines formatted like "v. 跑；运行"
-      final lines = cleaned.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty);
+      final lines = cleaned
+          .split('\n')
+          .map((l) => l.trim())
+          .where((l) => l.isNotEmpty);
       final senses = <DictionaryWordSense>[];
       for (final line in lines) {
         final m = _posLineRegex.firstMatch(line);
@@ -110,12 +119,7 @@ class DictionaryAiParser {
       // If no pos prefix matched, wrap non-empty cleaned text into default sense
       if (cleaned.isNotEmpty) {
         return DictionaryWordAnswer(
-          senses: [
-            DictionaryWordSense(
-              partOfSpeech: '',
-              meaning: cleaned,
-            ),
-          ],
+          senses: [DictionaryWordSense(partOfSpeech: '', meaning: cleaned)],
         );
       }
 

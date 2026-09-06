@@ -90,7 +90,7 @@ class RepeaterScreenState extends State<RepeaterScreen> {
   }
 
   void _showWordExplanation(String word) {
-    final curSentence = _controller.currentSegment?.text ?? '';
+    final curSentence = _controller.visibleTranscriptSegment?.text ?? '';
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -295,14 +295,14 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                                 ),
                                 const SizedBox(width: 8),
                                 const Text(
-                                  'No Transcript Segments',
+                                  'No speech cuts',
                                   style: AppTypography.titleSmall,
                                 ),
                               ],
                             ),
                             const SizedBox(height: 6),
                             const Text(
-                              'Generate synchronized sentence boundaries and text using on-device Whisper AI.',
+                              'No speech activity was detected. Move the playhead onto speech and use Add Cut.',
                               style: AppTypography.bodySmall,
                             ),
                             if (_controller.transcriptionError != null) ...[
@@ -315,18 +315,6 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                                 ),
                               ),
                             ],
-                            const SizedBox(height: 12),
-                            ElevatedButton.icon(
-                              onPressed: _controller.isWhisperBusyElsewhere
-                                  ? null
-                                  : _controller.transcribeLesson,
-                              icon: const Icon(Icons.auto_awesome, size: 18),
-                              label: Text(
-                                _controller.isWhisperBusyElsewhere
-                                    ? 'Whisper Busy Elsewhere'
-                                    : 'Transcribe with Whisper',
-                              ),
-                            ),
                           ],
                         ),
                       ),
@@ -344,29 +332,27 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                       fullPeaks: _controller.fullWaveformPeaks,
                       totalDurationMs: _controller.durationMs,
                       currentPositionMs: _controller.positionMs,
+                      segments: _controller.segments,
                       currentSegment: _controller.currentSegment,
                       waveformService: widget.waveformService,
-                      onSegmentBoundsChanged: (newStart, newEnd) {
-                        if (_controller.currentSegment != null) {
-                          _controller.updateSegmentBounds(
-                            segmentId: _controller.currentSegment!.id,
-                            newStartMs: newStart,
-                            newEndMs: newEnd,
-                          );
-                        }
+                      onSeek: _controller.seekTo,
+                      onSeekStart: _controller.beginWaveformSeek,
+                      onSeekEnd: _controller.endWaveformSeek,
+                      onAddCut: _controller.addCutAtPlayhead,
+                      onDeleteCut: _controller.deleteCurrentCut,
+                      onSegmentBoundsChanged: (id, revision, newStart, newEnd) {
+                        _controller.updateSegmentBounds(
+                          segmentId: id,
+                          expectedRevision: revision,
+                          newStartMs: newStart,
+                          newEndMs: newEnd,
+                        );
                       },
                     ),
                     const SizedBox(height: 14),
 
                     // Adjust Segment controls & Main Playback bar
                     SegmentControls(
-                      currentSegment: _controller.currentSegment,
-                      snapToSpeech: _controller.snapToSpeechEnabled,
-                      onToggleSnap: (_) => _controller.toggleSnapToSpeech(),
-                      onCutStart: _controller.cutStartAtPlayhead,
-                      onAddCut: _controller.addCutAtPlayhead,
-                      onCutEnd: _controller.cutEndAtPlayhead,
-                      onMergeNext: _controller.mergeWithNextSegment,
                       isPlaying: _controller.isPlaying,
                       isRepeatOne: _controller.isRepeatOne,
                       onTogglePlay: _controller.togglePlayPause,
@@ -378,7 +364,14 @@ class RepeaterScreenState extends State<RepeaterScreen> {
 
                     // Transcript Card
                     TranscriptView(
-                      segment: _controller.currentSegment,
+                      segment: _controller.visibleTranscriptSegment,
+                      auto: _controller.autoTranscribe,
+                      onAutoChanged: _controller.setAutoTranscribe,
+                      onTranscribe:
+                          _controller.currentSegment == null ||
+                              _controller.isWhisperBusyElsewhere
+                          ? null
+                          : _controller.transcribeCurrentCut,
                       onWordTap: _showWordExplanation,
                       onPlaySentence: _controller.repeatCurrentSentence,
                     ),
@@ -391,6 +384,7 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                       explanation: _controller.aiExplanation,
                       isGenerating: _controller.isAiGenerating,
                       onOpenQa: _handleOpenQa,
+                      onGenerate: _controller.generateExplanation,
                     ),
                     const SizedBox(height: 24),
                   ],

@@ -9,6 +9,7 @@ class AiExplanationCard extends StatelessWidget {
   final String explanation;
   final bool isGenerating;
   final VoidCallback onOpenQa;
+  final VoidCallback onGenerate;
 
   const AiExplanationCard({
     super.key,
@@ -17,6 +18,7 @@ class AiExplanationCard extends StatelessWidget {
     required this.explanation,
     required this.isGenerating,
     required this.onOpenQa,
+    required this.onGenerate,
   });
 
   @override
@@ -78,15 +80,13 @@ class AiExplanationCard extends StatelessWidget {
                       ),
                     )
                   else
-                    Text(
-                      explanation.isNotEmpty
-                          ? explanation
-                          : 'In this sentence, the speaker advises focusing on what truly matters instead of just following a busy schedule.\n\n'
-                                '"on your schedule" refers to allocating time on a calendar. '
-                                'The sentence highlights that we should schedule our real priorities rather than letting external demands dictate our time.\n\n'
-                                'Possible correction: No correction necessary. The transcript appears natural.',
-                      style: AppTypography.bodyMedium,
-                    ),
+                    explanation.isNotEmpty
+                        ? Text(explanation, style: AppTypography.bodyMedium)
+                        : OutlinedButton.icon(
+                            onPressed: onGenerate,
+                            icon: const Icon(Icons.auto_awesome, size: 18),
+                            label: const Text('Generate Explanation'),
+                          ),
                   const SizedBox(height: 16),
 
                   // Q&A Button

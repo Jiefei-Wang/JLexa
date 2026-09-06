@@ -88,13 +88,12 @@ void main() {
       // Verify key Repeater UI components
       expect(find.text('Total Progress'), findsOneWidget);
       expect(find.text('Local Window (10 seconds)'), findsOneWidget);
-      expect(find.text('Adjust Segment'), findsOneWidget);
-      expect(find.text('Snap to speech'), findsOneWidget);
-      expect(find.text('Cut Start'), findsOneWidget);
-      expect(find.text('Add Cut'), findsOneWidget);
-      expect(find.text('Cut End'), findsOneWidget);
+      expect(find.text('Adjust Segment'), findsNothing);
+      expect(find.byTooltip('Add cut at playhead'), findsOneWidget);
+      expect(find.byTooltip('Delete active cut'), findsOneWidget);
       expect(find.text('Transcript'), findsOneWidget);
       expect(find.text('AI Explanation'), findsOneWidget);
+      expect(find.text('Generate Explanation'), findsOneWidget);
     },
   );
 }

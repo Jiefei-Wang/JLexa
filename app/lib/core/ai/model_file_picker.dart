@@ -21,9 +21,7 @@ class PlatformModelFilePicker implements ModelFilePicker {
   @override
   Future<String?> pickLlmModel() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.any,
-      );
+      final result = await FilePicker.platform.pickFiles(type: FileType.any);
 
       if (result == null || result.files.isEmpty) {
         return null; // User cancelled picker
@@ -61,9 +59,7 @@ class PlatformModelFilePicker implements ModelFilePicker {
   @override
   Future<String?> pickSpeechModel() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.any,
-      );
+      final result = await FilePicker.platform.pickFiles(type: FileType.any);
 
       if (result == null || result.files.isEmpty) {
         return null;

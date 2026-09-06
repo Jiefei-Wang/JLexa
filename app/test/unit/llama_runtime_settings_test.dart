@@ -62,14 +62,12 @@ class MockTestAiEngine implements AiEngine {
   @override
   Future<LlamaActiveBackendInfo> getActiveBackendInfo() async {
     return LlamaActiveBackendInfo(
-      backend:
-          lastRuntimeSettings?.backend == LlamaBackendPreference.vulkan
-              ? 'vulkan'
-              : 'cpu',
-      deviceName:
-          lastRuntimeSettings?.backend == LlamaBackendPreference.vulkan
-              ? 'Vulkan GPU (Adreno 730)'
-              : 'CPU (Host)',
+      backend: lastRuntimeSettings?.backend == LlamaBackendPreference.vulkan
+          ? 'vulkan'
+          : 'cpu',
+      deviceName: lastRuntimeSettings?.backend == LlamaBackendPreference.vulkan
+          ? 'Vulkan GPU (Adreno 730)'
+          : 'CPU (Host)',
       gpuLayers: lastRuntimeSettings?.gpuLayers ?? -1,
       contextLength: lastRuntimeSettings?.contextLength ?? 2048,
       threads: lastRuntimeSettings?.threads ?? 4,
@@ -203,31 +201,16 @@ void main() {
       expect(LlamaFlashAttention.on.nativeValue, 1);
       expect(LlamaFlashAttention.off.nativeValue, 0);
 
-      expect(
-        LlamaFlashAttention.fromNativeValue(1),
-        LlamaFlashAttention.on,
-      );
-      expect(
-        LlamaFlashAttention.fromNativeValue(0),
-        LlamaFlashAttention.off,
-      );
-      expect(
-        LlamaFlashAttention.fromNativeValue(-1),
-        LlamaFlashAttention.auto,
-      );
+      expect(LlamaFlashAttention.fromNativeValue(1), LlamaFlashAttention.on);
+      expect(LlamaFlashAttention.fromNativeValue(0), LlamaFlashAttention.off);
+      expect(LlamaFlashAttention.fromNativeValue(-1), LlamaFlashAttention.auto);
 
-      expect(
-        LlamaFlashAttention.fromString('enabled'),
-        LlamaFlashAttention.on,
-      );
+      expect(LlamaFlashAttention.fromString('enabled'), LlamaFlashAttention.on);
       expect(
         LlamaFlashAttention.fromString('disabled'),
         LlamaFlashAttention.off,
       );
-      expect(
-        LlamaFlashAttention.fromString('auto'),
-        LlamaFlashAttention.auto,
-      );
+      expect(LlamaFlashAttention.fromString('auto'), LlamaFlashAttention.auto);
     });
 
     test('LlamaRuntimeSettings serialization and copyWith', () {
@@ -301,109 +284,134 @@ void main() {
       } catch (_) {}
     });
 
-    test(
-      'AiService.initialize restores saved models and resolves runtime configuration',
-      () async {
-        final db = await AppDatabase.instance.database;
-        await db.insert('app_settings', {
-          'key': 'llm_model_path',
-          'value': mockLlmFile.path,
-        });
-        await db.insert('app_settings', {
-          'key': 'whisper_model_path',
-          'value': mockWhisperFile.path,
-        });
-        await db.insert('app_settings', {
-          'key': 'llama_runtime_settings',
-          'value': jsonEncode(
-            const LlamaRuntimeSettings(
-              backend: LlamaBackendPreference.vulkan,
-              threads: 6,
-              contextLength: 4096,
-            ).toMap(),
-          ),
-        });
-
-        final service = AiService(llm: aiEngine, speech: speechEngine);
-        expect(service.initState, AiServiceInitState.uninitialized);
-
-        await service.initialize();
-
-        expect(service.initState, AiServiceInitState.ready);
-        expect(service.configuredLlmPath, mockLlmFile.path);
-        expect(service.configuredSpeechPath, mockWhisperFile.path);
-        expect(aiEngine.isLoaded, isTrue);
-        expect(speechEngine.isLoaded, isTrue);
-        expect(
-          service.llamaRuntimeSettings.backend,
-          LlamaBackendPreference.vulkan,
-        );
-        expect(service.llamaRuntimeSettings.threads, 6);
-        expect(service.availableBackends.length, 2);
-        expect(service.activeBackendInfo.backend, 'vulkan');
-        expect(service.llmRestorationError, isNull);
-        expect(service.speechRestorationError, isNull);
-
-        service.dispose();
-      },
-    );
-
-    test('AiService handles missing/stale files gracefully without crashing', () async {
+    test('AiService.initialize restores saved models and resolves runtime configuration', () async {
       final db = await AppDatabase.instance.database;
-      await db.delete('app_settings');
       await db.insert('app_settings', {
         'key': 'llm_model_path',
-        'value': '/nonexistent/path/model.gguf',
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+        'value': mockLlmFile.path,
+      });
       await db.insert('app_settings', {
         'key': 'whisper_model_path',
-        'value': '/nonexistent/path/whisper.bin',
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+        'value': mockWhisperFile.path,
+      });
+      await db.insert('app_settings', {
+        'key': 'llama_runtime_settings',
+        'value': jsonEncode(
+          const LlamaRuntimeSettings(
+            backend: LlamaBackendPreference.vulkan,
+            threads: 6,
+            contextLength: 4096,
+          ).toMap(),
+        ),
+      });
 
       final service = AiService(llm: aiEngine, speech: speechEngine);
+      expect(service.initState, AiServiceInitState.uninitialized);
+
       await service.initialize();
 
-      expect(service.initState, AiServiceInitState.readyWithWarnings);
-      expect(aiEngine.isLoaded, isFalse);
-      expect(speechEngine.isLoaded, isFalse);
-      expect(service.llmRestorationError, contains('not found'));
-      expect(service.speechRestorationError, contains('not found'));
+      expect(service.initState, AiServiceInitState.ready);
+      expect(service.configuredLlmPath, mockLlmFile.path);
+      expect(service.configuredSpeechPath, mockWhisperFile.path);
+      expect(aiEngine.isLoaded, isTrue);
+      expect(speechEngine.isLoaded, isTrue);
+      expect(
+        service.llamaRuntimeSettings.backend,
+        LlamaBackendPreference.vulkan,
+      );
+      expect(service.llamaRuntimeSettings.threads, 6);
+      expect(service.availableBackends.length, 2);
+      expect(service.activeBackendInfo.backend, 'vulkan');
+      expect(service.llmRestorationError, isNull);
+      expect(service.speechRestorationError, isNull);
 
       service.dispose();
     });
 
     test(
-      'AiService transactional reload applies new runtime settings to loaded model',
+      'AiService handles missing/stale files gracefully without crashing',
       () async {
+        final db = await AppDatabase.instance.database;
+        await db.delete('app_settings');
+        await db.insert('app_settings', {
+          'key': 'llm_model_path',
+          'value': '/nonexistent/path/model.gguf',
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        await db.insert('app_settings', {
+          'key': 'whisper_model_path',
+          'value': '/nonexistent/path/whisper.bin',
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+
         final service = AiService(llm: aiEngine, speech: speechEngine);
         await service.initialize();
 
-        // Load model explicitly with CPU settings
-        await service.loadLlmModel(
-          mockLlmFile.path,
-          runtimeSettings: const LlamaRuntimeSettings(
-            backend: LlamaBackendPreference.cpu,
-            threads: 4,
-          ),
-        );
-        expect(aiEngine.isLoaded, isTrue);
-        expect(service.activeBackendInfo.backend, 'cpu');
-
-        // Update settings to Vulkan -> triggers automatic reload
-        await service.updateLlamaRuntimeSettings(
-          const LlamaRuntimeSettings(
-            backend: LlamaBackendPreference.vulkan,
-            threads: 8,
-          ),
-          autoReload: true,
-        );
-
-        expect(aiEngine.isLoaded, isTrue);
-        expect(service.activeBackendInfo.backend, 'vulkan');
-        expect(service.activeBackendInfo.threads, 8);
+        expect(service.initState, AiServiceInitState.readyWithWarnings);
+        expect(aiEngine.isLoaded, isFalse);
+        expect(speechEngine.isLoaded, isFalse);
+        expect(service.llmRestorationError, contains('not found'));
+        expect(service.speechRestorationError, contains('not found'));
 
         service.dispose();
       },
     );
+
+    test('AiService restores Android SAF content URI models', () async {
+      const llmUri =
+          'content://com.android.externalstorage.documents/tree/models/document/llm%2Fmodel.gguf';
+      const whisperUri =
+          'content://com.android.externalstorage.documents/tree/models/document/whisper%2Fmodel.bin';
+      final db = await AppDatabase.instance.database;
+      await db.delete('app_settings');
+      await db.insert('app_settings', {
+        'key': 'llm_model_path',
+        'value': llmUri,
+      });
+      await db.insert('app_settings', {
+        'key': 'whisper_model_path',
+        'value': whisperUri,
+      });
+
+      final service = AiService(llm: aiEngine, speech: speechEngine);
+      await service.initialize();
+
+      expect(service.initState, AiServiceInitState.ready);
+      expect(aiEngine.loadedModelPath, llmUri);
+      expect(speechEngine.loadedModelPath, whisperUri);
+      expect(service.llmRestorationError, isNull);
+      expect(service.speechRestorationError, isNull);
+
+      service.dispose();
+    });
+
+    test('AiService transactional reload applies new runtime settings to loaded model', () async {
+      final service = AiService(llm: aiEngine, speech: speechEngine);
+      await service.initialize();
+
+      // Load model explicitly with CPU settings
+      await service.loadLlmModel(
+        mockLlmFile.path,
+        runtimeSettings: const LlamaRuntimeSettings(
+          backend: LlamaBackendPreference.cpu,
+          threads: 4,
+        ),
+      );
+      expect(aiEngine.isLoaded, isTrue);
+      expect(service.activeBackendInfo.backend, 'cpu');
+
+      // Update settings to Vulkan -> triggers automatic reload
+      await service.updateLlamaRuntimeSettings(
+        const LlamaRuntimeSettings(
+          backend: LlamaBackendPreference.vulkan,
+          threads: 8,
+        ),
+        autoReload: true,
+      );
+
+      expect(aiEngine.isLoaded, isTrue);
+      expect(service.activeBackendInfo.backend, 'vulkan');
+      expect(service.activeBackendInfo.threads, 8);
+
+      service.dispose();
+    });
   });
 }

@@ -23,25 +23,26 @@ class ModelStorage {
   ModelStorage({
     ModelStorageBackend? backend,
     Future<Directory> Function()? baseDirProvider,
-  })  : _customBaseDirProvider = baseDirProvider,
-        backend = backend ??
-            (baseDirProvider != null
-                ? FileSystemModelStorageBackend(
-                    baseDirProvider: baseDirProvider,
-                  )
-                : (Platform.isAndroid
-                    ? AndroidSafModelStorageBackend()
-                    : FileSystemModelStorageBackend()));
+  }) : _customBaseDirProvider = baseDirProvider,
+       backend =
+           backend ??
+           (baseDirProvider != null
+               ? FileSystemModelStorageBackend(baseDirProvider: baseDirProvider)
+               : (Platform.isAndroid
+                     ? AndroidSafModelStorageBackend()
+                     : FileSystemModelStorageBackend()));
 
   bool get isConfigured => backend.isConfigured;
   String? get baseLocationDisplay => backend.baseLocationDisplay;
   String? get baseLocationUriOrPath => backend.baseLocationUriOrPath;
 
   Future<bool> chooseBaseFolder() => backend.chooseBaseFolder();
-  Future<bool> restorePersistedFolderAccess() => backend.restorePersistedFolderAccess();
+  Future<bool> restorePersistedFolderAccess() =>
+      backend.restorePersistedFolderAccess();
   Future<void> clearConfiguredFolder() => backend.clearConfiguredFolder();
 
-  Future<List<ModelFileEntry>> listModelFiles(ModelType type) => backend.listModelFiles(type);
+  Future<List<ModelFileEntry>> listModelFiles(ModelType type) =>
+      backend.listModelFiles(type);
 
   Future<String> prepareDownloadPart(ModelType type, String filename) =>
       backend.prepareDownloadPart(type, filename);
@@ -50,12 +51,11 @@ class ModelStorage {
     required DownloadableModel model,
     required String destinationPartLocation,
     required void Function(ModelProgress progress) onProgress,
-  }) =>
-      backend.download(
-        model: model,
-        destinationPartLocation: destinationPartLocation,
-        onProgress: onProgress,
-      );
+  }) => backend.download(
+    model: model,
+    destinationPartLocation: destinationPartLocation,
+    onProgress: onProgress,
+  );
 
   void cancelDownload(String modelId) => backend.cancelDownload(modelId);
 
@@ -66,21 +66,19 @@ class ModelStorage {
     String filename,
     ModelType type, {
     int? expectedSizeBytes,
-  }) =>
-      backend.finalizeDownload(
-        partLocation,
-        filename,
-        type,
-        expectedSizeBytes: expectedSizeBytes,
-      );
+  }) => backend.finalizeDownload(
+    partLocation,
+    filename,
+    type,
+    expectedSizeBytes: expectedSizeBytes,
+  );
 
   Future<bool> deleteModel(String location) => backend.deleteModel(location);
 
   Future<bool> deleteModelFile(String path) => backend.deleteModel(path);
 
-  Future<void> cleanStalePartFiles({
-    Set<String> activePartPaths = const {},
-  }) => backend.cleanStalePartFiles(activeLocations: activePartPaths);
+  Future<void> cleanStalePartFiles({Set<String> activePartPaths = const {}}) =>
+      backend.cleanStalePartFiles(activeLocations: activePartPaths);
 
   Future<bool> isModelFileDownloaded(ModelType type, String filename) =>
       backend.isModelFileDownloaded(type, filename);
@@ -111,7 +109,8 @@ class ModelStorage {
 
   Future<Directory> getModelTypeDirectory(ModelType type) async {
     if (backend is FileSystemModelStorageBackend) {
-      final base = await (backend as FileSystemModelStorageBackend).getBaseDir();
+      final base = await (backend as FileSystemModelStorageBackend)
+          .getBaseDir();
       final subDirName = type == ModelType.llm ? 'llm' : 'whisper';
       final dir = Directory(p.join(base.path, subDirName));
       if (!await dir.exists()) {
@@ -214,9 +213,7 @@ class ModelStorage {
   Future<String> importLocalFile(String sourcePath, ModelType type) async {
     final sourceFile = File(sourcePath);
     if (!await sourceFile.exists()) {
-      throw ModelValidationException(
-        'Source file does not exist: $sourcePath',
-      );
+      throw ModelValidationException('Source file does not exist: $sourcePath');
     }
 
     await validateModelFile(sourcePath, type: type);

@@ -16,7 +16,7 @@ void main() {
     setupMockPlatformChannels();
   });
 
-  test('RepeaterController updateSegmentBounds clamps within lesson duration and preserves min length', () async {
+  test('RepeaterController rejects a zero-length cut and preserves positive precision', () async {
     final lessonRepo = LessonRepository();
     final audioService = AudioService();
     final waveformService = WaveformService();
@@ -69,13 +69,13 @@ void main() {
     await controller.updateSegmentBounds(
       segmentId: 'seg_b_1',
       newStartMs: 2000,
-      newEndMs: 2100, // < 500ms
+      newEndMs: 2100,
     );
 
     final updatedSeg1 = controller.segments.firstWhere(
       (s) => s.id == 'seg_b_1',
     );
-    expect(updatedSeg1.endMs - updatedSeg1.startMs, greaterThanOrEqualTo(500));
+    expect(updatedSeg1.endMs - updatedSeg1.startMs, equals(100));
     expect(updatedSeg1.endMs, lessThanOrEqualTo(seg2.startMs));
 
     controller.dispose();

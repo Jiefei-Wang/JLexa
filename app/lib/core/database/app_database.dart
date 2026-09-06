@@ -28,11 +28,33 @@ class AppDatabase {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: _createDB,
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute(
+            'ALTER TABLE audio_lessons ADD COLUMN cuts_initialized INTEGER NOT NULL DEFAULT 1',
+          );
+          await db.execute(
+            'ALTER TABLE audio_segments ADD COLUMN revision INTEGER NOT NULL DEFAULT 0',
+          );
+          await db.execute(
+            'ALTER TABLE audio_segments ADD COLUMN transcript_cut_revision INTEGER',
+          );
+          await db.execute(
+            'ALTER TABLE audio_segments ADD COLUMN transcript_model_id TEXT',
+          );
+          // Existing rows predate revision tracking. Their transcript belongs
+          // to revision zero; existing empty lessons are treated as explicitly
+          // initialized so migration never resurrects user-deleted cuts.
+          await db.execute(
+            "UPDATE audio_segments SET transcript_cut_revision = 0 WHERE TRIM(text) <> ''",
+          );
+        }
+      },
       onOpen: (db) async {
         try {
           await db.execute(
@@ -160,6 +182,7 @@ class AppDatabase {
         last_opened_at INTEGER NOT NULL,
         transcript_status TEXT NOT NULL DEFAULT 'none',
         waveform_cache_path TEXT
+        ,cuts_initialized INTEGER NOT NULL DEFAULT 0
       )
     ''');
 
@@ -174,6 +197,9 @@ class AppDatabase {
         confidence REAL NOT NULL DEFAULT 1.0,
         is_user_edited INTEGER NOT NULL DEFAULT 0,
         tokens_json TEXT,
+        revision INTEGER NOT NULL DEFAULT 0,
+        transcript_cut_revision INTEGER,
+        transcript_model_id TEXT,
         FOREIGN KEY (lesson_id) REFERENCES audio_lessons (id) ON DELETE CASCADE
       )
     ''');

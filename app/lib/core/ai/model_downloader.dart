@@ -87,7 +87,9 @@ class DioModelDownloader implements ModelDownloader {
         deleteOnError: true,
         onReceiveProgress: (received, total) {
           final totalBytes = total > 0 ? total : model.expectedSizeBytes;
-          final pct = totalBytes > 0 ? (received / totalBytes).clamp(0.0, 1.0) : 0.0;
+          final pct = totalBytes > 0
+              ? (received / totalBytes).clamp(0.0, 1.0)
+              : 0.0;
           onProgress(
             ModelProgress(
               receivedBytes: received,
@@ -177,7 +179,9 @@ class FakeModelDownloader implements ModelDownloader {
       );
     }
 
-    final totalBytes = model.expectedSizeBytes > 0 ? model.expectedSizeBytes : 1024 * 1024;
+    final totalBytes = model.expectedSizeBytes > 0
+        ? model.expectedSizeBytes
+        : 1024 * 1024;
     const steps = 5;
 
     for (int i = 1; i <= steps; i++) {
@@ -224,7 +228,9 @@ class FakeModelDownloader implements ModelDownloader {
       await partFile.parent.create(recursive: true);
     }
 
-    final targetSize = fakeWriteSizeBytes ?? (model.expectedSizeBytes > 0 ? model.expectedSizeBytes : 1024);
+    final targetSize =
+        fakeWriteSizeBytes ??
+        (model.expectedSizeBytes > 0 ? model.expectedSizeBytes : 1024);
     if (targetSize <= 64 * 1024) {
       await partFile.writeAsBytes(List<int>.filled(targetSize, 0x42));
     } else {

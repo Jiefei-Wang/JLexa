@@ -39,6 +39,7 @@ public:
 
     void cancel();
     void resetCancellation();
+    std::string getLastError();
 
 private:
     JLexaWhisperBridge();

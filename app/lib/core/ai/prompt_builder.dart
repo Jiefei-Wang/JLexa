@@ -48,15 +48,14 @@ class PromptBuilder {
   ) {
     final clean = query.trim();
     final isWord = !clean.contains(' ') && clean.isNotEmpty;
-    final prompt =
-        isWord
-            ? 'Provide lexical information for the English word "$clean".\n'
-                'Format strictly as JSON:\n'
-                '{"type": "word", "senses": [{"partOfSpeech": "v.", "meaning": "..."}, {"partOfSpeech": "n.", "meaning": "..."}]}\n'
-                'Use standard abbreviated part-of-speech labels (e.g. n., v., adj., adv., prep., conj., pron., interj.).'
-            : 'Provide a concise Chinese explanation of the meaning and usage of "$clean".\n'
-                'Format strictly as JSON:\n'
-                '{"type": "phrase", "explanation": "表示……，通常用于……"}';
+    final prompt = isWord
+        ? 'Provide lexical information for the English word "$clean".\n'
+              'Format strictly as JSON:\n'
+              '{"type": "word", "senses": [{"partOfSpeech": "v.", "meaning": "..."}, {"partOfSpeech": "n.", "meaning": "..."}]}\n'
+              'Use standard abbreviated part-of-speech labels (e.g. n., v., adj., adv., prep., conj., pron., interj.).'
+        : 'Provide a concise Chinese explanation of the meaning and usage of "$clean".\n'
+              'Format strictly as JSON:\n'
+              '{"type": "phrase", "explanation": "表示……，通常用于……"}';
 
     return [
       const ChatMessagePayload(
@@ -70,15 +69,14 @@ class PromptBuilder {
   static String buildDictionaryAiAnswer(String query) {
     final clean = query.trim();
     final isWord = !clean.contains(' ') && clean.isNotEmpty;
-    final prompt =
-        isWord
-            ? 'Provide lexical information for the English word "$clean".\n'
-                'Format strictly as JSON:\n'
-                '{"type": "word", "senses": [{"partOfSpeech": "v.", "meaning": "..."}, {"partOfSpeech": "n.", "meaning": "..."}]}\n'
-                'Use standard abbreviated part-of-speech labels (e.g. n., v., adj., adv., prep., conj., pron., interj.).'
-            : 'Provide a concise Chinese explanation of the meaning and usage of "$clean".\n'
-                'Format strictly as JSON:\n'
-                '{"type": "phrase", "explanation": "表示……，通常用于……"}';
+    final prompt = isWord
+        ? 'Provide lexical information for the English word "$clean".\n'
+              'Format strictly as JSON:\n'
+              '{"type": "word", "senses": [{"partOfSpeech": "v.", "meaning": "..."}, {"partOfSpeech": "n.", "meaning": "..."}]}\n'
+              'Use standard abbreviated part-of-speech labels (e.g. n., v., adj., adv., prep., conj., pron., interj.).'
+        : 'Provide a concise Chinese explanation of the meaning and usage of "$clean".\n'
+              'Format strictly as JSON:\n'
+              '{"type": "phrase", "explanation": "表示……，通常用于……"}';
 
     return '$dictionaryAiSystemPrompt\n\n$prompt';
   }
@@ -154,9 +152,7 @@ Translate the following English text into natural, fluent Chinese:
     buffer.writeln(
       'Meaning: Nuances of key phrases and idioms in this context.',
     );
-    buffer.writeln(
-      'Possible correction: If any word seems misrecognized, suggest the intended word; otherwise state "No correction necessary."',
-    );
+    buffer.writeln('Return only the explanation itself. Do not repeat these instructions.');
 
     return [
       const ChatMessagePayload(role: 'system', content: systemPrefix),
@@ -192,9 +188,7 @@ Translate the following English text into natural, fluent Chinese:
     buffer.writeln(
       'Meaning: Nuances of key phrases and idioms in this context.',
     );
-    buffer.writeln(
-      'Possible correction: If any word seems misrecognized, suggest the intended word; otherwise state "No correction necessary."',
-    );
+    buffer.writeln('Return only the explanation itself. Do not repeat these instructions.');
 
     return buffer.toString();
   }

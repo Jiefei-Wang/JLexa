@@ -41,6 +41,7 @@ class TestMockAiEngine implements AiEngine {
   String? _loadedModelPath = '/mock/model.gguf';
   AiModelState _state = AiModelState.ready;
   final List<String> cancelledRequests = [];
+  final List<String> generateCalls = [];
   String? currentRequestId;
 
   @override
@@ -109,6 +110,7 @@ class TestMockAiEngine implements AiEngine {
     List<ChatMessagePayload>? chatMessages,
     AiRequestPriority priority = AiRequestPriority.user,
   }) {
+    generateCalls.add(prompt);
     if (!_isLoaded) {
       return AiGenerationHandle(
         requestId: '',
@@ -324,7 +326,7 @@ void main() {
     });
 
     test(
-      '2. Lesson A transcription completes after user switched to Lesson B',
+      '2. Lesson A transcription is invalidated after switching to Lesson B',
       () async {
         final lessonA = AudioLesson(
           id: 'lesson_A',
@@ -347,6 +349,15 @@ void main() {
 
         await lessonRepo.saveLesson(lessonA);
         await lessonRepo.saveLesson(lessonB);
+        await lessonRepo.saveSegments('lesson_A', [
+          const AudioSegment(
+            id: 'cut_a',
+            lessonId: 'lesson_A',
+            startMs: 0,
+            endMs: 5000,
+            text: '',
+          ),
+        ]);
 
         final controller = RepeaterController(
           lessonRepo: lessonRepo,
@@ -385,9 +396,11 @@ void main() {
           isFalse,
         );
 
-        // In Fifth Pass, background transcription completes and saves to DB without UI bleed
+        // Switching lessons invalidates the old request for both UI and persistence.
         final dbLessonA = await lessonRepo.getLesson('lesson_A');
-        expect(dbLessonA?.transcriptStatus, equals(TranscriptStatus.completed));
+        expect(dbLessonA?.transcriptStatus, equals(TranscriptStatus.none));
+        final savedCuts = await lessonRepo.getSegmentsForLesson('lesson_A');
+        expect(savedCuts.single.text, isEmpty);
 
         controller.dispose();
       },
@@ -406,6 +419,15 @@ void main() {
           lastOpenedAt: DateTime.now(),
         );
         await lessonRepo.saveLesson(lesson);
+        await lessonRepo.saveSegments('lesson_cancel_test', [
+          const AudioSegment(
+            id: 'cut_cancel',
+            lessonId: 'lesson_cancel_test',
+            startMs: 0,
+            endMs: 5000,
+            text: '',
+          ),
+        ]);
 
         final controller = RepeaterController(
           lessonRepo: lessonRepo,
@@ -513,7 +535,7 @@ void main() {
     });
 
     test(
-      '7. Repeater sentence change cancels own pending AI handle only',
+      '7. Repeater sentence change never starts or cancels AI automatically',
       () async {
         final lesson = AudioLesson(
           id: 'lesson_ai_cancel',
@@ -555,7 +577,8 @@ void main() {
         controller.nextSentence();
         await Future.delayed(const Duration(milliseconds: 50));
 
-        expect(aiEngine.cancelledRequests.isNotEmpty, isTrue);
+        expect(aiEngine.generateCalls, isEmpty);
+        expect(aiEngine.cancelledRequests, isEmpty);
 
         controller.dispose();
       },
@@ -590,7 +613,7 @@ void main() {
     });
 
     test(
-      '9. Segment boundary edits legal range clamp prevents overlap',
+      '9. Segment boundary edits compress an overlapping neighbor',
       () async {
         final lesson = AudioLesson(
           id: 'lesson_bounds_test',
@@ -642,16 +665,17 @@ void main() {
         );
 
         final seg2 = controller.segments.firstWhere((s) => s.id == 'seg_2');
-        // Must not overlap seg_1 endMs (3000)
-        expect(seg2.startMs, greaterThanOrEqualTo(3000));
-        expect(seg2.endMs, lessThanOrEqualTo(6000));
+        expect(seg2.startMs, equals(1500));
+        expect(seg2.endMs, equals(5500));
+        final seg1 = controller.segments.firstWhere((s) => s.id == 'seg_1');
+        expect(seg1.endMs, equals(1500));
 
         controller.dispose();
       },
     );
 
     test(
-      '10. Segment split token fallback works when tokens lack timestamps',
+      '10. Add Cut is disabled while the playhead is inside an existing cut',
       () async {
         final lesson = AudioLesson(
           id: 'lesson_split_test',
@@ -691,13 +715,10 @@ void main() {
 
         await controller.addCutAtPlayhead();
 
-        expect(controller.segments.length, equals(2));
+        expect(controller.segments.length, equals(1));
         expect(controller.segments[0].startMs, equals(0));
-        expect(controller.segments[0].endMs, equals(2000));
-        expect(controller.segments[1].startMs, equals(2000));
-        expect(controller.segments[1].endMs, equals(4000));
+        expect(controller.segments[0].endMs, equals(4000));
         expect(controller.segments[0].text.isNotEmpty, isTrue);
-        expect(controller.segments[1].text.isNotEmpty, isTrue);
 
         controller.dispose();
       },
