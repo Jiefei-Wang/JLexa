@@ -28,13 +28,15 @@ class RepeaterController extends ChangeNotifier {
   AudioLesson? _lesson;
   List<AudioSegment> _segments = [];
   List<double> _fullWaveformPeaks = [];
-  bool _snapToSpeechEnabled = true;
+  bool _snapToSpeechEnabled = false;
   bool _isAiCardExpanded = true;
   String _aiExplanation = '';
   bool _isAiGenerating = false;
   bool _isLoading = false;
   bool _isWaveformLoading = false;
   bool _autoTranscribe = false;
+  bool _isEditingCuts = false;
+  bool get isEditingCuts => _isEditingCuts;
   String? _visibleTranscriptCutId;
   Timer? _autoTranscribeDebounce;
   String? _notice;
@@ -116,8 +118,8 @@ class RepeaterController extends ChangeNotifier {
         : null;
   }
 
-  bool get canAddCut => _lesson != null;
-  bool get canDeleteCut => currentSegment != null;
+  bool get canAddCut => _lesson != null && !_isEditingCuts;
+  bool get canDeleteCut => currentSegment != null && !_isEditingCuts;
 
   RepeaterController({
     required this.lessonRepo,
@@ -159,12 +161,10 @@ class RepeaterController extends ChangeNotifier {
       unawaited(cancelTranscription());
       _autoTranscribeDebounce?.cancel();
       final cut = currentSegment;
-      _visibleTranscriptCutId = cut?.hasValidTranscript == true
-          ? cut!.id
-          : null;
-      if (_autoTranscribe && cut != null) {
-        if (cut.hasValidTranscript &&
-            cut.transcriptModelId == aiService.speechEngine.loadedModelPath) {
+      _visibleTranscriptCutId =
+          _autoTranscribe && cut?.hasValidTranscript == true ? cut!.id : null;
+      if (_autoTranscribe && !_isEditingCuts && cut != null) {
+        if (cut.hasValidTranscript) {
           _visibleTranscriptCutId = cut.id;
         } else {
           unawaited(
@@ -194,6 +194,7 @@ class RepeaterController extends ChangeNotifier {
     }
     if (_isDisposed ||
         !_autoTranscribe ||
+        _isEditingCuts ||
         switchGeneration != _transcriptionGeneration ||
         currentSegment?.id != cutId ||
         currentSegment?.revision != cutRevision) {
@@ -313,6 +314,9 @@ class RepeaterController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final stored = await lessonRepo.getLesson(lesson.id);
+      if (currentGen != _loadGeneration) return;
+      _lesson = stored ?? lesson;
       // Step 1: Load segments from DB
       final segs = await lessonRepo.getSegmentsForLesson(lesson.id);
       if (currentGen != _loadGeneration) return;
@@ -320,7 +324,7 @@ class RepeaterController extends ChangeNotifier {
 
       // Step 2: Load audio in AudioService
       try {
-        await audioService.loadLesson(lesson, _segments);
+        await audioService.loadLesson(_lesson!, _segments);
       } catch (e) {
         _audioLoadError = 'Failed to load audio: $e';
       }
@@ -329,7 +333,8 @@ class RepeaterController extends ChangeNotifier {
       // Step 3: Show the lesson UI immediately
       _activeSegmentId = audioService.currentSegment?.id;
       final activeCut = audioService.currentSegment;
-      _visibleTranscriptCutId = activeCut?.hasValidTranscript == true
+      _visibleTranscriptCutId =
+          _autoTranscribe && activeCut?.hasValidTranscript == true
           ? activeCut!.id
           : null;
       _isLoading = false;
@@ -367,9 +372,16 @@ class RepeaterController extends ChangeNotifier {
   }
 
   Future<void> transcribeCurrentCut({bool automatic = false}) async {
+    if (_isEditingCuts || _isLoading) return;
     final cut = currentSegment;
     if (_lesson == null || cut == null) {
       _transcriptionError = 'Move the playhead into a cut before transcribing.';
+      notifyListeners();
+      return;
+    }
+    if (cut.hasValidTranscript) {
+      _visibleTranscriptCutId = cut.id;
+      _transcriptionError = null;
       notifyListeners();
       return;
     }
@@ -463,7 +475,10 @@ class RepeaterController extends ChangeNotifier {
         (s) => s.id == targetCutId && s.revision == targetRevision,
       );
       if (currentIndex < 0) return;
-      final combinedText = recognized.map((s) => s.text).join().trim();
+      final combinedText = recognized
+          .map((s) => s.text.trim())
+          .where((s) => s.isNotEmpty)
+          .join(' ');
       final combinedTokens = recognized.expand((s) => s.tokens).toList();
       final validConfidences = combinedTokens
           .map((t) => t.confidence)
@@ -554,6 +569,77 @@ class RepeaterController extends ChangeNotifier {
     audioService.updateSegments(cuts);
   }
 
+  Future<void> _quiesceCutWork() async {
+    _autoTranscribeDebounce?.cancel();
+    ++_transcriptionGeneration;
+    _visibleTranscriptCutId = null;
+    _invalidateExplanation();
+    final pending = _transcriptionCompleter?.future;
+    await cancelTranscription();
+    if (pending != null) await pending;
+  }
+
+  Future<void> resetTranscripts() => _replaceLessonCuts(regenerate: false);
+  Future<void> redoSegments() => _replaceLessonCuts(regenerate: true);
+
+  Future<void> _replaceLessonCuts({required bool regenerate}) async {
+    final target = _lesson;
+    if (target == null || _isEditingCuts || _isWaveformLoading) return;
+    _isEditingCuts = true;
+    notifyListeners();
+    final generation = _loadGeneration;
+    final snapshot = [..._segments];
+    try {
+      await audioService.pause();
+      await _quiesceCutWork();
+      if (generation != _loadGeneration || _isDisposed) return;
+      final cuts = regenerate
+          ? waveformService
+                .detectSpeechRegions(
+                  peaks: _fullWaveformPeaks,
+                  durationMs: durationMs,
+                )
+                .map(
+                  (r) => AudioSegment(
+                    id: _uuid.v4(),
+                    lessonId: target.id,
+                    startMs: r.startMs,
+                    endMs: r.endMs,
+                    text: '',
+                    confidence: -1,
+                  ),
+                )
+                .toList()
+          : snapshot
+                .map(
+                  (c) => c.copyWith(
+                    revision: c.revision + 1,
+                    clearTranscript: true,
+                  ),
+                )
+                .toList();
+      await lessonRepo.commitCutSet(target.id, {
+        for (final c in snapshot) c.id: c.revision,
+      }, cuts);
+      await lessonRepo.updateTranscriptStatus(target.id, TranscriptStatus.none);
+      if (generation != _loadGeneration || _isDisposed) return;
+      _lesson = target.copyWith(cutsInitialized: true);
+      _segments = cuts;
+      _selectedSegmentId = null;
+      audioService.updateSegments(cuts);
+      _activeSegmentId = currentSegment?.id;
+      _visibleTranscriptCutId = null;
+      _notice = regenerate
+          ? 'Segments rebuilt from speech pauses.'
+          : 'Transcript cache cleared for all segments.';
+    } catch (e) {
+      _notice = 'Could not save changes: $e';
+    } finally {
+      _isEditingCuts = false;
+      if (!_isDisposed) notifyListeners();
+    }
+  }
+
   Future<void> transcribeLesson() => transcribeCurrentCut();
 
   Future<void> cancelTranscription() async {
@@ -618,13 +704,11 @@ class RepeaterController extends ChangeNotifier {
       _transcriptionGeneration++;
       await cancelTranscription();
       final cut = currentSegment;
-      _visibleTranscriptCutId = cut?.hasValidTranscript == true
-          ? cut!.id
-          : null;
+      _visibleTranscriptCutId =
+          _autoTranscribe && cut?.hasValidTranscript == true ? cut!.id : null;
     } else if (currentSegment != null) {
       final cut = currentSegment!;
-      if (cut.hasValidTranscript &&
-          cut.transcriptModelId == aiService.speechEngine.loadedModelPath) {
+      if (cut.hasValidTranscript) {
         _visibleTranscriptCutId = cut.id;
       } else {
         unawaited(transcribeCurrentCut(automatic: true));
@@ -677,7 +761,7 @@ class RepeaterController extends ChangeNotifier {
     int? expectedRevision,
   }) async {
     final index = _segments.indexWhere((s) => s.id == segmentId);
-    if (index == -1) return;
+    if (index == -1 || _isEditingCuts) return;
 
     final totalDur = durationMs;
     if (totalDur <= 0) return;
@@ -710,7 +794,10 @@ class RepeaterController extends ChangeNotifier {
             .toInt();
       }
     }
-    if (finalStart >= finalEnd) return;
+    if (finalStart >= finalEnd ||
+        (finalStart == original.startMs && finalEnd == original.endMs)) {
+      return;
+    }
     final snapshot = [..._segments];
     final expected = {for (final c in snapshot) c.id: c.revision};
     final result = CutEditor.resize(
@@ -721,15 +808,19 @@ class RepeaterController extends ChangeNotifier {
       newEndMs: finalEnd,
       durationMs: totalDur,
     );
-    _invalidateExplanation();
-    _transcriptionGeneration++;
-    _visibleTranscriptCutId = null;
+    final lessonId = _lesson!.id;
+    _isEditingCuts = true;
     try {
-      await lessonRepo.commitCutSet(_lesson!.id, expected, result.cuts);
+      await _quiesceCutWork();
+      if (_lesson?.id != lessonId || _isDisposed) return;
+      await lessonRepo.commitCutSet(lessonId, expected, result.cuts);
+      if (_lesson?.id != lessonId || _isDisposed) return;
       _segments = result.cuts;
       audioService.updateSegments(_segments);
     } catch (e) {
       _notice = 'Cut edit was not saved: $e';
+    } finally {
+      _isEditingCuts = false;
     }
     notifyListeners();
   }
@@ -758,7 +849,24 @@ class RepeaterController extends ChangeNotifier {
     }
   }
 
-  Future<void> addCutAtPlayhead() async {
+  Future<void> _runCutEdit(Future<void> Function() edit) async {
+    if (_lesson == null || _isEditingCuts) return;
+    _isEditingCuts = true;
+    final generation = _loadGeneration;
+    try {
+      await _quiesceCutWork();
+      if (_isDisposed || generation != _loadGeneration) return;
+      await edit();
+    } catch (e) {
+      _notice = 'Cut edit was not saved: $e';
+    } finally {
+      _isEditingCuts = false;
+      if (!_isDisposed) notifyListeners();
+    }
+  }
+
+  Future<void> addCutAtPlayhead() => _runCutEdit(_addCutAtPlayhead);
+  Future<void> _addCutAtPlayhead() async {
     if (_lesson == null) return;
     final targetLessonId = _lesson!.id;
     final targetPosition = positionMs;
@@ -844,7 +952,8 @@ class RepeaterController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> deleteCurrentCut() async {
+  Future<void> deleteCurrentCut() => _runCutEdit(_deleteCurrentCut);
+  Future<void> _deleteCurrentCut() async {
     final cut = currentSegment;
     if (_lesson == null || cut == null) return;
     final snapshot = [..._segments];
@@ -868,21 +977,12 @@ class RepeaterController extends ChangeNotifier {
     final cur = _segments[curIndex];
     final next = _segments[curIndex + 1];
 
-    final merged = cur.copyWith(
-      endMs: next.endMs,
-      text: '${cur.text} ${next.text}',
-      isUserEdited: true,
-      tokens: [...cur.tokens, ...next.tokens],
+    await updateSegmentBounds(
+      segmentId: cur.id,
+      expectedRevision: cur.revision,
+      newStartMs: cur.startMs,
+      newEndMs: next.endMs,
     );
-
-    _segments[curIndex] = merged;
-    _segments.removeAt(curIndex + 1);
-
-    audioService.updateSegments(_segments);
-    if (_lesson != null) {
-      await lessonRepo.saveSegments(_lesson!.id, _segments);
-    }
-    notifyListeners();
   }
 
   SentenceContext getCurrentSentenceContext() {

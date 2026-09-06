@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
@@ -31,6 +32,42 @@ abstract class ILessonRepository implements Listenable {
 
 class LessonRepository extends ChangeNotifier implements ILessonRepository {
   final _uuid = const Uuid();
+
+  Future<String> audioFingerprint(String path) async =>
+      (await sha256.bind(File(path).openRead()).first).toString();
+
+  Future<void> setAudioFingerprint(String id, String hash) async {
+    final db = await AppDatabase.instance.database;
+    await db.update(
+      'audio_lessons',
+      {'source_hash': hash},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Recognizes identical bytes even when the picker copied/renamed the file.
+  /// Old lessons are fingerprinted lazily, without replacing their cut rows.
+  Future<AudioLesson?> findByAudioFingerprint(String hash) async {
+    final db = await AppDatabase.instance.database;
+    final rows = await db.query(
+      'audio_lessons',
+      orderBy: 'last_opened_at DESC',
+    );
+    for (final row in rows) {
+      var stored = row['source_hash'] as String?;
+      if (stored == null) {
+        final file = File(row['local_path'] as String);
+        if (!await file.exists()) continue;
+        stored = await audioFingerprint(file.path);
+        await setAudioFingerprint(row['id'] as String, stored);
+      }
+      if (stored == hash && await File(row['local_path'] as String).exists()) {
+        return AudioLesson.fromMap(row);
+      }
+    }
+    return null;
+  }
 
   @override
   Future<List<AudioLesson>> getAllLessons() async {

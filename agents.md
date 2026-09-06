@@ -252,3 +252,31 @@ At the end of every agent session after completing work:
   - `apksigner verify --verbose --print-certs`: Verified, APK Signature Scheme v2 true.
   - Build emits an upstream `flutter_tts` future Kotlin-plugin compatibility warning; current release build succeeds.
   - Automatic approval review rejected deletion of duplicate build-output APKs (`blocked by policy`); these copies remain under `app/build/app/outputs/`. The fixed release artifact is current.
+
+---
+
+## Session: 2026-09-06 (Seven Requested Repeater, Chat, and Back-Navigation Fixes)
+- **Focus**: Implemented the seven screenshot/behavior requests and the explicit Auto OFF preference. Details and final release screenshots: `docs/qa-2026-09-06-seven-fixes.md`.
+- **Changes**:
+  - Aligned cut handles, shading, hit coordinates, and revision-aware drag previews. Inset shading leaves a thin visible gap between touching cuts without altering audio bounds.
+  - Anchored waveform aggregation to the file timeline so playback only translates stable amplitude bars. Refined pause merging while preserving silent gaps.
+  - Added the Listening three-dot menu with Import audio, Redo segments, and Reset transcripts. Fingerprint matching reopens identical audio with its saved manual edits; an empty saved cut list is also preserved.
+  - Auto OFF now hides transcripts on load/cut switch/disable until Transcribe is tapped. Valid caches can be revealed without a loaded model. Edits and resets quiesce in-flight transcription before atomic revision-checked commits; changed cuts lose obsolete transcripts/explanations.
+  - Added persistent chat conversations, new chat, history switching, message/conversation deletion, cancellation, and regeneration. Reopening history fetches the latest snapshot, preventing loss of newly streamed tokens. Removed the disclaimer and instructed replies to follow the user's language.
+  - Added actual tab history and normal route popping; only Home requires a second Back within two seconds to exit. Removed the redundant Listening import FAB and persistent import snackbar action.
+- **Device Verification**:
+  - Pixel 6 (`25311FDF6004PR`, Android 16): fixed boundary dragging, adjacent-cut white gap, stable scrolling waveforms, same-file edit restoration, reset/redo separation, and Auto OFF cache gating.
+  - A 25.967-second WAV produced six speech regions and retained a 6.58-second silent gap. Manual resize/split survived reimport; reset retained bounds, while explicit redo generated fresh segment IDs.
+  - Native Whisper returned `Hello` for one short cut. Native chat answered in English, regenerated, cancelled, switched/deleted history, and restored its saved conversation across signed release upgrade.
+  - Physical Back verified Settings -> Home and Study -> Dictionary -> Home, followed by the double-back exit. Final release also verified menu actions, split rendering, chat generation, and deleting the last question/answer.
+  - Final signed upgrade succeeded with `adb install -r`; PID `28599`, crash buffer empty. Temporary QA lesson/source audio and conversations were removed after validation; original lessons and models retained.
+- **Static Analysis**: `flutter analyze` -> `No issues found!` (zero errors/warnings).
+- **Tests**: `flutter test --concurrency=1` -> `171 passed`, zero failed. Coverage includes waveform geometry/stability, persistence/reset behavior, Chinese chat prompt and cancellation ownership, stale history snapshots, and back navigation.
+- **Signed Release**:
+  - `flutter build apk --release` succeeded using `app/android/key.properties`; temporary debug-signing changes were removed before the build.
+  - Fixed path: `release/app-release.apk` (93,260,625 bytes).
+  - APK SHA-256: `27B29C03814E01B36EF3C8E2FFE7EB022DDD51D990D4F14319D6F48B2E731A8C`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
+  - `apksigner verify --verbose --print-certs`: Verified, APK Signature Scheme v2 true.
+  - Existing upstream `flutter_tts` future Kotlin compatibility warning remains; the release build succeeds.
+  - Prior automatic approval rejection still blocks deletion of duplicate APK build outputs. It was not bypassed; the fixed release artifact is current.

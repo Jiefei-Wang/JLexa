@@ -7,8 +7,14 @@ import '../../../core/theme/app_typography.dart';
 class ChatBubble extends StatelessWidget {
   final ChatMessage message;
   final ValueChanged<String> onSpeak;
+  final VoidCallback? onDelete;
 
-  const ChatBubble({super.key, required this.message, required this.onSpeak});
+  const ChatBubble({
+    super.key,
+    required this.message,
+    required this.onSpeak,
+    this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -60,12 +66,28 @@ class ChatBubble extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  SelectableText(
                     message.content,
                     style: AppTypography.bodyMedium.copyWith(
                       color: isUser ? Colors.white : AppColors.textPrimary,
                     ),
                   ),
+                  if (onDelete != null)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: IconButton(
+                        tooltip: 'Delete message',
+                        iconSize: 16,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: onDelete,
+                        icon: Icon(
+                          Icons.delete_outline,
+                          color: isUser
+                              ? Colors.white70
+                              : AppColors.textTertiary,
+                        ),
+                      ),
+                    ),
                   if (message.audioTimestampLabel != null || !isUser) ...[
                     const SizedBox(height: 6),
                     Row(

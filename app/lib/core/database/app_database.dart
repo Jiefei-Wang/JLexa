@@ -28,7 +28,7 @@ class AppDatabase {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -53,6 +53,12 @@ class AppDatabase {
           await db.execute(
             "UPDATE audio_segments SET transcript_cut_revision = 0 WHERE TRIM(text) <> ''",
           );
+        }
+        if (oldVersion < 3) {
+          await db.execute(
+            'ALTER TABLE audio_lessons ADD COLUMN source_hash TEXT',
+          );
+          await _createConversations(db);
         }
       },
       onOpen: (db) async {
@@ -183,6 +189,7 @@ class AppDatabase {
         transcript_status TEXT NOT NULL DEFAULT 'none',
         waveform_cache_path TEXT
         ,cuts_initialized INTEGER NOT NULL DEFAULT 0
+        ,source_hash TEXT
       )
     ''');
 
@@ -204,6 +211,8 @@ class AppDatabase {
       )
     ''');
 
+    await _createConversations(db);
+
     // Chat messages
     await db.execute('''
       CREATE TABLE chat_messages (
@@ -223,6 +232,13 @@ class AppDatabase {
         value TEXT NOT NULL
       )
     ''');
+  }
+
+  Future<void> _createConversations(Database db) async {
+    await db.execute('''CREATE TABLE chat_conversations (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, context_json TEXT,
+      messages_json TEXT NOT NULL, updated_at INTEGER NOT NULL
+    )''');
   }
 
   Future<void> close() async {

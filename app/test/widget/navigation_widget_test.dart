@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jlexa/core/ai/ai_service.dart';
 import 'package:jlexa/core/audio/audio_service.dart';
@@ -81,6 +82,31 @@ void main() {
       // Verify Study screen is active
       expect(find.byType(VocabularyScreen), findsOneWidget);
       expect(find.text('Vocabulary Study'), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(find.byType(DictionaryScreen), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(find.text('JLexa'), findsOneWidget);
+      var exitCalls = 0;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'SystemNavigator.pop') exitCalls++;
+          return null;
+        },
+      );
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(exitCalls, 0);
+      expect(find.textContaining('Press back again'), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(exitCalls, 1);
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
     },
   );
 }

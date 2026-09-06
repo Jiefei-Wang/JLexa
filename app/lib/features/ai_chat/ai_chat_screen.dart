@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
+import '../../core/ai/chat_repository.dart';
 
 import '../../core/ai/ai_service.dart';
 import '../../core/ai/prompt_builder.dart';
@@ -25,7 +29,8 @@ class AiChatScreen extends StatefulWidget {
   State<AiChatScreen> createState() => _AiChatScreenState();
 }
 
-class _AiChatScreenState extends State<AiChatScreen> {
+class _AiChatScreenState extends State<AiChatScreen>
+    with WidgetsBindingObserver {
   late final AiChatController _controller;
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -33,6 +38,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     SentenceContext? sentenceCtx;
     if (widget.initialContext != null) {
       final map = widget.initialContext!;
@@ -58,10 +64,13 @@ class _AiChatScreenState extends State<AiChatScreen> {
       speechEngine: widget.speechEngine,
       initialContext: sentenceCtx,
     );
+    _controller.addListener(_onChatChanged);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller.removeListener(_onChatChanged);
     _inputController.dispose();
     _scrollController.dispose();
     _controller.dispose();
@@ -70,7 +79,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
   void _send() {
     final text = _inputController.text.trim();
-    if (text.isNotEmpty) {
+    if (text.isNotEmpty && !_controller.isGenerating && _controller.isReady) {
       _controller.sendMessage(text);
       _inputController.clear();
       _scrollToBottom();
@@ -91,6 +100,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
   void _toggleVoiceRecording() async {
     final transcribedText = await _controller.startStopRecording();
+    if (!mounted) return;
     if (transcribedText != null && transcribedText.isNotEmpty) {
       _inputController.text = transcribedText;
     } else if (_controller.voiceErrorMessage != null) {
@@ -106,242 +116,281 @@ class _AiChatScreenState extends State<AiChatScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: _controller,
-      builder: (context, _) {
-        return Scaffold(
-          backgroundColor: AppColors.background,
-          appBar: AppBar(
-            backgroundColor: AppColors.surface,
-            elevation: 0,
-            title: const Text('AI Q&A', style: AppTypography.titleMedium),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.history, color: AppColors.textPrimary),
-                onPressed: () => showModalBottomSheet<void>(
-                  context: context,
-                  isScrollControlled: true,
-                  builder: (context) => SafeArea(
-                    child: SizedBox(
-                      height: MediaQuery.sizeOf(context).height * 0.7,
-                      child: ListView(
-                        padding: const EdgeInsets.all(16),
-                        children: [
-                          const Text(
-                            'Current conversation',
-                            style: AppTypography.titleMedium,
-                          ),
-                          const SizedBox(height: 16),
-                          if (_controller.messages.isEmpty)
-                            const Text('No messages yet.')
-                          else
-                            ..._controller.messages.map(
-                              (message) => Padding(
-                                padding: const EdgeInsets.only(bottom: 16),
-                                child: SelectableText(
-                                  '${message.role == 'user' ? 'You' : 'JLexa'}: ${message.content}',
-                                ),
-                              ),
-                            ),
-                        ],
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      unawaited(_controller.saveConversation());
+    }
+  }
+
+  void _onChatChanged() {
+    if (_scrollController.hasClients &&
+        _scrollController.position.extentAfter < 160) {
+      _scrollToBottom();
+    }
+  }
+
+  Future<bool> _confirmDelete(String title) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Delete conversation?'),
+          content: Text(title),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
+  Future<void> _showHistory() async {
+    await _controller.saveConversation();
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, refresh) => SafeArea(
+          child: SizedBox(
+            height: MediaQuery.sizeOf(context).height * .75,
+            child: FutureBuilder<List<ChatConversation>>(
+              future: _controller.repository.list(),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Text('Could not load history: ${snapshot.error}'),
+                  );
+                }
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final chats = snapshot.data!;
+                return Column(
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text(
+                        'Chat history',
+                        style: AppTypography.titleMedium,
                       ),
                     ),
-                  ),
-                ),
-                tooltip: 'History',
-              ),
-            ],
-          ),
-          body: SafeArea(
-            top: false,
-            child: Column(
-              children: [
-                // Context summary & example questions (Header area)
-                Expanded(
-                  child: ListView(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      if (_controller.sentenceContext != null) ...[
-                        SentenceSummaryCard(
-                          contextData: _controller.sentenceContext!,
-                          isExpanded: _controller.isSummaryExpanded,
-                          onToggleExpand: _controller.toggleSummaryExpanded,
-                        ),
-                        const SizedBox(height: 16),
-                      ],
-
-                      // Example Questions
-                      const Text(
-                        'Example Questions',
-                        style: AppTypography.titleSmall,
-                      ),
-                      const SizedBox(height: 8),
-                      if (_controller.sentenceContext == null) ...[
-                        _buildExampleQuestionTile(
-                          'Explain the difference between "say" and "tell" in Chinese.',
-                        ),
-                        _buildExampleQuestionTile(
-                          'Translate "I look forward to hearing from you" into Chinese.',
-                        ),
-                        _buildExampleQuestionTile(
-                          'Give me three useful English phrases for daily conversation.',
-                        ),
-                      ] else ...[
-                        _buildExampleQuestionTile('Why is this phrase used?'),
-                        _buildExampleQuestionTile(
-                          'Explain this sentence in Chinese.',
-                        ),
-                        _buildExampleQuestionTile(
-                          'What does "prioritize" mean here?',
-                        ),
-                        _buildExampleQuestionTile(
-                          'Give me another example sentence.',
-                        ),
-                        _buildExampleQuestionTile(
-                          'Is the transcription correct?',
-                        ),
-                      ],
-                      const SizedBox(height: 16),
-
-                      // Chat messages list
-                      const Divider(height: 24),
-                      ..._controller.messages.map(
-                        (msg) => ChatBubble(
-                          message: msg,
-                          onSpeak: _controller.speak,
-                        ),
-                      ),
-
-                      if (_controller.isGenerating)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 8.0),
-                          child: Center(
-                            child: SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                              ),
+                    Expanded(
+                      child: chats.isEmpty
+                          ? const Center(child: Text('No saved conversations.'))
+                          : ListView.builder(
+                              itemCount: chats.length,
+                              itemBuilder: (context, index) {
+                                final chat = chats[index];
+                                return ListTile(
+                                  title: Text(
+                                    chat.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  subtitle: Text(
+                                    '${chat.updatedAt.toLocal().toString().substring(0, 16)} • ${chat.messages.length} messages',
+                                  ),
+                                  selected:
+                                      chat.id == _controller.conversationId,
+                                  onTap: () async {
+                                    Navigator.pop(context);
+                                    await _controller.openConversation(chat);
+                                    _inputController.clear();
+                                    _scrollToBottom();
+                                  },
+                                  trailing: IconButton(
+                                    tooltip: 'Delete conversation',
+                                    icon: const Icon(Icons.delete_outline),
+                                    onPressed: () async {
+                                      if (!await _confirmDelete(chat.title)) {
+                                        return;
+                                      }
+                                      await _controller.deleteConversation(
+                                        chat.id,
+                                      );
+                                      if (context.mounted) refresh(() {});
+                                    },
+                                  ),
+                                );
+                              },
                             ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-
-                // Recording Status Banner if active
-                if (_controller.isRecording)
-                  Container(
-                    color: AppColors.primaryLight,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Row(
-                          children: [
-                            Icon(Icons.mic, color: AppColors.primary, size: 20),
-                            SizedBox(width: 8),
-                            Text(
-                              'Listening...',
-                              style: TextStyle(
-                                color: AppColors.primary,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                        TextButton(
-                          onPressed: _toggleVoiceRecording,
-                          child: const Text(
-                            'Tap to stop',
-                            style: TextStyle(
-                              color: AppColors.primary,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                // Bottom Input Bar
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  decoration: const BoxDecoration(
-                    color: AppColors.surface,
-                    border: Border(top: BorderSide(color: AppColors.border)),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        children: [
-                          IconButton(
-                            icon: Icon(
-                              _controller.isRecording
-                                  ? Icons.stop
-                                  : Icons.mic_none,
-                              color: _controller.isRecording
-                                  ? AppColors.error
-                                  : AppColors.textSecondary,
-                            ),
-                            onPressed: _toggleVoiceRecording,
-                            tooltip: 'Voice Input',
-                          ),
-                          Expanded(
-                            child: TextField(
-                              controller: _inputController,
-                              onSubmitted: (_) => _send(),
-                              decoration: InputDecoration(
-                                hintText: _controller.sentenceContext == null
-                                    ? 'Ask an English learning question...'
-                                    : 'Ask anything about this audio...',
-                                border: InputBorder.none,
-                                enabledBorder: InputBorder.none,
-                                focusedBorder: InputBorder.none,
-                                contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
-                              ),
-                            ),
-                          ),
-                          IconButton.filled(
-                            onPressed: _controller.isGenerating ? null : _send,
-                            icon: const Icon(Icons.send, size: 18),
-                            style: IconButton.styleFrom(
-                              backgroundColor: AppColors.primary,
-                              foregroundColor: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'AI responses may be imperfect. Please verify important information.',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: AppColors.textTertiary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+                  ],
+                );
+              },
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: _controller,
+    builder: (context, _) => Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: const Text('AI Q&A', style: AppTypography.titleMedium),
+        actions: [
+          IconButton(
+            tooltip: 'New chat',
+            icon: const Icon(Icons.add_comment_outlined),
+            onPressed: !_controller.isReady
+                ? null
+                : () async {
+                    await _controller.newChat();
+                    _inputController.clear();
+                  },
+          ),
+          IconButton(
+            tooltip: 'Chat history',
+            icon: const Icon(Icons.history),
+            onPressed: _showHistory,
+          ),
+        ],
+      ),
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            if (_controller.storageError != null)
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Text(
+                  _controller.storageError!,
+                  style: const TextStyle(color: AppColors.error),
+                ),
+              ),
+            Expanded(
+              child: !_controller.isReady
+                  ? const Center(child: CircularProgressIndicator())
+                  : ListView(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.all(16),
+                      children: [
+                        if (_controller.sentenceContext != null)
+                          SentenceSummaryCard(
+                            contextData: _controller.sentenceContext!,
+                            isExpanded: _controller.isSummaryExpanded,
+                            onToggleExpand: _controller.toggleSummaryExpanded,
+                          ),
+                        if (_controller.messages.isEmpty) ...[
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Example Questions',
+                            style: AppTypography.titleSmall,
+                          ),
+                          const SizedBox(height: 8),
+                          _buildExampleQuestionTile(
+                            _controller.sentenceContext == null
+                                ? 'Explain the difference between "say" and "tell".'
+                                : 'Explain this sentence in Chinese.',
+                          ),
+                          _buildExampleQuestionTile(
+                            'Give me three useful English phrases for daily conversation.',
+                          ),
+                        ],
+                        ..._controller.messages
+                            .where((m) => m.content.isNotEmpty)
+                            .map(
+                              (msg) => ChatBubble(
+                                message: msg,
+                                onSpeak: _controller.speak,
+                                onDelete: () =>
+                                    _controller.deleteMessage(msg.id),
+                              ),
+                            ),
+                        if (_controller.isGenerating)
+                          const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(12),
+                              child: SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (_controller.canRegenerate)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
+                              onPressed: _controller.regenerate,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Regenerate answer'),
+                            ),
+                          ),
+                      ],
+                    ),
+            ),
+            if (_controller.isRecording)
+              ListTile(
+                tileColor: AppColors.primaryLight,
+                title: const Text('Listening…'),
+                leading: const Icon(Icons.mic),
+                trailing: TextButton(
+                  onPressed: _toggleVoiceRecording,
+                  child: const Text('Stop recording'),
+                ),
+              ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: const BoxDecoration(
+                color: AppColors.surface,
+                border: Border(top: BorderSide(color: AppColors.border)),
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Voice Input',
+                    icon: Icon(
+                      _controller.isRecording ? Icons.stop : Icons.mic_none,
+                    ),
+                    onPressed: _toggleVoiceRecording,
+                  ),
+                  Expanded(
+                    child: TextField(
+                      controller: _inputController,
+                      minLines: 1,
+                      maxLines: 5,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => _send(),
+                      decoration: const InputDecoration(
+                        hintText: 'Message…',
+                        border: InputBorder.none,
+                      ),
+                    ),
+                  ),
+                  IconButton.filled(
+                    tooltip: _controller.isGenerating
+                        ? 'Stop generating'
+                        : 'Send message',
+                    onPressed: !_controller.isReady
+                        ? null
+                        : _controller.isGenerating
+                        ? _controller.stopGeneration
+                        : _send,
+                    icon: Icon(
+                      _controller.isGenerating ? Icons.stop : Icons.send,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 
   Widget _buildExampleQuestionTile(String question) {
     return Padding(
@@ -362,12 +411,14 @@ class _AiChatScreenState extends State<AiChatScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                question,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w500,
+              Expanded(
+                child: Text(
+                  question,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
               const Icon(

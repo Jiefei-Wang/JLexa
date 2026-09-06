@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../../../core/audio/audio_models.dart';
+import '../../../core/audio/cut_editor.dart';
 import '../../../core/audio/waveform_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
@@ -49,6 +50,8 @@ class WaveformView extends StatefulWidget {
 class _WaveformViewState extends State<WaveformView> {
   int? _previewStart, _previewEnd;
   AudioSegment? _gestureCut;
+  final _plotKey = GlobalKey();
+  int? _gestureWindowStart;
   double _seekDx = 0;
   int _seekOrigin = 0;
   String _time(int ms) {
@@ -59,14 +62,28 @@ class _WaveformViewState extends State<WaveformView> {
   @override
   Widget build(BuildContext context) {
     const windowMs = 10000;
-    final center = widget.currentPositionMs, windowStart = center - 5000;
-    final peaks = widget.waveformService.getWindowSlice(
-      fullPeaks: widget.fullPeaks,
-      totalDurationMs: widget.totalDurationMs,
-      centerPositionMs: center,
-      windowDurationMs: windowMs,
-      targetSamples: 80,
+    final center = widget.currentPositionMs;
+    final windowStart = _gestureWindowStart ?? center - 5000;
+    final bars = widget.waveformService.windowBars(
+      peaks: widget.fullPeaks,
+      durationMs: widget.totalDurationMs,
+      windowStartMs: windowStart,
     );
+    var displayedCuts = widget.segments;
+    if (_gestureCut != null) {
+      try {
+        displayedCuts = CutEditor.resize(
+          snapshot: widget.segments,
+          cutId: _gestureCut!.id,
+          expectedRevision: _gestureCut!.revision,
+          newStartMs: _previewStart!,
+          newEndMs: _previewEnd!,
+          durationMs: widget.totalDurationMs,
+        ).cuts;
+      } on StateError {
+        /* A newer lesson/edit superseded this gesture. */
+      }
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -124,6 +141,7 @@ class _WaveformViewState extends State<WaveformView> {
                   : toX(_previewEnd ?? active.endMs);
               Widget handle(bool start, double x) => Positioned(
                 left: x - 16,
+                width: 32,
                 top: 0,
                 bottom: 0,
                 child: GestureDetector(
@@ -134,15 +152,20 @@ class _WaveformViewState extends State<WaveformView> {
                     if (c != null) {
                       setState(() {
                         _gestureCut = c;
+                        _gestureWindowStart = windowStart;
                         _previewStart = c.startMs;
                         _previewEnd = c.endMs;
                       });
+                      widget.onSeekStart?.call();
                     }
                   },
                   onHorizontalDragUpdate: (d) {
                     final c = _gestureCut;
                     if (c == null) return;
-                    final v = toMs(d.localPosition.dx + x - 16);
+                    final plot =
+                        _plotKey.currentContext!.findRenderObject()
+                            as RenderBox;
+                    final v = toMs(plot.globalToLocal(d.globalPosition).dx);
                     setState(() {
                       if (start && v < (_previewEnd ?? c.endMs)) {
                         _previewStart = v;
@@ -167,7 +190,8 @@ class _WaveformViewState extends State<WaveformView> {
                   },
                   child: Center(
                     child: Container(
-                      width: 4,
+                      key: ValueKey(start ? 'cut-start-line' : 'cut-end-line'),
+                      width: 3,
                       height: 82,
                       decoration: BoxDecoration(
                         color: AppColors.primary,
@@ -186,6 +210,7 @@ class _WaveformViewState extends State<WaveformView> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(14),
                   child: Stack(
+                    key: _plotKey,
                     children: [
                       Positioned.fill(
                         child: GestureDetector(
@@ -207,19 +232,35 @@ class _WaveformViewState extends State<WaveformView> {
                           onHorizontalDragEnd: (_) => widget.onSeekEnd?.call(),
                           onHorizontalDragCancel: () =>
                               widget.onSeekEnd?.call(),
-                          child: CustomPaint(painter: _WaveformPainter(peaks)),
+                          child: CustomPaint(
+                            painter: _WaveformPainter(
+                              bars,
+                              windowStart,
+                              windowMs,
+                            ),
+                          ),
                         ),
                       ),
-                      ...widget.segments
+                      ...displayedCuts
                           .where(
                             (c) => toX(c.endMs) > 0 && toX(c.startMs) < width,
                           )
                           .map((c) {
-                            final l = toX(c.startMs).clamp(0.0, width),
-                                r = toX(c.endMs).clamp(0.0, width);
+                            // At least one logical pixel per side makes adjacent cuts
+                            // distinguishable even when 10 ms is sub-pixel.
+                            final inset = min(
+                              (toX(c.endMs) - toX(c.startMs)) / 4,
+                              max(1.0, width * 10 / windowMs),
+                            );
+                            final l = (toX(c.startMs) + inset).clamp(
+                                  0.0,
+                                  width,
+                                ),
+                                r = (toX(c.endMs) - inset).clamp(0.0, width);
                             return Positioned(
+                              key: ValueKey('cut-shade-${c.id}'),
                               left: l,
-                              width: max(1, r - l),
+                              width: max(0, r - l),
                               top: 0,
                               bottom: 0,
                               child: IgnorePointer(
@@ -258,9 +299,11 @@ class _WaveformViewState extends State<WaveformView> {
   }
 
   void _clearEdit() {
+    if (_gestureCut != null) widget.onSeekEnd?.call();
     if (mounted) {
       setState(() {
         _gestureCut = null;
+        _gestureWindowStart = null;
         _previewStart = null;
         _previewEnd = null;
       });
@@ -269,26 +312,31 @@ class _WaveformViewState extends State<WaveformView> {
 }
 
 class _WaveformPainter extends CustomPainter {
-  final List<double> peaks;
-  const _WaveformPainter(this.peaks);
+  final List<WaveformBar> bars;
+  final int windowStartMs, windowMs;
+  const _WaveformPainter(this.bars, this.windowStartMs, this.windowMs);
   @override
   void paint(Canvas canvas, Size size) {
-    if (peaks.isEmpty) return;
+    if (bars.isEmpty) return;
     final p = Paint()
       ..strokeCap = StrokeCap.round
       ..strokeWidth = 2.5;
-    final step = size.width / peaks.length;
-    for (var i = 0; i < peaks.length; i++) {
-      final v = peaks[i].clamp(.02, 1.0), h = max(3.0, v * size.height * .78);
+    for (final bar in bars) {
+      final x = (bar.timeMs - windowStartMs) / windowMs * size.width;
+      final v = bar.amplitude.clamp(.02, 1.0),
+          h = max(3.0, v * size.height * .78);
       p.color = v > .25 ? AppColors.waveformSpeech : AppColors.waveformSilence;
       canvas.drawLine(
-        Offset(i * step + step / 2, size.height / 2 - h / 2),
-        Offset(i * step + step / 2, size.height / 2 + h / 2),
+        Offset(x, size.height / 2 - h / 2),
+        Offset(x, size.height / 2 + h / 2),
         p,
       );
     }
   }
 
   @override
-  bool shouldRepaint(covariant _WaveformPainter old) => old.peaks != peaks;
+  bool shouldRepaint(covariant _WaveformPainter old) =>
+      old.bars != bars ||
+      old.windowStartMs != windowStartMs ||
+      old.windowMs != windowMs;
 }

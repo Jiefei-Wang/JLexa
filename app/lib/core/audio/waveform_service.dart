@@ -32,18 +32,64 @@ class SpeechRegion {
   const SpeechRegion(this.startMs, this.endMs);
 }
 
+class WaveformBar {
+  final double timeMs;
+  final double amplitude;
+  const WaveformBar(this.timeMs, this.amplitude);
+}
+
 class WaveformService implements IWaveformService {
   static const MethodChannel _whisperChannel = MethodChannel(
     'com.jlexa.app/whisper',
   );
   final Map<String, List<double>> _memoryCache = {};
 
+  List<double>? _barSource;
+  int _barDuration = 0;
+  int _barGroupSize = 0;
+  List<WaveformBar> _bars = const [];
+
+  /// Aggregate once on the file's time grid. Scrolling changes x coordinates,
+  /// never the membership or amplitude of a bar's source samples.
+  List<WaveformBar> windowBars({
+    required List<double> peaks,
+    required int durationMs,
+    required int windowStartMs,
+    int windowMs = 10000,
+    int targetSamples = 80,
+  }) {
+    if (peaks.isEmpty || durationMs <= 0) return const [];
+    final msPerPeak = durationMs / peaks.length;
+    final groupSize = max(1, (windowMs / targetSamples / msPerPeak).round());
+    if (!identical(peaks, _barSource) ||
+        _barDuration != durationMs ||
+        _barGroupSize != groupSize) {
+      _barSource = peaks;
+      _barDuration = durationMs;
+      _barGroupSize = groupSize;
+      _bars = [
+        for (var i = 0; i < peaks.length; i += groupSize)
+          WaveformBar(
+            (i + min(groupSize, peaks.length - i) / 2) * msPerPeak,
+            peaks.skip(i).take(groupSize).reduce(max),
+          ),
+      ];
+    }
+    final step = groupSize * msPerPeak;
+    final first = max(0, (windowStartMs / step).floor() - 1);
+    final last = min(
+      _bars.length,
+      ((windowStartMs + windowMs) / step).ceil() + 1,
+    );
+    return first >= last ? const [] : _bars.sublist(first, last);
+  }
+
   /// Adaptive energy VAD over peaks produced from the fully decoded PCM
-  /// timeline (normally one peak per 50 ms). Pauses up to 300 ms are merged.
+  /// timeline (normally one peak per 50 ms). Short pauses are merged.
   List<SpeechRegion> detectSpeechRegions({
     required List<double> peaks,
     required int durationMs,
-    int mergeGapMs = 300,
+    int mergeGapMs = 200,
     int minimumSpeechMs = 180,
   }) {
     if (peaks.isEmpty || durationMs <= 0) return const [];
@@ -89,9 +135,7 @@ class WaveformService implements IWaveformService {
       );
     }
     final merged = <SpeechRegion>[];
-    for (final region in raw.where(
-      (r) => r.endMs - r.startMs >= minimumSpeechMs,
-    )) {
+    for (final region in raw) {
       if (merged.isNotEmpty &&
           region.startMs - merged.last.endMs <= mergeGapMs) {
         final previous = merged.removeLast();
@@ -100,7 +144,7 @@ class WaveformService implements IWaveformService {
         merged.add(region);
       }
     }
-    return merged;
+    return merged.where((r) => r.endMs - r.startMs >= minimumSpeechMs).toList();
   }
 
   String _buildCacheKey(String lessonId, int? fileSize, int? lastModified) {

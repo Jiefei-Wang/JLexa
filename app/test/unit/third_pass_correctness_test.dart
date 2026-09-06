@@ -288,6 +288,21 @@ class ControllableAudioService extends AudioService {
   }
 }
 
+class FixedSpeechWaveform extends WaveformService {
+  @override
+  Future<List<double>> extractAndCacheWaveform(
+    String path,
+    String id,
+    int duration,
+  ) async => [
+    ...List.filled(20, .001),
+    ...List.filled(20, .5),
+    ...List.filled(40, .001),
+    ...List.filled(20, .7),
+    ...List.filled(20, .001),
+  ];
+}
+
 void main() {
   late Directory tempDir;
   late LessonRepository lessonRepo;
@@ -633,7 +648,7 @@ void main() {
     });
 
     test(
-      '3d. persisted per-cut transcripts remain visible with Auto off',
+      '3d. Auto off hides cached transcripts until explicitly requested',
       () async {
         final controlledAudio = ControllableAudioService();
         final lesson = AudioLesson(
@@ -675,26 +690,98 @@ void main() {
         );
         await controller.loadLesson(lesson);
         expect(controller.autoTranscribe, isFalse);
+        expect(controller.visibleTranscriptSegment, isNull);
+        await controller.transcribeCurrentCut();
         expect(
           controller.visibleTranscriptSegment?.text,
           'first persisted transcript',
         );
-
         await controller.seekTo(3000);
+        expect(controller.visibleTranscriptSegment, isNull);
+        await controller.transcribeCurrentCut();
         expect(
           controller.visibleTranscriptSegment?.text,
           'second persisted transcript',
         );
         await controller.setAutoTranscribe(false);
-        expect(
-          controller.visibleTranscriptSegment?.text,
-          'second persisted transcript',
-        );
+        expect(controller.visibleTranscriptSegment, isNull);
 
         controller.dispose();
         controlledAudio.dispose();
       },
     );
+
+    test('saved edits survive same-file import; resets preserve bounds and redo excludes silence', () async {
+      final audio = ControllableAudioService();
+      final lesson = AudioLesson(
+        id: 'persist-edits',
+        title: 'Persist edits',
+        originalFileName: 'test.mp3',
+        localPath: '${tempDir.path}/test_sample.mp3',
+        durationMs: 6000,
+        currentPositionMs: 1200,
+        createdAt: DateTime.now(),
+        lastOpenedAt: DateTime.now(),
+      );
+      await lessonRepo.saveLesson(lesson);
+      await lessonRepo.saveSegments(lesson.id, [
+        AudioSegment(
+          id: 'edited',
+          lessonId: lesson.id,
+          startMs: 1000,
+          endMs: 2500,
+          text: 'cached',
+          revision: 3,
+          transcriptCutRevision: 3,
+          isUserEdited: true,
+        ),
+      ]);
+      final controller = RepeaterController(
+        lessonRepo: lessonRepo,
+        audioService: audio,
+        waveformService: FixedSpeechWaveform(),
+        aiService: aiService,
+      );
+      await controller.loadLesson(
+        lesson,
+      ); // stale cutsInitialized=false from caller
+      expect(controller.segments.single.id, 'edited');
+      expect(controller.visibleTranscriptSegment, isNull);
+      await controller.transcribeCurrentCut();
+      expect(controller.visibleTranscriptSegment?.text, 'cached');
+      await controller.resetTranscripts();
+      expect(controller.segments.single.startMs, 1000);
+      expect(controller.segments.single.endMs, 2500);
+      expect(controller.segments.single.text, isEmpty);
+      expect(controller.segments.single.revision, 4);
+      expect(controller.visibleTranscriptSegment, isNull);
+      final renamed = await File(lesson.localPath)
+          .copy('${tempDir.path}/renamed.mp3');
+      final hash = await lessonRepo.audioFingerprint(renamed.path);
+      final existing = await lessonRepo.findByAudioFingerprint(hash);
+      expect(existing?.id, lesson.id);
+      await controller.deleteCurrentCut();
+      await controller.loadLesson(lesson);
+      expect(
+        controller.segments,
+        isEmpty,
+        reason: 'Deleted cuts must not resurrect on reload',
+      );
+      await controller.redoSegments();
+      expect(controller.segments, hasLength(2));
+      expect(controller.segments.first.startMs, greaterThan(800));
+      expect(controller.segments.last.endMs, lessThan(5300));
+      expect(
+        controller.segments.last.startMs - controller.segments.first.endMs,
+        greaterThan(1500),
+      );
+      expect(
+        controller.segments.every((c) => c.text.isEmpty && c.id != 'edited'),
+        isTrue,
+      );
+      controller.dispose();
+      audio.dispose();
+    });
 
     test('4. Dictionary search rapid race does not overwrite isSaved with stale query', () async {
       final dictController = DictionaryController(

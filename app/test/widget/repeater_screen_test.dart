@@ -80,10 +80,17 @@ void main() {
         ),
       );
 
-      await tester.runAsync(() async {
-        await Future.delayed(const Duration(milliseconds: 600));
-      });
-      await tester.pumpAndSettle();
+      for (
+        var attempt = 0;
+        attempt < 100 && find.text('Total Progress').evaluate().isEmpty;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      await tester.pump();
 
       // Verify key Repeater UI components
       expect(find.text('Total Progress'), findsOneWidget);

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
@@ -56,6 +57,9 @@ class MainScaffoldState extends State<MainScaffold> {
   late final ModelManager _modelManager;
   bool _ownsModelManager = false;
   int _currentIndex = 0;
+  final List<int> _tabHistory = [];
+  DateTime? _lastExitBack;
+  bool _isImporting = false;
   String? _targetDictionaryWord;
   int _dictionaryNavigationRevision = 0;
   AudioLesson? _activeLesson;
@@ -84,6 +88,13 @@ class MainScaffoldState extends State<MainScaffold> {
   }
 
   void switchToTab(int index) {
+    if (index == _currentIndex) return;
+    _lastExitBack = null;
+    if (index == 0) {
+      _tabHistory.clear();
+    } else {
+      _tabHistory.add(_currentIndex);
+    }
     setState(() {
       _currentIndex = index;
     });
@@ -102,6 +113,7 @@ class MainScaffoldState extends State<MainScaffold> {
   }
 
   void openDictionaryForWord(String word) {
+    switchToTab(1);
     setState(() {
       _targetDictionaryWord = word;
       _dictionaryNavigationRevision++;
@@ -110,6 +122,7 @@ class MainScaffoldState extends State<MainScaffold> {
   }
 
   void openRepeaterForLesson(AudioLesson lesson) {
+    switchToTab(2);
     setState(() {
       _activeLesson = lesson;
       _currentIndex = 2; // Repeater tab
@@ -145,6 +158,8 @@ class MainScaffoldState extends State<MainScaffold> {
   }
 
   Future<void> importAudioFile() async {
+    if (_isImporting) return;
+    _isImporting = true;
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -153,6 +168,13 @@ class MainScaffoldState extends State<MainScaffold> {
 
       if (result != null && result.files.single.path != null) {
         final originalPath = result.files.single.path!;
+        final hash = await widget.lessonRepo.audioFingerprint(originalPath);
+        final existing = await widget.lessonRepo.findByAudioFingerprint(hash);
+        if (!mounted) return;
+        if (existing != null) {
+          openRepeaterForLesson(existing);
+          return;
+        }
         final fileName = result.files.single.name;
         final docDir = await getApplicationDocumentsDirectory();
         final lessonsDir = Directory(p.join(docDir.path, 'lessons'));
@@ -200,15 +222,13 @@ class MainScaffoldState extends State<MainScaffold> {
         );
 
         await widget.lessonRepo.saveLesson(newLesson);
+        await widget.lessonRepo.setAudioFingerprint(newLesson.id, hash);
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Imported "${newLesson.title}"'),
-              action: SnackBarAction(
-                label: 'Open',
-                onPressed: () => openRepeaterForLesson(newLesson),
-              ),
+              duration: const Duration(seconds: 2),
             ),
           );
         }
@@ -220,115 +240,149 @@ class MainScaffoldState extends State<MainScaffold> {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('Error importing audio: $e')));
       }
+    } finally {
+      _isImporting = false;
     }
+  }
+
+  void _handleBack() {
+    if (_currentIndex != 0) {
+      setState(() {
+        _currentIndex = _tabHistory.isEmpty ? 0 : _tabHistory.removeLast();
+      });
+      if (_currentIndex == 0) _homeKey.currentState?.refresh();
+      _lastExitBack = null;
+      return;
+    }
+    final now = DateTime.now();
+    if (_lastExitBack != null &&
+        now.difference(_lastExitBack!) < const Duration(seconds: 2)) {
+      SystemNavigator.pop();
+      return;
+    }
+    _lastExitBack = now;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('再按一次返回键退出 / Press back again to exit'),
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: [
-          HomeScreen(
-            key: _homeKey,
-            dictionaryRepo: widget.dictionaryRepo,
-            lessonRepo: widget.lessonRepo,
-            aiService: widget.aiService,
-            onOpenDictionary: openDictionaryForWord,
-            onOpenLesson: openRepeaterForLesson,
-            onDeleteLesson: handleLessonDeleted,
-            onOpenSettings: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => SettingsScreen(
-                    aiService: widget.aiService,
-                    modelManager: _modelManager,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _handleBack();
+      },
+      child: Scaffold(
+        body: IndexedStack(
+          index: _currentIndex,
+          children: [
+            HomeScreen(
+              key: _homeKey,
+              dictionaryRepo: widget.dictionaryRepo,
+              lessonRepo: widget.lessonRepo,
+              aiService: widget.aiService,
+              onOpenDictionary: openDictionaryForWord,
+              onOpenLesson: openRepeaterForLesson,
+              onDeleteLesson: handleLessonDeleted,
+              onOpenSettings: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => SettingsScreen(
+                      aiService: widget.aiService,
+                      modelManager: _modelManager,
+                    ),
                   ),
-                ),
-              );
-            },
-            onOpenAiChat: () => switchToTab(4),
-            onOpenVocabulary: () => switchToTab(3),
-            onImportAudio: importAudioFile,
-          ),
-          DictionaryScreen(
-            dictionaryRepo: widget.dictionaryRepo,
-            vocabularyRepo: widget.vocabularyRepo,
-            aiService: widget.aiService,
-            initialWord: _targetDictionaryWord,
-            navigationRevision: _dictionaryNavigationRevision,
-          ),
-          RepeaterScreen(
-            key: _repeaterKey,
-            lessonRepo: widget.lessonRepo,
-            audioService: widget.audioService,
-            waveformService: widget.waveformService,
-            aiService: widget.aiService,
-            dictionaryRepo: widget.dictionaryRepo,
-            vocabularyRepo: widget.vocabularyRepo,
-            activeLesson: _activeLesson,
-            onOpenAiChat: openAiChatWithContext,
-            onImportAudio: importAudioFile,
-          ),
-          VocabularyScreen(
-            vocabularyRepo: widget.vocabularyRepo,
-            onOpenWordInDictionary: openDictionaryForWord,
-          ),
-          AiChatScreen(
-            aiService: widget.aiService,
-            speechEngine: widget.aiService.speechEngine,
-          ),
-        ],
-      ),
-      floatingActionButton: _currentIndex == 0 || _currentIndex == 2
-          ? FloatingActionButton(
-              onPressed: importAudioFile,
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              elevation: 3,
-              tooltip: 'Import Audio Lesson',
-              child: const Icon(Icons.add, size: 28),
-            )
-          : null,
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          color: AppColors.surface,
-          border: Border(top: BorderSide(color: AppColors.border, width: 0.8)),
-        ),
-        child: NavigationBar(
-          selectedIndex: _currentIndex,
-          onDestinationSelected: (index) => switchToTab(index),
-          backgroundColor: AppColors.surface,
-          indicatorColor: AppColors.primaryLight,
-          elevation: 0,
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.home_outlined),
-              selectedIcon: Icon(Icons.home, color: AppColors.primary),
-              label: 'Home',
+                );
+              },
+              onOpenAiChat: () => switchToTab(4),
+              onOpenVocabulary: () => switchToTab(3),
+              onImportAudio: importAudioFile,
             ),
-            NavigationDestination(
-              icon: Icon(Icons.menu_book_outlined),
-              selectedIcon: Icon(Icons.menu_book, color: AppColors.primary),
-              label: 'Dictionary',
+            DictionaryScreen(
+              dictionaryRepo: widget.dictionaryRepo,
+              vocabularyRepo: widget.vocabularyRepo,
+              aiService: widget.aiService,
+              initialWord: _targetDictionaryWord,
+              navigationRevision: _dictionaryNavigationRevision,
             ),
-            NavigationDestination(
-              icon: Icon(Icons.graphic_eq_outlined),
-              selectedIcon: Icon(Icons.graphic_eq, color: AppColors.primary),
-              label: 'Listening',
+            RepeaterScreen(
+              key: _repeaterKey,
+              lessonRepo: widget.lessonRepo,
+              audioService: widget.audioService,
+              waveformService: widget.waveformService,
+              aiService: widget.aiService,
+              dictionaryRepo: widget.dictionaryRepo,
+              vocabularyRepo: widget.vocabularyRepo,
+              activeLesson: _activeLesson,
+              onOpenAiChat: openAiChatWithContext,
+              onImportAudio: importAudioFile,
             ),
-            NavigationDestination(
-              icon: Icon(Icons.style_outlined),
-              selectedIcon: Icon(Icons.style, color: AppColors.primary),
-              label: 'Study',
+            VocabularyScreen(
+              vocabularyRepo: widget.vocabularyRepo,
+              onOpenWordInDictionary: openDictionaryForWord,
             ),
-            NavigationDestination(
-              icon: Icon(Icons.chat_bubble_outline),
-              selectedIcon: Icon(Icons.chat_bubble, color: AppColors.primary),
-              label: 'Ask AI',
+            AiChatScreen(
+              aiService: widget.aiService,
+              speechEngine: widget.aiService.speechEngine,
             ),
           ],
+        ),
+        floatingActionButton: _currentIndex == 0
+            ? FloatingActionButton(
+                onPressed: importAudioFile,
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                elevation: 3,
+                tooltip: 'Import Audio Lesson',
+                child: const Icon(Icons.add, size: 28),
+              )
+            : null,
+        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+        bottomNavigationBar: Container(
+          decoration: const BoxDecoration(
+            color: AppColors.surface,
+            border: Border(
+              top: BorderSide(color: AppColors.border, width: 0.8),
+            ),
+          ),
+          child: NavigationBar(
+            selectedIndex: _currentIndex,
+            onDestinationSelected: (index) => switchToTab(index),
+            backgroundColor: AppColors.surface,
+            indicatorColor: AppColors.primaryLight,
+            elevation: 0,
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.home_outlined),
+                selectedIcon: Icon(Icons.home, color: AppColors.primary),
+                label: 'Home',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.menu_book_outlined),
+                selectedIcon: Icon(Icons.menu_book, color: AppColors.primary),
+                label: 'Dictionary',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.graphic_eq_outlined),
+                selectedIcon: Icon(Icons.graphic_eq, color: AppColors.primary),
+                label: 'Listening',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.style_outlined),
+                selectedIcon: Icon(Icons.style, color: AppColors.primary),
+                label: 'Study',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.chat_bubble_outline),
+                selectedIcon: Icon(Icons.chat_bubble, color: AppColors.primary),
+                label: 'Ask AI',
+              ),
+            ],
+          ),
         ),
       ),
     );

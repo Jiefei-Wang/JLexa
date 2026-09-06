@@ -137,13 +137,64 @@ class RepeaterScreenState extends State<RepeaterScreen> {
               overflow: TextOverflow.ellipsis,
             ),
             actions: [
-              IconButton(
-                icon: const Icon(
-                  Icons.file_upload_outlined,
-                  color: AppColors.textPrimary,
-                ),
-                tooltip: 'Import Audio',
-                onPressed: widget.onImportAudio,
+              PopupMenuButton<String>(
+                tooltip: 'Lesson options',
+                icon: const Icon(Icons.more_vert),
+                onSelected: (value) async {
+                  if (value == 'import') {
+                    widget.onImportAudio();
+                    return;
+                  }
+                  final redo = value == 'segments';
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text(
+                        redo ? 'Redo segments?' : 'Reset transcripts?',
+                      ),
+                      content: Text(
+                        redo
+                            ? 'Replace this lesson’s saved segments with detected speech regions? Their transcripts will also be cleared.'
+                            : 'Clear cached transcripts for every segment in this lesson? Segment boundaries will stay the same.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Cancel'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Reset'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmed != true || !mounted) return;
+                  if (redo) {
+                    await _controller.redoSegments();
+                  } else {
+                    await _controller.resetTranscripts();
+                  }
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: 'import',
+                    child: Text('Import audio'),
+                  ),
+                  PopupMenuItem(
+                    value: 'segments',
+                    enabled:
+                        lesson != null &&
+                        !_controller.isEditingCuts &&
+                        !_controller.isWaveformLoading,
+                    child: const Text('Redo segments'),
+                  ),
+                  PopupMenuItem(
+                    value: 'transcripts',
+                    enabled: lesson != null && !_controller.isEditingCuts,
+                    child: const Text('Reset transcripts'),
+                  ),
+                ],
               ),
             ],
           ),
@@ -185,6 +236,14 @@ class RepeaterScreenState extends State<RepeaterScreen> {
               : ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
+                    if (_controller.notice != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          _controller.notice!,
+                          style: AppTypography.bodySmall,
+                        ),
+                      ),
                     if (_controller.audioLoadError != null)
                       Container(
                         margin: const EdgeInsets.only(bottom: 16),
@@ -338,8 +397,12 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                       onSeek: _controller.seekTo,
                       onSeekStart: _controller.beginWaveformSeek,
                       onSeekEnd: _controller.endWaveformSeek,
-                      onAddCut: _controller.addCutAtPlayhead,
-                      onDeleteCut: _controller.deleteCurrentCut,
+                      onAddCut: _controller.canAddCut
+                          ? _controller.addCutAtPlayhead
+                          : null,
+                      onDeleteCut: _controller.canDeleteCut
+                          ? _controller.deleteCurrentCut
+                          : null,
                       onSegmentBoundsChanged: (id, revision, newStart, newEnd) {
                         _controller.updateSegmentBounds(
                           segmentId: id,

@@ -32,7 +32,7 @@ class ChatMessagePayload {
 class PromptBuilder {
   static const String systemPrefix =
       'You are JLexa, an expert offline English learning AI assistant. '
-      'Explain clearly, accurately, and concisely. When appropriate, provide natural Chinese explanations for English learners.';
+      'Explain clearly, accurately, and concisely. Reply in the language of the user’s question: Chinese questions get Chinese answers, English questions get English answers. Follow an explicit request to translate or answer in another language.';
 
   static const String dictionaryAiSystemPrompt =
       '你是英汉词典。只输出用户所给英文单词的常用词性和简明中文释义。'
