@@ -10,6 +10,52 @@ class CutEditResult {
 }
 
 class CutEditor {
+  static CutEditResult split({
+    required List<AudioSegment> snapshot,
+    required String cutId,
+    required int expectedRevision,
+    required int splitMs,
+    required String rightCutId,
+    required int durationMs,
+  }) {
+    final ordered = [...snapshot]
+      ..sort((a, b) => a.startMs.compareTo(b.startMs));
+    final targetIndex = ordered.indexWhere(
+      (cut) => cut.id == cutId && cut.revision == expectedRevision,
+    );
+    if (targetIndex < 0 || durationMs <= 0) {
+      throw StateError('Cut changed while it was being split.');
+    }
+    final target = ordered[targetIndex];
+    if (splitMs <= target.startMs || splitMs >= target.endMs) {
+      throw ArgumentError('The split point must be inside the cut.');
+    }
+    if (rightCutId == cutId || ordered.any((cut) => cut.id == rightCutId)) {
+      throw ArgumentError('The new cut id must be unique.');
+    }
+
+    final left = target.copyWith(
+      endMs: splitMs,
+      revision: target.revision + 1,
+      isUserEdited: true,
+      clearTranscript: true,
+    );
+    final right = AudioSegment(
+      id: rightCutId,
+      lessonId: target.lessonId,
+      startMs: splitMs,
+      endMs: target.endMs,
+      text: '',
+      confidence: -1,
+      isUserEdited: true,
+    );
+    ordered
+      ..removeAt(targetIndex)
+      ..insertAll(targetIndex, [left, right]);
+    validate(ordered, durationMs);
+    return CutEditResult(ordered, {left.id, right.id}, const {});
+  }
+
   static CutEditResult resize({
     required List<AudioSegment> snapshot,
     required String cutId,

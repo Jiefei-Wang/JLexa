@@ -90,6 +90,42 @@ void main() {
         throwsStateError,
       );
     });
+    test('split creates two independent cuts and invalidates transcript', () {
+      final result = CutEditor.split(
+        snapshot: original,
+        cutId: 'A',
+        expectedRevision: 0,
+        splitMs: 3000,
+        rightCutId: 'A-right',
+        durationMs: 12000,
+      );
+      expect(result.cuts.map((c) => (c.id, c.startMs, c.endMs)), [
+        ('A', 2000, 3000),
+        ('A-right', 3000, 4000),
+        ('B', 5000, 7000),
+        ('C', 8000, 10000),
+      ]);
+      expect(result.cuts[0].revision, 1);
+      expect(result.cuts[0].text, isEmpty);
+      expect(result.cuts[1].text, isEmpty);
+      expect(result.cuts[0].isUserEdited, isTrue);
+      expect(result.cuts[1].isUserEdited, isTrue);
+    });
+    test('split rejects either cut boundary', () {
+      for (final position in [2000, 4000]) {
+        expect(
+          () => CutEditor.split(
+            snapshot: original,
+            cutId: 'A',
+            expectedRevision: 0,
+            splitMs: position,
+            rightCutId: 'new-$position',
+            durationMs: 12000,
+          ),
+          throwsArgumentError,
+        );
+      }
+    });
   });
 
   test(

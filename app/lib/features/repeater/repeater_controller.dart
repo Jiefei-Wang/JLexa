@@ -49,6 +49,7 @@ class RepeaterController extends ChangeNotifier {
 
   int _loadGeneration = 0;
   String? _activeSegmentId;
+  String? _selectedSegmentId;
   int _aiExplanationGeneration = 0;
   int _lastPersistedPositionMs = -1;
   DateTime _lastPersistTime = DateTime.fromMillisecondsSinceEpoch(0);
@@ -96,10 +97,16 @@ class RepeaterController extends ChangeNotifier {
   bool get isRepeatOne =>
       (audioService.currentLesson?.id == _lesson?.id) &&
       audioService.isRepeatOne;
-  AudioSegment? get currentSegment =>
-      (audioService.currentLesson?.id == _lesson?.id)
-      ? audioService.currentSegment
-      : null;
+  AudioSegment? get currentSegment {
+    if (audioService.currentLesson?.id != _lesson?.id) return null;
+    if (_selectedSegmentId != null) {
+      for (final cut in _segments) {
+        if (cut.id == _selectedSegmentId) return cut;
+      }
+    }
+    return audioService.currentSegment;
+  }
+
   AudioSegment? get visibleTranscriptSegment {
     final cut = currentSegment;
     return cut != null &&
@@ -109,7 +116,7 @@ class RepeaterController extends ChangeNotifier {
         : null;
   }
 
-  bool get canAddCut => currentSegment == null && _lesson != null;
+  bool get canAddCut => _lesson != null;
   bool get canDeleteCut => currentSegment != null;
 
   RepeaterController({
@@ -138,7 +145,8 @@ class RepeaterController extends ChangeNotifier {
     }
     _checkPersistPosition();
     _checkPersistDuration();
-    final newSegId = audioService.currentSegment?.id;
+    if (audioService.isPlaying) _selectedSegmentId = null;
+    final newSegId = currentSegment?.id;
     if (newSegId != _activeSegmentId) {
       debugPrint(
         '[JLexaWhisper] active cut changed from=$_activeSegmentId to=$newSegId '
@@ -253,6 +261,7 @@ class RepeaterController extends ChangeNotifier {
     _segments = [];
     _fullWaveformPeaks = [];
     _activeSegmentId = null;
+    _selectedSegmentId = null;
     _visibleTranscriptCutId = null;
     _transcriptionError = null;
     _audioLoadError = null;
@@ -289,6 +298,7 @@ class RepeaterController extends ChangeNotifier {
     _segments = [];
     _fullWaveformPeaks = [];
     _activeSegmentId = null;
+    _selectedSegmentId = null;
     _transcriptionError = null;
     _audioLoadError = null;
     _durationPersisted = false;
@@ -624,23 +634,40 @@ class RepeaterController extends ChangeNotifier {
   }
 
   Future<void> seekTo(int targetMs) async {
+    _selectedSegmentId = null;
     await audioService.seekTo(targetMs);
     _persistPositionNow();
     notifyListeners();
   }
 
-  Future<void> beginWaveformSeek() => audioService.beginScrub();
+  Future<void> beginWaveformSeek() {
+    _selectedSegmentId = null;
+    return audioService.beginScrub();
+  }
+
   Future<void> endWaveformSeek() => audioService.endScrub();
 
   void togglePlayPause() {
+    _selectedSegmentId = null;
     audioService.togglePlayPause();
     _persistPositionNow();
   }
 
   void toggleRepeatOne() => audioService.toggleRepeatOne();
-  void previousSentence() => audioService.previousSentence();
-  void nextSentence() => audioService.nextSentence();
-  void repeatCurrentSentence() => audioService.repeatCurrentSentence();
+  void previousSentence() {
+    _selectedSegmentId = null;
+    audioService.previousSentence();
+  }
+
+  void nextSentence() {
+    _selectedSegmentId = null;
+    audioService.nextSentence();
+  }
+
+  void repeatCurrentSentence() {
+    _selectedSegmentId = null;
+    audioService.repeatCurrentSentence();
+  }
 
   // Item 12: Rewritten segment boundary algorithm — legal range first, then preferences
   Future<void> updateSegmentBounds({
@@ -732,11 +759,53 @@ class RepeaterController extends ChangeNotifier {
   }
 
   Future<void> addCutAtPlayhead() async {
-    if (_lesson == null || currentSegment != null) return;
+    if (_lesson == null) return;
     final targetLessonId = _lesson!.id;
     final targetPosition = positionMs;
     final snapshot = [..._segments];
     final expected = {for (final c in snapshot) c.id: c.revision};
+    final activeCut = currentSegment;
+
+    if (activeCut != null) {
+      if (targetPosition <= activeCut.startMs ||
+          targetPosition >= activeCut.endMs) {
+        _notice = 'Move the playhead inside the cut before splitting it.';
+        notifyListeners();
+        return;
+      }
+      _transcriptionGeneration++;
+      await cancelTranscription();
+      _invalidateExplanation();
+      try {
+        final result = CutEditor.split(
+          snapshot: snapshot,
+          cutId: activeCut.id,
+          expectedRevision: activeCut.revision,
+          splitMs: targetPosition,
+          rightCutId: _uuid.v4(),
+          durationMs: durationMs,
+        );
+        await lessonRepo.commitCutSet(targetLessonId, expected, result.cuts);
+        if (_lesson?.id != targetLessonId) return;
+        _segments = result.cuts;
+        _selectedSegmentId = activeCut.id;
+        _visibleTranscriptCutId = null;
+        _notice = null;
+        // Intervals are half-open, so the exact split point belongs to the
+        // right cut. Android audio decoders can quantize a 1 ms seek back to
+        // the boundary, so select a point up to 100 ms inside the left cut
+        // (or its midpoint when the left cut is very short).
+        final leftDurationMs = targetPosition - activeCut.startMs;
+        final selectionOffsetMs = min(100, max(1, leftDurationMs ~/ 2));
+        await audioService.seekTo(targetPosition - selectionOffsetMs);
+        audioService.updateSegments(_segments);
+      } catch (e) {
+        _notice = 'Cut split was not saved: $e';
+      }
+      notifyListeners();
+      return;
+    }
+
     final gap = CutEditor.gapAt(snapshot, targetPosition, durationMs);
     final regions = waveformService.detectSpeechRegions(
       peaks: _fullWaveformPeaks,
@@ -770,6 +839,7 @@ class RepeaterController extends ChangeNotifier {
       ..sort((a, b) => a.startMs.compareTo(b.startMs));
     await lessonRepo.commitCutSet(targetLessonId, expected, updated);
     _segments = updated;
+    _selectedSegmentId = null;
     audioService.updateSegments(updated);
     notifyListeners();
   }
@@ -785,6 +855,7 @@ class RepeaterController extends ChangeNotifier {
     final updated = snapshot.where((c) => c.id != cut.id).toList();
     await lessonRepo.commitCutSet(_lesson!.id, expected, updated);
     _segments = updated;
+    _selectedSegmentId = null;
     _visibleTranscriptCutId = null;
     audioService.updateSegments(updated);
     notifyListeners();

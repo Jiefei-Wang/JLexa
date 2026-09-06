@@ -906,8 +906,9 @@ void main() {
     );
 
     test(
-      '10. Add Cut is disabled while the playhead is inside an existing cut',
+      '10. Add Cut splits the active cut and keeps the left cut selected',
       () async {
+        final controlledAudio = ControllableAudioService();
         final lesson = AudioLesson(
           id: 'lesson_split_test',
           title: 'Split Test',
@@ -937,7 +938,7 @@ void main() {
 
         final controller = RepeaterController(
           lessonRepo: lessonRepo,
-          audioService: audioService,
+          audioService: controlledAudio,
           waveformService: waveformService,
           aiService: aiService,
         );
@@ -946,12 +947,27 @@ void main() {
 
         await controller.addCutAtPlayhead();
 
-        expect(controller.segments.length, equals(1));
+        expect(controller.segments.length, equals(2));
         expect(controller.segments[0].startMs, equals(0));
-        expect(controller.segments[0].endMs, equals(4000));
-        expect(controller.segments[0].text.isNotEmpty, isTrue);
+        expect(controller.segments[0].endMs, equals(2000));
+        expect(controller.segments[1].startMs, equals(2000));
+        expect(controller.segments[1].endMs, equals(4000));
+        expect(controller.segments.every((cut) => cut.text.isEmpty), isTrue);
+        expect(controller.positionMs, equals(1900));
+        expect(controller.currentSegment?.id, equals('seg_split'));
+
+        // A late native decoder callback at the exact half-open boundary
+        // must not steal the explicit post-split selection from the left cut.
+        await controlledAudio.seekTo(2000);
+        expect(controller.currentSegment?.id, equals('seg_split'));
+
+        // The next explicit user seek releases the selection override and
+        // resumes normal playhead-based cut selection.
+        await controller.seekTo(2000);
+        expect(controller.currentSegment?.id, isNot('seg_split'));
 
         controller.dispose();
+        controlledAudio.dispose();
       },
     );
 

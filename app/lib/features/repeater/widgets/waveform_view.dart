@@ -81,7 +81,7 @@ class _WaveformViewState extends State<WaveformView> {
             IconButton(
               tooltip: 'Add cut at playhead',
               visualDensity: VisualDensity.compact,
-              onPressed: widget.currentSegment == null ? widget.onAddCut : null,
+              onPressed: widget.onAddCut,
               icon: const Icon(Icons.add_circle_outline),
             ),
             IconButton(

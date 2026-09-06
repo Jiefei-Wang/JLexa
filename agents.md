@@ -201,3 +201,27 @@ At the end of every agent session after completing work:
   - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`
   - APK Signature Scheme v2: `true` (Verified)
   - Pixel 6 installation: Success (`pm install -r`, data preserved; final PID `15562`).
+
+---
+
+## Session: 2026-09-06 (Split Segment at Playhead)
+- **Focus**: Changed the waveform **Add cut** action so pressing it inside an existing segment splits that segment at the current playback position and explicitly selects the left result.
+- **Implementation**:
+  - Added an atomic, revision-checked `CutEditor.split` operation that preserves the original ID on the left, creates a unique ID on the right, maintains half-open non-overlapping intervals, and invalidates transcript metadata on both changed cuts.
+  - Kept the Add button enabled inside an active segment while preserving the existing VAD-based add behavior in gaps.
+  - Added a post-split selection override so late/quantized Android decoder position callbacks cannot steal selection from the left cut. The override is released on the next explicit seek, waveform scrub, playback, or previous/next action.
+  - Cancels/invalidate any in-flight Whisper transcription and AI explanation before committing the split.
+- **Verification**:
+  - Added pure split tests for boundaries, uniqueness, ordering, revision changes, and transcript invalidation.
+  - Added controller coverage proving a `0-4000 ms` cut split at `2000 ms` becomes `0-2000` and `2000-4000`, with the original left cut selected even after a late boundary callback.
+  - Pixel 6 release validation confirmed the Add button remains enabled inside a cut, split persistence succeeds, transcript is invalidated, the left cut remains active, and the process remains stable.
+- **Static Analysis**:
+  - `flutter analyze` -> `No issues found!`.
+- **Test Suite**:
+  - `flutter test --concurrency=1` -> `158 passed`, `0 failed`.
+- **Fixed Signed Release APK Location**:
+  - Path: `release/app-release.apk` (88,508,239 bytes)
+  - APK SHA-256: `BC1543F763D35FA9C1A908EEEF19ED31113C8A71DF433AF43007F1CF9B6A7CB5`
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`
+  - APK Signature Scheme v2: `true` (Verified)
+  - Pixel 6 installation: Success (`pm install -r`, data preserved; final PID `20803`).
