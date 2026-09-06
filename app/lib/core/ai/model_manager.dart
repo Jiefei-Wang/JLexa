@@ -113,6 +113,8 @@ class ModelManager extends ChangeNotifier {
   List<ManagedModelItem> get llmModels => List.unmodifiable(_llmModels);
   List<ManagedModelItem> get whisperModels => List.unmodifiable(_whisperModels);
   bool get isInitialized => _isInitialized;
+  bool get isStorageConfigured => storage.isConfigured;
+  String? get storageLocationDisplay => storage.baseLocationDisplay;
 
   @override
   void notifyListeners() {
@@ -135,33 +137,95 @@ class ModelManager extends ChangeNotifier {
   }
 
   Future<void> initialize() async {
-    await storage.cleanStalePartFiles(activePartPaths: _activePartPaths);
-    await refreshModels();
+    final restored = await storage.restorePersistedFolderAccess();
+    if (restored) {
+      await storage.cleanStalePartFiles(activePartPaths: _activePartPaths);
+      await refreshModels();
+    } else {
+      _llmModels = [];
+      _whisperModels = [];
+    }
     _isInitialized = true;
     notifyListeners();
   }
 
+  Future<bool> chooseInitialStorageFolder() async {
+    final success = await storage.chooseBaseFolder();
+    if (success) {
+      await storage.cleanStalePartFiles();
+      await refreshModels();
+      notifyListeners();
+    }
+    return success;
+  }
+
+  Future<bool> changeStorageFolder() async {
+    final previousLlmPath =
+        aiService.llmEngine.isLoaded ? aiService.llmEngine.loadedModelPath : null;
+    final previousSpeechPath =
+        aiService.speechEngine.isLoaded ? aiService.speechEngine.loadedModelPath : null;
+
+    final success = await storage.chooseBaseFolder();
+    if (!success) return false;
+
+    final newLlmFiles = await storage.listModelFiles(ModelType.llm);
+    final newWhisperFiles = await storage.listModelFiles(ModelType.whisper);
+
+    // Safely unload active LLM model if not in new folder
+    if (previousLlmPath != null) {
+      final existsInNew = newLlmFiles.any(
+        (f) =>
+            f.location == previousLlmPath ||
+            p.basename(f.location) == p.basename(previousLlmPath),
+      );
+      if (!existsInNew) {
+        await aiService.unloadLlmModel();
+      }
+    }
+
+    // Safely unload active Whisper model if not in new folder
+    if (previousSpeechPath != null) {
+      final existsInNew = newWhisperFiles.any(
+        (f) =>
+            f.location == previousSpeechPath ||
+            p.basename(f.location) == p.basename(previousSpeechPath),
+      );
+      if (!existsInNew) {
+        await aiService.unloadSpeechModel();
+      }
+    }
+
+    await storage.cleanStalePartFiles();
+    await refreshModels();
+    notifyListeners();
+    return true;
+  }
+
   Future<void> refreshModels() async {
-    final downloadedLlmFiles = await storage.listDownloadedModels(ModelType.llm);
-    final downloadedWhisperFiles = await storage.listDownloadedModels(
-      ModelType.whisper,
-    );
+    if (!storage.isConfigured) {
+      _llmModels = [];
+      _whisperModels = [];
+      return;
+    }
+
+    final downloadedLlmEntries = await storage.listModelFiles(ModelType.llm);
+    final downloadedWhisperEntries = await storage.listModelFiles(ModelType.whisper);
 
     // Build curated LLM items
     final llmItems = <ManagedModelItem>[];
-    final knownLlmPaths = <String>{};
+    final knownLlmLocations = <String>{};
 
     for (final catalog in ModelCatalog.curatedLlmModels) {
-      final finalPath = await storage.getFinalModelPath(
-        ModelType.llm,
-        catalog.filename,
-      );
-      final file = File(finalPath);
-      final exists = await file.exists();
-      final size = exists ? await file.length() : 0;
+      final matchingFile = downloadedLlmEntries.where(
+        (f) => f.name.toLowerCase() == catalog.filename.toLowerCase(),
+      ).firstOrNull;
 
-      if (exists) {
-        knownLlmPaths.add(p.canonicalize(finalPath));
+      final exists = matchingFile != null && matchingFile.sizeBytes > 0;
+      final fileLoc = matchingFile?.location;
+      final size = matchingFile?.sizeBytes ?? 0;
+
+      if (exists && fileLoc != null) {
+        knownLlmLocations.add(fileLoc);
       }
 
       final isDownloading =
@@ -171,8 +235,10 @@ class ModelManager extends ChangeNotifier {
       final isCurrentlyLoaded =
           aiService.llmEngine.isLoaded &&
           aiService.llmEngine.loadedModelPath != null &&
-          p.canonicalize(aiService.llmEngine.loadedModelPath!) ==
-              p.canonicalize(finalPath);
+          fileLoc != null &&
+          (aiService.llmEngine.loadedModelPath == fileLoc ||
+              p.canonicalize(aiService.llmEngine.loadedModelPath!) ==
+                  p.canonicalize(fileLoc));
 
       ModelDownloadState state;
       if (isCurrentlyLoaded) {
@@ -181,7 +247,7 @@ class ModelManager extends ChangeNotifier {
         state = ModelDownloadState.loading;
       } else if (isDownloading) {
         state = ModelDownloadState.downloading;
-      } else if (exists && size > 0) {
+      } else if (exists) {
         state = ModelDownloadState.downloaded;
       } else if (_modelErrors.containsKey(catalog.id)) {
         state = ModelDownloadState.error;
@@ -195,7 +261,7 @@ class ModelManager extends ChangeNotifier {
           displayName: catalog.displayName,
           type: ModelType.llm,
           catalogModel: catalog,
-          localPath: exists ? finalPath : null,
+          localPath: exists ? fileLoc : null,
           fileSizeBytes: size,
           isCustomImport: false,
           state: state,
@@ -209,34 +275,33 @@ class ModelManager extends ChangeNotifier {
       );
     }
 
-    // Check for custom imported LLM files in managed storage
-    for (final file in downloadedLlmFiles) {
-      final canon = p.canonicalize(file.path);
-      if (!knownLlmPaths.contains(canon)) {
-        final filename = p.basename(file.path);
-        final size = await file.length();
+    // Check for custom placed/imported LLM files in managed storage
+    for (final file in downloadedLlmEntries) {
+      if (!knownLlmLocations.contains(file.location)) {
         final isCurrentlyLoaded =
             aiService.llmEngine.isLoaded &&
             aiService.llmEngine.loadedModelPath != null &&
-            p.canonicalize(aiService.llmEngine.loadedModelPath!) == canon;
+            (aiService.llmEngine.loadedModelPath == file.location ||
+                p.canonicalize(aiService.llmEngine.loadedModelPath!) ==
+                    p.canonicalize(file.location));
 
-        final itemId = 'custom_llm_${file.path.hashCode}';
+        final itemId = 'custom_llm_${file.name}_${file.location.hashCode}';
         final isLoading = _loadingModelIds.contains(itemId);
 
         llmItems.add(
           ManagedModelItem(
             id: itemId,
-            displayName: filename,
+            displayName: file.name,
             type: ModelType.llm,
-            localPath: file.path,
-            fileSizeBytes: size,
+            localPath: file.location,
+            fileSizeBytes: file.sizeBytes,
             isCustomImport: true,
             state: isCurrentlyLoaded
                 ? ModelDownloadState.loaded
                 : (isLoading
                     ? ModelDownloadState.loading
                     : ModelDownloadState.downloaded),
-            description: 'Custom imported GGUF model',
+            description: 'Custom model in storage folder',
             memoryHint: 'Custom',
             speedHint: 'Custom',
           ),
@@ -246,19 +311,19 @@ class ModelManager extends ChangeNotifier {
 
     // Build curated Whisper items
     final whisperItems = <ManagedModelItem>[];
-    final knownWhisperPaths = <String>{};
+    final knownWhisperLocations = <String>{};
 
     for (final catalog in ModelCatalog.curatedWhisperModels) {
-      final finalPath = await storage.getFinalModelPath(
-        ModelType.whisper,
-        catalog.filename,
-      );
-      final file = File(finalPath);
-      final exists = await file.exists();
-      final size = exists ? await file.length() : 0;
+      final matchingFile = downloadedWhisperEntries.where(
+        (f) => f.name.toLowerCase() == catalog.filename.toLowerCase(),
+      ).firstOrNull;
 
-      if (exists) {
-        knownWhisperPaths.add(p.canonicalize(finalPath));
+      final exists = matchingFile != null && matchingFile.sizeBytes > 0;
+      final fileLoc = matchingFile?.location;
+      final size = matchingFile?.sizeBytes ?? 0;
+
+      if (exists && fileLoc != null) {
+        knownWhisperLocations.add(fileLoc);
       }
 
       final isDownloading =
@@ -268,8 +333,10 @@ class ModelManager extends ChangeNotifier {
       final isCurrentlyLoaded =
           aiService.speechEngine.isLoaded &&
           aiService.speechEngine.loadedModelPath != null &&
-          p.canonicalize(aiService.speechEngine.loadedModelPath!) ==
-              p.canonicalize(finalPath);
+          fileLoc != null &&
+          (aiService.speechEngine.loadedModelPath == fileLoc ||
+              p.canonicalize(aiService.speechEngine.loadedModelPath!) ==
+                  p.canonicalize(fileLoc));
 
       ModelDownloadState state;
       if (isCurrentlyLoaded) {
@@ -278,7 +345,7 @@ class ModelManager extends ChangeNotifier {
         state = ModelDownloadState.loading;
       } else if (isDownloading) {
         state = ModelDownloadState.downloading;
-      } else if (exists && size > 0) {
+      } else if (exists) {
         state = ModelDownloadState.downloaded;
       } else if (_modelErrors.containsKey(catalog.id)) {
         state = ModelDownloadState.error;
@@ -292,7 +359,7 @@ class ModelManager extends ChangeNotifier {
           displayName: catalog.displayName,
           type: ModelType.whisper,
           catalogModel: catalog,
-          localPath: exists ? finalPath : null,
+          localPath: exists ? fileLoc : null,
           fileSizeBytes: size,
           isCustomImport: false,
           state: state,
@@ -306,34 +373,33 @@ class ModelManager extends ChangeNotifier {
       );
     }
 
-    // Check for custom imported Whisper files
-    for (final file in downloadedWhisperFiles) {
-      final canon = p.canonicalize(file.path);
-      if (!knownWhisperPaths.contains(canon)) {
-        final filename = p.basename(file.path);
-        final size = await file.length();
+    // Check for custom placed/imported Whisper files
+    for (final file in downloadedWhisperEntries) {
+      if (!knownWhisperLocations.contains(file.location)) {
         final isCurrentlyLoaded =
             aiService.speechEngine.isLoaded &&
             aiService.speechEngine.loadedModelPath != null &&
-            p.canonicalize(aiService.speechEngine.loadedModelPath!) == canon;
+            (aiService.speechEngine.loadedModelPath == file.location ||
+                p.canonicalize(aiService.speechEngine.loadedModelPath!) ==
+                    p.canonicalize(file.location));
 
-        final itemId = 'custom_whisper_${file.path.hashCode}';
+        final itemId = 'custom_whisper_${file.name}_${file.location.hashCode}';
         final isLoading = _loadingModelIds.contains(itemId);
 
         whisperItems.add(
           ManagedModelItem(
             id: itemId,
-            displayName: filename,
+            displayName: file.name,
             type: ModelType.whisper,
-            localPath: file.path,
-            fileSizeBytes: size,
+            localPath: file.location,
+            fileSizeBytes: file.sizeBytes,
             isCustomImport: true,
             state: isCurrentlyLoaded
                 ? ModelDownloadState.loaded
                 : (isLoading
                     ? ModelDownloadState.loading
                     : ModelDownloadState.downloaded),
-            description: 'Custom imported speech model',
+            description: 'Custom model in storage folder',
             memoryHint: 'Custom',
             speedHint: 'Custom',
           ),
@@ -350,20 +416,18 @@ class ModelManager extends ChangeNotifier {
   }
 
   Future<void> downloadModel(DownloadableModel catalogModel) async {
+    if (!storage.isConfigured) {
+      throw const ModelValidationException('Storage folder has not been configured.');
+    }
     final modelId = catalogModel.id;
     _modelErrors.remove(modelId);
 
-    final partPath = await storage.getPartModelPath(
-      catalogModel.modelType,
-      catalogModel.filename,
-    );
-    final finalPath = await storage.getFinalModelPath(
+    final destinationPartLocation = await storage.prepareDownloadPart(
       catalogModel.modelType,
       catalogModel.filename,
     );
 
-    final canonPart = p.canonicalize(partPath);
-    _activePartPaths.add(canonPart);
+    _activePartPaths.add(destinationPartLocation);
 
     _downloadProgress[modelId] = const ModelProgress(
       receivedBytes: 0,
@@ -374,18 +438,30 @@ class ModelManager extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await downloader.download(
-        model: catalogModel,
-        destinationPartPath: partPath,
-        onProgress: (prog) {
-          _downloadProgress[modelId] = prog;
-          _updateItemProgress(modelId, prog);
-        },
-      );
+      if (storage.backend is AndroidSafModelStorageBackend) {
+        await storage.download(
+          model: catalogModel,
+          destinationPartLocation: destinationPartLocation,
+          onProgress: (prog) {
+            _downloadProgress[modelId] = prog;
+            _updateItemProgress(modelId, prog);
+          },
+        );
+      } else {
+        await downloader.download(
+          model: catalogModel,
+          destinationPartPath: destinationPartLocation,
+          onProgress: (prog) {
+            _downloadProgress[modelId] = prog;
+            _updateItemProgress(modelId, prog);
+          },
+        );
+      }
 
-      await storage.atomicFinalizeDownload(
-        partPath,
-        finalPath,
+      await storage.finalizeDownload(
+        destinationPartLocation,
+        catalogModel.filename,
+        catalogModel.modelType,
         expectedSizeBytes: catalogModel.expectedSizeBytes,
       );
 
@@ -396,12 +472,7 @@ class ModelManager extends ChangeNotifier {
     } catch (e) {
       _downloadProgress.remove(modelId);
       if (e is ModelDownloadCancelledException) {
-        try {
-          final partFile = File(partPath);
-          if (await partFile.exists()) {
-            await partFile.delete();
-          }
-        } catch (_) {}
+        await storage.deleteModel(destinationPartLocation);
         _modelErrors.remove(modelId);
         await refreshModels();
         notifyListeners();
@@ -413,7 +484,7 @@ class ModelManager extends ChangeNotifier {
       notifyListeners();
       rethrow;
     } finally {
-      _activePartPaths.remove(canonPart);
+      _activePartPaths.remove(destinationPartLocation);
     }
   }
 
@@ -447,6 +518,7 @@ class ModelManager extends ChangeNotifier {
   }
 
   void cancelDownload(String modelId) {
+    storage.cancelDownload(modelId);
     downloader.cancel(modelId);
     _downloadProgress.remove(modelId);
     _modelErrors.remove(modelId);
@@ -616,6 +688,7 @@ class ModelManager extends ChangeNotifier {
     aiService.removeListener(_onAiServiceChanged);
     for (final id in _downloadProgress.keys.toList()) {
       try {
+        storage.cancelDownload(id);
         downloader.cancel(id);
       } catch (_) {}
     }

@@ -24,6 +24,9 @@ class SettingsController extends ChangeNotifier {
   bool get isLoading => _isProcessing || !modelManager.isInitialized;
   String? get errorMessage => _errorMessage;
 
+  bool get isStorageConfigured => modelManager.isStorageConfigured;
+  String? get storageLocationDisplay => modelManager.storageLocationDisplay;
+
   List<ManagedModelItem> get llmModels => modelManager.llmModels;
   List<ManagedModelItem> get whisperModels => modelManager.whisperModels;
 
@@ -33,6 +36,46 @@ class SettingsController extends ChangeNotifier {
   String? get llmRestorationError => aiService.llmRestorationError;
   String? get speechRestorationError => aiService.speechRestorationError;
   AiGenerationSettings get generationSettings => aiService.settings;
+
+  Future<bool> chooseStorageFolder() async {
+    _errorMessage = null;
+    _isProcessing = true;
+    notifyListeners();
+    try {
+      final success = await modelManager.chooseInitialStorageFolder();
+      return success;
+    } catch (e) {
+      if (!_isDisposed) {
+        _errorMessage = 'Failed to select storage folder: $e';
+      }
+      return false;
+    } finally {
+      if (!_isDisposed) {
+        _isProcessing = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<bool> changeStorageFolder() async {
+    _errorMessage = null;
+    _isProcessing = true;
+    notifyListeners();
+    try {
+      final success = await modelManager.changeStorageFolder();
+      return success;
+    } catch (e) {
+      if (!_isDisposed) {
+        _errorMessage = 'Failed to change storage folder: $e';
+      }
+      return false;
+    } finally {
+      if (!_isDisposed) {
+        _isProcessing = false;
+        notifyListeners();
+      }
+    }
+  }
 
   @override
   void notifyListeners() {

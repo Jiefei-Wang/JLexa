@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/ai/ai_service.dart';
+import '../../core/dictionary/dictionary_models.dart';
 import '../../core/dictionary/dictionary_repository.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
@@ -290,8 +291,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                             child: Row(
                               children: [
                                 _buildTabButton(0, 'Dictionary'),
-                                _buildTabButton(1, 'AI Translation'),
-                                _buildTabButton(2, 'AI Explanation'),
+                                _buildTabButton(1, 'AI Answer'),
                               ],
                             ),
                           ),
@@ -310,157 +310,26 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                               )
                             else
                               Container(
-                                padding: const EdgeInsets.all(20),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 36,
+                                  horizontal: 20,
+                                ),
                                 decoration: BoxDecoration(
                                   color: AppColors.surface,
                                   borderRadius: BorderRadius.circular(16),
                                   border: Border.all(color: AppColors.border),
                                 ),
-                                child: Column(
-                                  children: [
-                                    const Icon(
-                                      Icons.search_off,
-                                      size: 40,
-                                      color: AppColors.textTertiary,
+                                child: const Center(
+                                  child: Text(
+                                    'No entry found.',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: AppColors.textSecondary,
+                                      fontWeight: FontWeight.w500,
                                     ),
-                                    const SizedBox(height: 10),
-                                    Text(
-                                      'No offline dictionary entry for "${_controller.currentQuery}"',
-                                      style: AppTypography.titleSmall,
-                                      textAlign: TextAlign.center,
-                                    ),
-                                    const SizedBox(height: 6),
-                                    const Text(
-                                      'You can use the local AI model to generate contextual explanations and translations.',
-                                      style: AppTypography.bodySmall,
-                                      textAlign: TextAlign.center,
-                                    ),
-                                    const SizedBox(height: 16),
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        OutlinedButton.icon(
-                                          onPressed: () =>
-                                              _controller.setSelectedTab(1),
-                                          icon: const Icon(
-                                            Icons.translate,
-                                            size: 16,
-                                          ),
-                                          label: const Text('AI Translation'),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        FilledButton.icon(
-                                          onPressed: () =>
-                                              _controller.setSelectedTab(2),
-                                          icon: const Icon(
-                                            Icons.psychology,
-                                            size: 16,
-                                          ),
-                                          label: const Text('AI Explanation'),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
+                                  ),
                                 ),
                               ),
-                          ] else if (_controller.selectedTab == 1) ...[
-                            Container(
-                              padding: const EdgeInsets.all(18),
-                              decoration: BoxDecoration(
-                                color: AppColors.surface,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: AppColors.border),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.translate,
-                                        color: AppColors.secondary,
-                                        size: 20,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      const Text(
-                                        'AI Translation',
-                                        style: AppTypography.titleSmall,
-                                      ),
-                                      const Spacer(),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 6,
-                                          vertical: 2,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: AppColors.secondaryLight,
-                                          borderRadius: BorderRadius.circular(
-                                            6,
-                                          ),
-                                        ),
-                                        child: const Text(
-                                          'AI GENERATED',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                            color: AppColors.secondary,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 12),
-                                  if (_controller.isAiGenerating)
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        if (_controller
-                                            .aiTranslationText
-                                            .isNotEmpty)
-                                          Text(
-                                            _controller.aiTranslationText,
-                                            style: AppTypography.bodyLarge,
-                                          ),
-                                        const SizedBox(height: 12),
-                                        const Row(
-                                          children: [
-                                            SizedBox(
-                                              width: 16,
-                                              height: 16,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                              ),
-                                            ),
-                                            SizedBox(width: 8),
-                                            Text(
-                                              'Generating translation...',
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: AppColors.textSecondary,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    )
-                                  else
-                                    Text(
-                                      _controller.aiTranslationText.isNotEmpty
-                                          ? _controller.aiTranslationText
-                                          : (entry?.chineseDefinitions
-                                                    .isNotEmpty ==
-                                                true
-                                            ? entry!.chineseDefinitions.join(
-                                                '\n',
-                                              )
-                                            : 'No translation available.'),
-                                      style: AppTypography.bodyLarge,
-                                    ),
-                                ],
-                              ),
-                            ),
                           ] else ...[
                             Container(
                               padding: const EdgeInsets.all(18),
@@ -475,13 +344,13 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                   Row(
                                     children: [
                                       const Icon(
-                                        Icons.psychology,
-                                        color: AppColors.accentPurple,
+                                        Icons.auto_awesome,
+                                        color: AppColors.primary,
                                         size: 20,
                                       ),
                                       const SizedBox(width: 8),
                                       const Text(
-                                        'AI Contextual Explanation',
+                                        'AI Answer',
                                         style: AppTypography.titleSmall,
                                       ),
                                       const Spacer(),
@@ -491,7 +360,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                           vertical: 2,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: AppColors.accentPurpleLight,
+                                          color: AppColors.primaryLight,
                                           borderRadius: BorderRadius.circular(
                                             6,
                                           ),
@@ -501,26 +370,27 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                           style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.bold,
-                                            color: AppColors.accentPurple,
+                                            color: AppColors.primary,
                                           ),
                                         ),
                                       ),
                                     ],
                                   ),
-                                  const SizedBox(height: 12),
+                                  const SizedBox(height: 14),
                                   if (_controller.isAiGenerating)
                                     Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
                                         if (_controller
-                                            .aiExplanationText
-                                            .isNotEmpty)
+                                            .aiRawStreamingText
+                                            .isNotEmpty) ...[
                                           Text(
-                                            _controller.aiExplanationText,
+                                            _controller.aiRawStreamingText,
                                             style: AppTypography.bodyLarge,
                                           ),
-                                        const SizedBox(height: 12),
+                                          const SizedBox(height: 12),
+                                        ],
                                         const Row(
                                           children: [
                                             SizedBox(
@@ -532,7 +402,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                             ),
                                             SizedBox(width: 8),
                                             Text(
-                                              'Generating explanation...',
+                                              'Generating AI Answer...',
                                               style: TextStyle(
                                                 fontSize: 12,
                                                 color: AppColors.textSecondary,
@@ -542,12 +412,29 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                         ),
                                       ],
                                     )
+                                  else if (_controller.aiErrorMessage != null)
+                                    Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          _controller.aiErrorMessage!,
+                                          style: const TextStyle(
+                                            color: AppColors.error,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  else if (_controller.aiAnswer != null)
+                                    _buildAiAnswerContent(_controller.aiAnswer!)
                                   else
-                                    Text(
-                                      _controller.aiExplanationText.isNotEmpty
-                                          ? _controller.aiExplanationText
-                                          : 'No explanation generated yet. Tap to request an explanation.',
-                                      style: AppTypography.bodyLarge,
+                                    const Text(
+                                      'No AI answer generated yet.',
+                                      style: TextStyle(
+                                        color: AppColors.textSecondary,
+                                        fontSize: 13,
+                                      ),
                                     ),
                                 ],
                               ),
@@ -632,5 +519,54 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildAiAnswerContent(DictionaryAiAnswer answer) {
+    if (answer is DictionaryWordAnswer) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children:
+            answer.senses.map((sense) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (sense.partOfSpeech.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        margin: const EdgeInsets.only(right: 8, top: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryLight,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          sense.partOfSpeech,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      ),
+                    ],
+                    Expanded(
+                      child: Text(
+                        sense.meaning,
+                        style: AppTypography.bodyLarge,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+      );
+    } else if (answer is DictionaryPhraseAnswer) {
+      return Text(answer.explanation, style: AppTypography.bodyLarge);
+    }
+    return const SizedBox.shrink();
   }
 }

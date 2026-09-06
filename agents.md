@@ -15,6 +15,7 @@ At the end of every agent session after completing work:
    `Copy-Item -Path "app/build/app/outputs/flutter-apk/app-release.apk" -Destination "release/app-release.apk" -Force`
 6. Remove any obsolete/temporary APKs outside of the release path.
 7. Append a new entry to this file (`agents.md`) documenting the session date, summary of work done, test results, release build artifact status, and signing verification digest.
+8. Commit and push: Every time when you finish a comprehensive change from user's prompt, commit the changes with a clear, descriptive message and push to the remote repository (`git push`).
 
 ## Device Installation & Hot Reload Protocol
 - **ADB APK Full Installation**: On physical test devices (e.g., MagicOS / Android OEM security systems), ADB cannot perform fully unattended / silent APK installations without physical on-screen user authorization. When executing an `adb` APK installation (`adb install` or `adb shell pm install`), the agent **must stop outputting and explicitly notify the user to tap "Continue" and "Install" on the phone screen**.
@@ -112,3 +113,40 @@ At the end of every agent session after completing work:
   - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`
   - APK Signature Scheme v2: `true` (Verified)
   - Result: Success
+
+---
+
+## Session: 2026-09-06 (Pass 2)
+- **Focus**: Feature 1: Unified Dictionary AI Answer (Word & Phrase structured responses, fallback parser, 2-tab Dictionary UX, vocabulary snapshots); Feature 2: Persistent user-selected model storage folder via SAF (`ACTION_OPEN_DOCUMENT_TREE`, `takePersistableUriPermission`, DocumentFile, `/proc/self/fd/<fd>` native loading, auto-scanning custom models in `llm/` and `whisper/`, catalog gating, folder change safe model unloading), JNI exception clearing hardening.
+- **Implemented & Hardened**:
+  1. *Unified Dictionary AI Answer*:
+     - Sealed hierarchy `DictionaryAiAnswer` (`DictionaryWordAnswer` with senses + `DictionaryPhraseAnswer` with explanation).
+     - Robust parser in `dictionary_ai_parser.dart` handling JSON parsing, markdown code fences, POS line fallbacks, and phrase text.
+     - Prompt builder enforces strict JSON schema generation for dictionary queries.
+     - Dictionary UI consolidated from 3 tabs into 2 tabs: "Dictionary" and "AI Answer".
+     - Removed redundant/duplicate AI buttons on offline dictionary misses (clean "No entry found.").
+     - Refactored vocabulary snapshotting in `DictionaryController` to snapshot structured word senses and phrase explanations.
+  2. *User-Selected Persistent Model Storage Folder (Android SAF + Desktop/Test FileSystem Backend)*:
+     - Implemented `ModelStorageBackend` interface with `AndroidSafModelStorageBackend` and `FileSystemModelStorageBackend`.
+     - Platform channel `com.jlexa.app/saf_storage` and event channel `com.jlexa.app/saf_download_stream` in Kotlin (`SafStorageBridge.kt`).
+     - Persistent folder selection using `Intent.ACTION_OPEN_DOCUMENT_TREE` + `takePersistableUriPermission` stored in SharedPreferences.
+     - Automatically creates and manages `<folder>/llm/` and `<folder>/whisper/` subdirectories.
+     - Auto-scans and lists custom `.gguf` and Whisper model files placed in those subfolders without requiring manual import buttons.
+     - Replaced manual "import file" buttons in Settings with an informative Custom Models card.
+     - Model catalog and downloads gated on storage configuration; unconfigured state prompts user to select a folder.
+     - Implemented safe folder switching in `ModelManager`: unloads active models if they do not exist in the newly selected folder.
+  3. *Native Android Model Loading via `/proc/self/fd/<fd>`*:
+     - `LlamaBridge.kt` and `WhisperBridge.kt` resolve `content://` URIs by opening `ParcelFileDescriptor` via ContentResolver and passing `/proc/self/fd/${pfd.fd}` to native C++ loaders.
+     - Holds `ParcelFileDescriptor` reference for the entire lifetime of the loaded model and closes it cleanly upon model unloading or engine cleanup.
+  4. *JNI Hardening (`app/android/app/src/main/cpp/jlexa_jni.cpp`)*:
+     - Added reusable `clearPendingException` utility and guarded JNI callback lookups and method invocations.
+- **Test Suite**:
+  - `flutter test --concurrency=1` -> `145 passed, 0 failed` (10 new unit & widget tests added covering structured AI parsing, phrase vocabulary saving, unconfigured catalog gating, custom model auto-detection, and folder switching).
+- **Static Analysis**:
+  - `flutter analyze` -> `No issues found!` (0 errors, 0 warnings).
+- **Fixed Signed Release APK Location**:
+  - Path: `release/app-release.apk` (49.8 MB / 52,217,811 bytes)
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`
+  - APK Signature Scheme v2: `true` (Verified)
+  - Result: Success
+

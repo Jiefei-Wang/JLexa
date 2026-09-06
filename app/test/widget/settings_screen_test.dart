@@ -231,10 +231,57 @@ void main() {
       expect(find.text('Whisper Base (English)'), findsOneWidget);
       expect(find.text('Whisper Small (English)'), findsOneWidget);
 
-      // Verify Badges and Import Buttons
+      // Verify Badges and Custom Models Note
       expect(find.text('RECOMMENDED'), findsNWidgets(2));
-      expect(find.text('Import Local GGUF'), findsOneWidget);
-      expect(find.text('Import Local Whisper Model'), findsOneWidget);
+      expect(find.text('Model Storage Directory'), findsOneWidget);
+      expect(find.text('Custom Models'), findsOneWidget);
+    });
+
+    testWidgets('When storage is unconfigured, catalog is hidden and setup prompt is displayed', (
+      WidgetTester tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(800, 2400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final unconfiguredBackend = FileSystemModelStorageBackend(
+        baseDir: null,
+        isConfigured: false,
+      );
+      final unconfiguredStorage = ModelStorage(backend: unconfiguredBackend);
+      final unconfiguredManager = ModelManager(
+        storage: unconfiguredStorage,
+        downloader: downloader,
+        aiService: aiService,
+      );
+      await unconfiguredManager.initialize();
+
+      final unconfiguredController = SettingsController(
+        aiService: aiService,
+        manager: unconfiguredManager,
+        picker: filePicker,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SettingsScreen(
+            aiService: aiService,
+            controller: unconfiguredController,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Verify unconfigured banner and prompt are shown
+      expect(find.text('Storage Directory Required'), findsOneWidget);
+      expect(find.text('Model Catalog Unavailable'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Select Storage Folder'), findsOneWidget);
+
+      // Verify catalog is hidden
+      expect(find.text('Local Language Model (LLM)'), findsNothing);
+      expect(find.text('Speech Recognition Model (Whisper)'), findsNothing);
+
+      unconfiguredController.dispose();
+      unconfiguredManager.dispose();
     });
 
     testWidgets('Download workflow with progress, completion, use, and unload', (

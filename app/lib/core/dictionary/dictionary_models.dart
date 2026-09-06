@@ -80,3 +80,37 @@ class ExampleSentence {
     );
   }
 }
+
+sealed class DictionaryAiAnswer {
+  const DictionaryAiAnswer();
+}
+
+class DictionaryWordAnswer extends DictionaryAiAnswer {
+  final List<DictionaryWordSense> senses;
+  const DictionaryWordAnswer({required this.senses});
+
+  @override
+  String toString() =>
+      senses.map((s) => '${s.partOfSpeech} ${s.meaning}').join('\n');
+}
+
+class DictionaryWordSense {
+  final String partOfSpeech;
+  final String meaning;
+  const DictionaryWordSense({
+    required this.partOfSpeech,
+    required this.meaning,
+  });
+
+  @override
+  String toString() => '$partOfSpeech $meaning';
+}
+
+class DictionaryPhraseAnswer extends DictionaryAiAnswer {
+  final String explanation;
+  const DictionaryPhraseAnswer({required this.explanation});
+
+  @override
+  String toString() => explanation;
+}
+

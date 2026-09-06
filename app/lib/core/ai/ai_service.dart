@@ -330,6 +330,27 @@ class AiService extends ChangeNotifier {
     ).stream;
   }
 
+  AiGenerationHandle startDictionaryAiAnswer(
+    String query, {
+    AiRequestPriority priority = AiRequestPriority.user,
+  }) {
+    if (!llmEngine.isLoaded) {
+      return AiGenerationHandle(
+        requestId: '',
+        stream: Stream.error(const AiModelNotLoadedException()),
+        onCancel: () async {},
+      );
+    }
+    final msgs = PromptBuilder.buildDictionaryAiAnswerMessages(query);
+    final prompt = PromptBuilder.buildDictionaryAiAnswer(query);
+    return llmEngine.startGeneration(
+      prompt,
+      settings: _settings,
+      chatMessages: msgs,
+      priority: priority,
+    );
+  }
+
   AiGenerationHandle startTranslateText(
     String text, {
     AiRequestPriority priority = AiRequestPriority.user,

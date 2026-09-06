@@ -34,6 +34,55 @@ class PromptBuilder {
       'You are JLexa, an expert offline English learning AI assistant. '
       'Explain clearly, accurately, and concisely. When appropriate, provide natural Chinese explanations for English learners.';
 
+  static const String dictionaryAiSystemPrompt =
+      'Return JSON only.\n'
+      'Do not address the user.\n'
+      'Do not include introductions.\n'
+      'Do not include conclusions.\n'
+      'Do not apologize.\n'
+      'Do not include markdown fences.\n'
+      'Do not include meta commentary.';
+
+  static List<ChatMessagePayload> buildDictionaryAiAnswerMessages(
+    String query,
+  ) {
+    final clean = query.trim();
+    final isWord = !clean.contains(' ') && clean.isNotEmpty;
+    final prompt =
+        isWord
+            ? 'Provide lexical information for the English word "$clean".\n'
+                'Format strictly as JSON:\n'
+                '{"type": "word", "senses": [{"partOfSpeech": "v.", "meaning": "..."}, {"partOfSpeech": "n.", "meaning": "..."}]}\n'
+                'Use standard abbreviated part-of-speech labels (e.g. n., v., adj., adv., prep., conj., pron., interj.).'
+            : 'Provide a concise Chinese explanation of the meaning and usage of "$clean".\n'
+                'Format strictly as JSON:\n'
+                '{"type": "phrase", "explanation": "表示……，通常用于……"}';
+
+    return [
+      const ChatMessagePayload(
+        role: 'system',
+        content: dictionaryAiSystemPrompt,
+      ),
+      ChatMessagePayload(role: 'user', content: prompt),
+    ];
+  }
+
+  static String buildDictionaryAiAnswer(String query) {
+    final clean = query.trim();
+    final isWord = !clean.contains(' ') && clean.isNotEmpty;
+    final prompt =
+        isWord
+            ? 'Provide lexical information for the English word "$clean".\n'
+                'Format strictly as JSON:\n'
+                '{"type": "word", "senses": [{"partOfSpeech": "v.", "meaning": "..."}, {"partOfSpeech": "n.", "meaning": "..."}]}\n'
+                'Use standard abbreviated part-of-speech labels (e.g. n., v., adj., adv., prep., conj., pron., interj.).'
+            : 'Provide a concise Chinese explanation of the meaning and usage of "$clean".\n'
+                'Format strictly as JSON:\n'
+                '{"type": "phrase", "explanation": "表示……，通常用于……"}';
+
+    return '$dictionaryAiSystemPrompt\n\n$prompt';
+  }
+
   static List<ChatMessagePayload> buildDictionaryExplanationMessages(
     String word,
   ) {

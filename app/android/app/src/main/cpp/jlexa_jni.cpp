@@ -4,6 +4,15 @@
 #include "jlexa_whisper_bridge.h"
 #include "jlexa_llama_bridge.h"
 
+static inline bool clearPendingException(JNIEnv* env) {
+    if (env && env->ExceptionCheck()) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+        return true;
+    }
+    return false;
+}
+
 static jstring makeJavaStringFromUtf8(JNIEnv* env, const std::string& str) {
     if (str.empty()) {
         return env->NewStringUTF("");
@@ -170,77 +179,142 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeTranscribe(
 
     // Build Java List<Map<String, Object>>
     jclass arrayListClass = env->FindClass("java/util/ArrayList");
+    if (!arrayListClass || clearPendingException(env)) return nullptr;
     jmethodID arrayListInit = env->GetMethodID(arrayListClass, "<init>", "()V");
+    if (!arrayListInit || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); return nullptr; }
     jmethodID arrayListAdd = env->GetMethodID(arrayListClass, "add", "(Ljava/lang/Object;)Z");
+    if (!arrayListAdd || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); return nullptr; }
 
     jclass hashMapClass = env->FindClass("java/util/HashMap");
+    if (!hashMapClass || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); return nullptr; }
     jmethodID hashMapInit = env->GetMethodID(hashMapClass, "<init>", "()V");
+    if (!hashMapInit || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); env->DeleteLocalRef(hashMapClass); return nullptr; }
     jmethodID hashMapPut = env->GetMethodID(hashMapClass, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+    if (!hashMapPut || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); env->DeleteLocalRef(hashMapClass); return nullptr; }
 
     jclass longClass = env->FindClass("java/lang/Long");
+    if (!longClass || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); env->DeleteLocalRef(hashMapClass); return nullptr; }
     jmethodID longValueOf = env->GetStaticMethodID(longClass, "valueOf", "(J)Ljava/lang/Long;");
+    if (!longValueOf || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); env->DeleteLocalRef(hashMapClass); env->DeleteLocalRef(longClass); return nullptr; }
 
     jclass doubleClass = env->FindClass("java/lang/Double");
+    if (!doubleClass || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); env->DeleteLocalRef(hashMapClass); env->DeleteLocalRef(longClass); return nullptr; }
     jmethodID doubleValueOf = env->GetStaticMethodID(doubleClass, "valueOf", "(D)Ljava/lang/Double;");
+    if (!doubleValueOf || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); env->DeleteLocalRef(hashMapClass); env->DeleteLocalRef(longClass); env->DeleteLocalRef(doubleClass); return nullptr; }
 
     jobject resultList = env->NewObject(arrayListClass, arrayListInit);
+    if (!resultList || clearPendingException(env)) {
+        env->DeleteLocalRef(arrayListClass);
+        env->DeleteLocalRef(hashMapClass);
+        env->DeleteLocalRef(longClass);
+        env->DeleteLocalRef(doubleClass);
+        return nullptr;
+    }
 
     for (const auto& seg : segments) {
         if (env->PushLocalFrame(32) < 0) {
+            clearPendingException(env);
             continue; // Out of memory
         }
 
         jobject segMap = env->NewObject(hashMapClass, hashMapInit);
+        if (!segMap || clearPendingException(env)) {
+            env->PopLocalFrame(nullptr);
+            continue;
+        }
 
         jstring kStart = env->NewStringUTF("start_ms");
         jobject vStart = env->CallStaticObjectMethod(longClass, longValueOf, (jlong)seg.start_ms);
-        env->CallObjectMethod(segMap, hashMapPut, kStart, vStart);
+        if (kStart && vStart && !clearPendingException(env)) {
+            env->CallObjectMethod(segMap, hashMapPut, kStart, vStart);
+            clearPendingException(env);
+        }
 
         jstring kEnd = env->NewStringUTF("end_ms");
         jobject vEnd = env->CallStaticObjectMethod(longClass, longValueOf, (jlong)seg.end_ms);
-        env->CallObjectMethod(segMap, hashMapPut, kEnd, vEnd);
+        if (kEnd && vEnd && !clearPendingException(env)) {
+            env->CallObjectMethod(segMap, hashMapPut, kEnd, vEnd);
+            clearPendingException(env);
+        }
 
         jstring kText = env->NewStringUTF("text");
         jstring vText = makeJavaStringFromUtf8(env, seg.text);
-        env->CallObjectMethod(segMap, hashMapPut, kText, vText);
+        if (kText && vText && !clearPendingException(env)) {
+            env->CallObjectMethod(segMap, hashMapPut, kText, vText);
+            clearPendingException(env);
+        }
 
         jstring kConf = env->NewStringUTF("confidence");
         jobject vConf = env->CallStaticObjectMethod(doubleClass, doubleValueOf, (jdouble)seg.confidence);
-        env->CallObjectMethod(segMap, hashMapPut, kConf, vConf);
+        if (kConf && vConf && !clearPendingException(env)) {
+            env->CallObjectMethod(segMap, hashMapPut, kConf, vConf);
+            clearPendingException(env);
+        }
 
         // Tokens
         jobject tokenList = env->NewObject(arrayListClass, arrayListInit);
-        for (const auto& tok : seg.tokens) {
-            if (env->PushLocalFrame(16) < 0) continue;
+        if (tokenList && !clearPendingException(env)) {
+            for (const auto& tok : seg.tokens) {
+                if (env->PushLocalFrame(16) < 0) {
+                    clearPendingException(env);
+                    continue;
+                }
 
-            jobject tokMap = env->NewObject(hashMapClass, hashMapInit);
-            jstring tkText = env->NewStringUTF("text");
-            jstring tvText = makeJavaStringFromUtf8(env, tok.text);
-            env->CallObjectMethod(tokMap, hashMapPut, tkText, tvText);
+                jobject tokMap = env->NewObject(hashMapClass, hashMapInit);
+                if (!tokMap || clearPendingException(env)) {
+                    env->PopLocalFrame(nullptr);
+                    continue;
+                }
 
-            jstring tkStart = env->NewStringUTF("start_ms");
-            jobject tvStart = env->CallStaticObjectMethod(longClass, longValueOf, (jlong)tok.start_ms);
-            env->CallObjectMethod(tokMap, hashMapPut, tkStart, tvStart);
+                jstring tkText = env->NewStringUTF("text");
+                jstring tvText = makeJavaStringFromUtf8(env, tok.text);
+                if (tkText && tvText && !clearPendingException(env)) {
+                    env->CallObjectMethod(tokMap, hashMapPut, tkText, tvText);
+                    clearPendingException(env);
+                }
 
-            jstring tkEnd = env->NewStringUTF("end_ms");
-            jobject tvEnd = env->CallStaticObjectMethod(longClass, longValueOf, (jlong)tok.end_ms);
-            env->CallObjectMethod(tokMap, hashMapPut, tkEnd, tvEnd);
+                jstring tkStart = env->NewStringUTF("start_ms");
+                jobject tvStart = env->CallStaticObjectMethod(longClass, longValueOf, (jlong)tok.start_ms);
+                if (tkStart && tvStart && !clearPendingException(env)) {
+                    env->CallObjectMethod(tokMap, hashMapPut, tkStart, tvStart);
+                    clearPendingException(env);
+                }
 
-            jstring tkConf = env->NewStringUTF("confidence");
-            jobject tvConf = env->CallStaticObjectMethod(doubleClass, doubleValueOf, (jdouble)tok.confidence);
-            env->CallObjectMethod(tokMap, hashMapPut, tkConf, tvConf);
+                jstring tkEnd = env->NewStringUTF("end_ms");
+                jobject tvEnd = env->CallStaticObjectMethod(longClass, longValueOf, (jlong)tok.end_ms);
+                if (tkEnd && tvEnd && !clearPendingException(env)) {
+                    env->CallObjectMethod(tokMap, hashMapPut, tkEnd, tvEnd);
+                    clearPendingException(env);
+                }
 
-            env->CallBooleanMethod(tokenList, arrayListAdd, tokMap);
-            env->PopLocalFrame(nullptr);
+                jstring tkConf = env->NewStringUTF("confidence");
+                jobject tvConf = env->CallStaticObjectMethod(doubleClass, doubleValueOf, (jdouble)tok.confidence);
+                if (tkConf && tvConf && !clearPendingException(env)) {
+                    env->CallObjectMethod(tokMap, hashMapPut, tkConf, tvConf);
+                    clearPendingException(env);
+                }
+
+                env->CallBooleanMethod(tokenList, arrayListAdd, tokMap);
+                clearPendingException(env);
+                env->PopLocalFrame(nullptr);
+            }
+
+            jstring kTokens = env->NewStringUTF("tokens");
+            if (kTokens && !clearPendingException(env)) {
+                env->CallObjectMethod(segMap, hashMapPut, kTokens, tokenList);
+                clearPendingException(env);
+            }
         }
 
-        jstring kTokens = env->NewStringUTF("tokens");
-        env->CallObjectMethod(segMap, hashMapPut, kTokens, tokenList);
-
         env->CallBooleanMethod(resultList, arrayListAdd, segMap);
+        clearPendingException(env);
         env->PopLocalFrame(nullptr);
     }
 
+    env->DeleteLocalRef(arrayListClass);
+    env->DeleteLocalRef(hashMapClass);
+    env->DeleteLocalRef(longClass);
+    env->DeleteLocalRef(doubleClass);
     return resultList;
 }
 
@@ -270,48 +344,88 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGetAvailableBackends(
     jobject /* this */
 ) {
     jclass arrayListClass = env->FindClass("java/util/ArrayList");
+    if (!arrayListClass || clearPendingException(env)) return nullptr;
     jmethodID arrayListInit = env->GetMethodID(arrayListClass, "<init>", "()V");
+    if (!arrayListInit || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); return nullptr; }
     jmethodID arrayListAdd = env->GetMethodID(arrayListClass, "add", "(Ljava/lang/Object;)Z");
+    if (!arrayListAdd || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); return nullptr; }
 
     jclass hashMapClass = env->FindClass("java/util/HashMap");
+    if (!hashMapClass || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); return nullptr; }
     jmethodID hashMapInit = env->GetMethodID(hashMapClass, "<init>", "()V");
+    if (!hashMapInit || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); env->DeleteLocalRef(hashMapClass); return nullptr; }
     jmethodID hashMapPut = env->GetMethodID(hashMapClass, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+    if (!hashMapPut || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); env->DeleteLocalRef(hashMapClass); return nullptr; }
 
     jclass booleanClass = env->FindClass("java/lang/Boolean");
+    if (!booleanClass || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); env->DeleteLocalRef(hashMapClass); return nullptr; }
     jmethodID booleanValueOf = env->GetStaticMethodID(booleanClass, "valueOf", "(Z)Ljava/lang/Boolean;");
+    if (!booleanValueOf || clearPendingException(env)) { env->DeleteLocalRef(arrayListClass); env->DeleteLocalRef(hashMapClass); env->DeleteLocalRef(booleanClass); return nullptr; }
 
     jobject resultList = env->NewObject(arrayListClass, arrayListInit);
+    if (!resultList || clearPendingException(env)) {
+        env->DeleteLocalRef(arrayListClass);
+        env->DeleteLocalRef(hashMapClass);
+        env->DeleteLocalRef(booleanClass);
+        return nullptr;
+    }
 
     auto backends = JLexaLlamaBridge::instance().getAvailableBackends();
     for (const auto& b : backends) {
-        if (env->PushLocalFrame(16) < 0) continue;
+        if (env->PushLocalFrame(16) < 0) {
+            clearPendingException(env);
+            continue;
+        }
 
         jobject bMap = env->NewObject(hashMapClass, hashMapInit);
+        if (!bMap || clearPendingException(env)) {
+            env->PopLocalFrame(nullptr);
+            continue;
+        }
 
         jstring kBackend = env->NewStringUTF("backend");
         jstring vBackend = makeJavaStringFromUtf8(env, b.backend);
-        env->CallObjectMethod(bMap, hashMapPut, kBackend, vBackend);
+        if (kBackend && vBackend && !clearPendingException(env)) {
+            env->CallObjectMethod(bMap, hashMapPut, kBackend, vBackend);
+            clearPendingException(env);
+        }
 
         jstring kCompiled = env->NewStringUTF("compiled");
         jobject vCompiled = env->CallStaticObjectMethod(booleanClass, booleanValueOf, (jboolean)(b.compiled ? JNI_TRUE : JNI_FALSE));
-        env->CallObjectMethod(bMap, hashMapPut, kCompiled, vCompiled);
+        if (kCompiled && vCompiled && !clearPendingException(env)) {
+            env->CallObjectMethod(bMap, hashMapPut, kCompiled, vCompiled);
+            clearPendingException(env);
+        }
 
         jstring kAvailable = env->NewStringUTF("available");
         jobject vAvailable = env->CallStaticObjectMethod(booleanClass, booleanValueOf, (jboolean)(b.available ? JNI_TRUE : JNI_FALSE));
-        env->CallObjectMethod(bMap, hashMapPut, kAvailable, vAvailable);
+        if (kAvailable && vAvailable && !clearPendingException(env)) {
+            env->CallObjectMethod(bMap, hashMapPut, kAvailable, vAvailable);
+            clearPendingException(env);
+        }
 
         jstring kDevName = env->NewStringUTF("deviceName");
         jstring vDevName = makeJavaStringFromUtf8(env, b.deviceName);
-        env->CallObjectMethod(bMap, hashMapPut, kDevName, vDevName);
+        if (kDevName && vDevName && !clearPendingException(env)) {
+            env->CallObjectMethod(bMap, hashMapPut, kDevName, vDevName);
+            clearPendingException(env);
+        }
 
         jstring kReason = env->NewStringUTF("reasonUnavailable");
         jstring vReason = makeJavaStringFromUtf8(env, b.reasonUnavailable);
-        env->CallObjectMethod(bMap, hashMapPut, kReason, vReason);
+        if (kReason && vReason && !clearPendingException(env)) {
+            env->CallObjectMethod(bMap, hashMapPut, kReason, vReason);
+            clearPendingException(env);
+        }
 
         env->CallBooleanMethod(resultList, arrayListAdd, bMap);
+        clearPendingException(env);
         env->PopLocalFrame(nullptr);
     }
 
+    env->DeleteLocalRef(arrayListClass);
+    env->DeleteLocalRef(hashMapClass);
+    env->DeleteLocalRef(booleanClass);
     return resultList;
 }
 
@@ -321,47 +435,54 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGetActiveBackendInfo(
     jobject /* this */
 ) {
     jclass hashMapClass = env->FindClass("java/util/HashMap");
+    if (!hashMapClass || clearPendingException(env)) return nullptr;
     jmethodID hashMapInit = env->GetMethodID(hashMapClass, "<init>", "()V");
+    if (!hashMapInit || clearPendingException(env)) { env->DeleteLocalRef(hashMapClass); return nullptr; }
     jmethodID hashMapPut = env->GetMethodID(hashMapClass, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+    if (!hashMapPut || clearPendingException(env)) { env->DeleteLocalRef(hashMapClass); return nullptr; }
 
     jclass integerClass = env->FindClass("java/lang/Integer");
+    if (!integerClass || clearPendingException(env)) { env->DeleteLocalRef(hashMapClass); return nullptr; }
     jmethodID integerValueOf = env->GetStaticMethodID(integerClass, "valueOf", "(I)Ljava/lang/Integer;");
+    if (!integerValueOf || clearPendingException(env)) { env->DeleteLocalRef(hashMapClass); env->DeleteLocalRef(integerClass); return nullptr; }
 
     auto info = JLexaLlamaBridge::instance().getActiveBackendInfo();
     jobject infoMap = env->NewObject(hashMapClass, hashMapInit);
+    if (!infoMap || clearPendingException(env)) {
+        env->DeleteLocalRef(hashMapClass);
+        env->DeleteLocalRef(integerClass);
+        return nullptr;
+    }
 
-    jstring kBackend = env->NewStringUTF("backend");
-    jstring vBackend = makeJavaStringFromUtf8(env, info.backend);
-    env->CallObjectMethod(infoMap, hashMapPut, kBackend, vBackend);
+    auto putString = [&](const char* key, const std::string& val) {
+        jstring k = env->NewStringUTF(key);
+        jstring v = makeJavaStringFromUtf8(env, val);
+        if (k && v && !clearPendingException(env)) {
+            env->CallObjectMethod(infoMap, hashMapPut, k, v);
+            clearPendingException(env);
+        }
+    };
 
-    jstring kDev = env->NewStringUTF("deviceName");
-    jstring vDev = makeJavaStringFromUtf8(env, info.deviceName);
-    env->CallObjectMethod(infoMap, hashMapPut, kDev, vDev);
+    auto putInt = [&](const char* key, int val) {
+        jstring k = env->NewStringUTF(key);
+        jobject v = env->CallStaticObjectMethod(integerClass, integerValueOf, (jint)val);
+        if (k && v && !clearPendingException(env)) {
+            env->CallObjectMethod(infoMap, hashMapPut, k, v);
+            clearPendingException(env);
+        }
+    };
 
-    jstring kGpuLayers = env->NewStringUTF("gpuLayers");
-    jobject vGpuLayers = env->CallStaticObjectMethod(integerClass, integerValueOf, (jint)info.gpuLayers);
-    env->CallObjectMethod(infoMap, hashMapPut, kGpuLayers, vGpuLayers);
+    putString("backend", info.backend);
+    putString("deviceName", info.deviceName);
+    putInt("gpuLayers", info.gpuLayers);
+    putInt("contextLength", info.contextLength);
+    putInt("threads", info.threads);
+    putInt("batchSize", info.batchSize);
+    putInt("ubatchSize", info.ubatchSize);
+    putInt("flashAttention", info.flashAttention);
 
-    jstring kCtx = env->NewStringUTF("contextLength");
-    jobject vCtx = env->CallStaticObjectMethod(integerClass, integerValueOf, (jint)info.contextLength);
-    env->CallObjectMethod(infoMap, hashMapPut, kCtx, vCtx);
-
-    jstring kThreads = env->NewStringUTF("threads");
-    jobject vThreads = env->CallStaticObjectMethod(integerClass, integerValueOf, (jint)info.threads);
-    env->CallObjectMethod(infoMap, hashMapPut, kThreads, vThreads);
-
-    jstring kBatch = env->NewStringUTF("batchSize");
-    jobject vBatch = env->CallStaticObjectMethod(integerClass, integerValueOf, (jint)info.batchSize);
-    env->CallObjectMethod(infoMap, hashMapPut, kBatch, vBatch);
-
-    jstring kUbatch = env->NewStringUTF("ubatchSize");
-    jobject vUbatch = env->CallStaticObjectMethod(integerClass, integerValueOf, (jint)info.ubatchSize);
-    env->CallObjectMethod(infoMap, hashMapPut, kUbatch, vUbatch);
-
-    jstring kFlash = env->NewStringUTF("flashAttention");
-    jobject vFlash = env->CallStaticObjectMethod(integerClass, integerValueOf, (jint)info.flashAttention);
-    env->CallObjectMethod(infoMap, hashMapPut, kFlash, vFlash);
-
+    env->DeleteLocalRef(hashMapClass);
+    env->DeleteLocalRef(integerClass);
     return infoMap;
 }
 
@@ -439,7 +560,9 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGenerate(
         jsize count = n_roles < n_contents ? n_roles : n_contents;
         for (jsize i = 0; i < count; ++i) {
             jstring rStr = static_cast<jstring>(env->GetObjectArrayElement(chat_roles, i));
+            clearPendingException(env);
             jstring cStr = static_cast<jstring>(env->GetObjectArrayElement(chat_contents, i));
+            clearPendingException(env);
             std::string r = "user";
             std::string c = "";
             if (rStr) {

@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import '../../core/ai/ai_models.dart';
 import '../../core/ai/ai_service.dart';
 import '../../core/ai/prompt_builder.dart';
+import '../../core/dictionary/dictionary_ai_parser.dart';
 import '../../core/dictionary/dictionary_models.dart';
 import '../../core/dictionary/dictionary_repository.dart';
 import '../../core/utils/text_normalization.dart';
@@ -27,10 +28,11 @@ class DictionaryController extends ChangeNotifier {
   bool _isSaved = false;
   bool _isLoading = false;
   List<String> _suggestions = [];
-  int _selectedTab = 0; // 0: Dictionary, 1: AI Translation, 2: AI Explanation
+  int _selectedTab = 0; // 0: Dictionary, 1: AI Answer
 
-  String _aiTranslationText = '';
-  String _aiExplanationText = '';
+  DictionaryAiAnswer? _aiAnswer;
+  String? _aiErrorMessage;
+  String _aiRawStreamingText = '';
   bool _isAiGenerating = false;
   AiGenerationHandle? _activeAiHandle;
   bool _isDisposed = false;
@@ -42,8 +44,9 @@ class DictionaryController extends ChangeNotifier {
   bool get isSaving => _isSaving;
   List<String> get suggestions => _suggestions;
   int get selectedTab => _selectedTab;
-  String get aiTranslationText => _aiTranslationText;
-  String get aiExplanationText => _aiExplanationText;
+  DictionaryAiAnswer? get aiAnswer => _aiAnswer;
+  String? get aiErrorMessage => _aiErrorMessage;
+  String get aiRawStreamingText => _aiRawStreamingText;
   bool get isAiGenerating => _isAiGenerating;
 
   DictionaryController({
@@ -66,8 +69,7 @@ class DictionaryController extends ChangeNotifier {
   void setSelectedTab(int index) {
     if (_selectedTab != index) {
       if (_isAiGenerating) {
-        if (_selectedTab == 1) _aiTranslationText = '';
-        if (_selectedTab == 2) _aiExplanationText = '';
+        _aiRawStreamingText = '';
       }
       ++_aiGeneration;
       _activeAiHandle?.cancel();
@@ -76,12 +78,8 @@ class DictionaryController extends ChangeNotifier {
     }
     _selectedTab = index;
     final query = _currentEntry?.word ?? _currentQuery;
-    if (_selectedTab == 1 && _aiTranslationText.isEmpty && query.isNotEmpty) {
-      _fetchAiTranslation();
-    } else if (_selectedTab == 2 &&
-        _aiExplanationText.isEmpty &&
-        query.isNotEmpty) {
-      _fetchAiExplanation();
+    if (_selectedTab == 1 && _aiAnswer == null && query.isNotEmpty) {
+      _fetchAiAnswer();
     }
     notifyListeners();
   }
@@ -116,8 +114,9 @@ class DictionaryController extends ChangeNotifier {
     _isLoading = true;
     _currentQuery = clean;
     _suggestions = [];
-    _aiTranslationText = '';
-    _aiExplanationText = '';
+    _aiAnswer = null;
+    _aiErrorMessage = null;
+    _aiRawStreamingText = '';
     _isAiGenerating = false;
     notifyListeners();
 
@@ -137,8 +136,7 @@ class DictionaryController extends ChangeNotifier {
     _isLoading = false;
     notifyListeners();
 
-    if (_selectedTab == 1) _fetchAiTranslation();
-    if (_selectedTab == 2) _fetchAiExplanation();
+    if (_selectedTab == 1) _fetchAiAnswer();
   }
 
   Future<void> speak(String text) async {
@@ -162,19 +160,49 @@ class DictionaryController extends ChangeNotifier {
           }
         }
       } else {
+        String defSnap = '';
+        String transSnap = '';
+        String pos = _currentEntry?.partOfSpeech ?? '';
+
+        if (_currentEntry != null) {
+          defSnap =
+              _currentEntry!.definitions.isNotEmpty
+                  ? _currentEntry!.definitions.first
+                  : '';
+          transSnap =
+              _currentEntry!.chineseDefinitions.isNotEmpty
+                  ? _currentEntry!.chineseDefinitions.first
+                  : '';
+        }
+
+        if (defSnap.isEmpty && transSnap.isEmpty && _aiAnswer != null) {
+          final ans = _aiAnswer!;
+          if (ans is DictionaryWordAnswer) {
+            defSnap = ans.senses
+                .map((s) => '${s.partOfSpeech} ${s.meaning}'.trim())
+                .join('\n');
+            transSnap = ans.senses.map((s) => s.meaning).join('；');
+            if (pos.isEmpty && ans.senses.isNotEmpty) {
+              pos = ans.senses.first.partOfSpeech;
+            }
+          } else if (ans is DictionaryPhraseAnswer) {
+            defSnap = ans.explanation;
+            transSnap = ans.explanation;
+            if (pos.isEmpty) pos = 'phrase';
+          }
+        }
+
+        if (defSnap.isEmpty && transSnap.isEmpty) {
+          defSnap = targetWord;
+        }
+
         final newWord = VocabularyWord(
           id: const Uuid().v4(),
           word: targetWord,
           phonetic: _currentEntry?.phonetic ?? '',
-          partOfSpeech: _currentEntry?.partOfSpeech ?? '',
-          definitionSnapshot:
-              _currentEntry?.definitions.isNotEmpty == true
-                  ? _currentEntry!.definitions.first
-                  : (_aiExplanationText.isNotEmpty ? _aiExplanationText : ''),
-          translationSnapshot:
-              _currentEntry?.chineseDefinitions.isNotEmpty == true
-                  ? _currentEntry!.chineseDefinitions.first
-                  : (_aiTranslationText.isNotEmpty ? _aiTranslationText : ''),
+          partOfSpeech: pos,
+          definitionSnapshot: defSnap,
+          translationSnapshot: transSnap,
           source: 'Dictionary',
           sourceSentence:
               _currentEntry?.examples.isNotEmpty == true
@@ -195,7 +223,7 @@ class DictionaryController extends ChangeNotifier {
     }
   }
 
-  Future<void> _fetchAiTranslation() async {
+  Future<void> _fetchAiAnswer() async {
     final targetWord = _currentEntry?.word ?? _currentQuery;
     if (targetWord.isEmpty) return;
 
@@ -204,88 +232,52 @@ class DictionaryController extends ChangeNotifier {
     _activeAiHandle = null;
 
     if (!aiService.llmEngine.isLoaded) {
-      _aiTranslationText =
-          'Load a local AI model in Settings to use AI translation.';
+      _aiAnswer = null;
+      _aiErrorMessage = 'Load a local AI model in Settings to use AI Answer.';
       notifyListeners();
       return;
     }
 
     _isAiGenerating = true;
-    _aiTranslationText = '';
+    _aiAnswer = null;
+    _aiErrorMessage = null;
+    _aiRawStreamingText = '';
     notifyListeners();
 
     try {
-      final handle = aiService.startTranslateText(targetWord);
+      final handle = aiService.startDictionaryAiAnswer(targetWord);
       _activeAiHandle = handle;
 
       await for (final chunk in handle.stream) {
         if (gen != _aiGeneration || _isDisposed) break;
-        _aiTranslationText += chunk;
+        _aiRawStreamingText += chunk;
         notifyListeners();
+      }
+
+      if (gen == _aiGeneration && !_isDisposed) {
+        _aiAnswer = DictionaryAiParser.parse(
+          _aiRawStreamingText,
+          query: targetWord,
+        );
+        _aiErrorMessage = null;
       }
     } on AiCancelledException {
       if (gen == _aiGeneration && !_isDisposed) {
-        _aiTranslationText = '';
+        _aiRawStreamingText = '';
+        _aiAnswer = null;
+        _aiErrorMessage = null;
       }
     } catch (e) {
       if (gen == _aiGeneration && !_isDisposed) {
         if (e is AiCancelledException ||
             e.toString().contains('cancelled') ||
             e.toString().contains('canceled')) {
-          _aiTranslationText = '';
+          _aiRawStreamingText = '';
+          _aiAnswer = null;
+          _aiErrorMessage = null;
         } else {
-          _aiTranslationText = 'Translation unavailable: $e';
-        }
-      }
-    } finally {
-      if (gen == _aiGeneration && !_isDisposed) {
-        _isAiGenerating = false;
-        _activeAiHandle = null;
-        notifyListeners();
-      }
-    }
-  }
-
-  Future<void> _fetchAiExplanation() async {
-    final targetWord = _currentEntry?.word ?? _currentQuery;
-    if (targetWord.isEmpty) return;
-
-    final gen = ++_aiGeneration;
-    _activeAiHandle?.cancel();
-    _activeAiHandle = null;
-
-    if (!aiService.llmEngine.isLoaded) {
-      _aiExplanationText =
-          'Load a local AI model in Settings to use AI explanation.';
-      notifyListeners();
-      return;
-    }
-
-    _isAiGenerating = true;
-    _aiExplanationText = '';
-    notifyListeners();
-
-    try {
-      final handle = aiService.startExplainWord(targetWord);
-      _activeAiHandle = handle;
-
-      await for (final chunk in handle.stream) {
-        if (gen != _aiGeneration || _isDisposed) break;
-        _aiExplanationText += chunk;
-        notifyListeners();
-      }
-    } on AiCancelledException {
-      if (gen == _aiGeneration && !_isDisposed) {
-        _aiExplanationText = '';
-      }
-    } catch (e) {
-      if (gen == _aiGeneration && !_isDisposed) {
-        if (e is AiCancelledException ||
-            e.toString().contains('cancelled') ||
-            e.toString().contains('canceled')) {
-          _aiExplanationText = '';
-        } else {
-          _aiExplanationText = 'Explanation unavailable: $e';
+          _aiAnswer = null;
+          _aiErrorMessage = 'AI Answer unavailable: $e';
         }
       }
     } finally {
@@ -304,17 +296,19 @@ class DictionaryController extends ChangeNotifier {
     _activeAiHandle?.cancel();
     _activeAiHandle = null;
 
+    _selectedTab = 1;
+
     if (!aiService.llmEngine.isLoaded) {
-      _aiExplanationText =
-          'Load a local AI model in Settings to use AI explanation.';
-      _selectedTab = 2;
+      _aiAnswer = null;
+      _aiErrorMessage = 'Load a local AI model in Settings to use AI Answer.';
       notifyListeners();
       return;
     }
 
-    _selectedTab = 2;
     _isAiGenerating = true;
-    _aiExplanationText = 'Querying local model: "$prompt"...\n\n';
+    _aiAnswer = null;
+    _aiErrorMessage = null;
+    _aiRawStreamingText = '';
     notifyListeners();
 
     try {
@@ -326,11 +320,11 @@ class DictionaryController extends ChangeNotifier {
         ChatMessagePayload(
           role: 'user',
           content:
-              'Word: "$targetWord"\nRequest: $prompt\nProvide a clear, concise educational explanation.',
+              'Word or phrase: "$targetWord"\nUser request: $prompt\nProvide a clear, concise educational explanation in Chinese.',
         ),
       ];
       final plainPrompt =
-          'Word: $targetWord\nRequest: $prompt\nProvide a clear, concise educational explanation.';
+          'Word or phrase: $targetWord\nUser request: $prompt\nProvide a clear, concise educational explanation in Chinese.';
 
       final handle = aiService.llmEngine.startGeneration(
         plainPrompt,
@@ -341,21 +335,33 @@ class DictionaryController extends ChangeNotifier {
 
       await for (final chunk in handle.stream) {
         if (gen != _aiGeneration || _isDisposed) break;
-        _aiExplanationText += chunk;
+        _aiRawStreamingText += chunk;
         notifyListeners();
+      }
+
+      if (gen == _aiGeneration && !_isDisposed) {
+        _aiAnswer = DictionaryPhraseAnswer(
+          explanation: _aiRawStreamingText.trim(),
+        );
+        _aiErrorMessage = null;
       }
     } on AiCancelledException {
       if (gen == _aiGeneration && !_isDisposed) {
-        _aiExplanationText = '';
+        _aiRawStreamingText = '';
+        _aiAnswer = null;
+        _aiErrorMessage = null;
       }
     } catch (e) {
       if (gen == _aiGeneration && !_isDisposed) {
         if (e is AiCancelledException ||
             e.toString().contains('cancelled') ||
             e.toString().contains('canceled')) {
-          _aiExplanationText = '';
+          _aiRawStreamingText = '';
+          _aiAnswer = null;
+          _aiErrorMessage = null;
         } else {
-          _aiExplanationText = 'AI explanation unavailable: $e';
+          _aiAnswer = null;
+          _aiErrorMessage = 'AI explanation unavailable: $e';
         }
       }
     } finally {
@@ -384,3 +390,4 @@ class DictionaryController extends ChangeNotifier {
     super.dispose();
   }
 }
+

@@ -1,7 +1,10 @@
 package com.example.local_ai_app
 
+import android.content.Context
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.ParcelFileDescriptor
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -15,7 +18,9 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 @Keep
-class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
+class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
+
+    private var activePfd: ParcelFileDescriptor? = null
 
     companion object {
         var isLibraryAvailable: Boolean = false
@@ -192,9 +197,20 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
                 }
 
                 scope.launch {
+                    var newPfd: ParcelFileDescriptor? = null
                     try {
+                        val effectivePath = if (modelPath.startsWith("content://") && context != null) {
+                            val uri = Uri.parse(modelPath)
+                            val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+                                ?: throw IllegalStateException("Could not open file descriptor for $modelPath")
+                            newPfd = pfd
+                            "/proc/self/fd/${pfd.fd}"
+                        } else {
+                            modelPath
+                        }
+
                         val loaded = nativeLoadModel(
-                            modelPath,
+                            effectivePath,
                             backend,
                             contextLength,
                             threads,
@@ -203,10 +219,25 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
                             ubatchSize,
                             flashAttention
                         )
+
+                        if (loaded) {
+                            try {
+                                activePfd?.close()
+                            } catch (_: Throwable) {}
+                            activePfd = newPfd
+                        } else {
+                            try {
+                                newPfd?.close()
+                            } catch (_: Throwable) {}
+                        }
+
                         withContext(Dispatchers.Main) {
                             result.success(loaded)
                         }
                     } catch (e: Throwable) {
+                        try {
+                            newPfd?.close()
+                        } catch (_: Throwable) {}
                         withContext(Dispatchers.Main) {
                             result.error("LOAD_ERROR", e.message, null)
                         }
@@ -218,10 +249,18 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
                 scope.launch {
                     try {
                         nativeUnloadModel()
+                        try {
+                            activePfd?.close()
+                        } catch (_: Throwable) {}
+                        activePfd = null
                         withContext(Dispatchers.Main) {
                             result.success(null)
                         }
                     } catch (e: Throwable) {
+                        try {
+                            activePfd?.close()
+                        } catch (_: Throwable) {}
+                        activePfd = null
                         withContext(Dispatchers.Main) {
                             result.error("UNLOAD_ERROR", e.message, null)
                         }
@@ -305,6 +344,10 @@ class LlamaBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler 
         try {
             nativeCancel()
             nativeUnloadModel()
+        } catch (_: Throwable) {}
+        try {
+            activePfd?.close()
+            activePfd = null
         } catch (_: Throwable) {}
         isGenerating.set(false)
         activeRequestId = null

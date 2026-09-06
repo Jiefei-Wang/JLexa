@@ -5,6 +5,8 @@ import 'package:jlexa/core/ai/ai_engine.dart';
 import 'package:jlexa/core/ai/ai_models.dart';
 import 'package:jlexa/core/ai/ai_service.dart';
 import 'package:jlexa/core/ai/prompt_builder.dart';
+import 'package:jlexa/core/database/app_database.dart';
+import 'package:jlexa/core/dictionary/dictionary_models.dart';
 import 'package:jlexa/core/dictionary/dictionary_repository.dart';
 import 'package:jlexa/core/vocabulary/vocabulary_repository.dart';
 import 'package:jlexa/features/dictionary/dictionary_controller.dart';
@@ -123,6 +125,9 @@ void main() {
     late DictionaryController controller;
 
     setUp(() async {
+      final db = await AppDatabase.instance.database;
+      await db.delete('vocabulary');
+
       dictionaryRepo = DictionaryRepository();
       vocabularyRepo = VocabularyRepository();
       mockEngine = ControllableAiEngine();
@@ -142,8 +147,8 @@ void main() {
       aiService.dispose();
     });
 
-    test('Switching away from AI Translation cancels without leaving error text', () async {
-      // 1. Switch to AI Translation Tab
+    test('Switching away from AI Answer cancels without leaving error text', () async {
+      // 1. Switch to AI Answer Tab (Tab 1)
       controller.setSelectedTab(1);
       expect(controller.selectedTab, 1);
       expect(controller.isAiGenerating, isTrue);
@@ -153,22 +158,21 @@ void main() {
       final stream1 = mockEngine.activeControllers.last;
 
       // Emit a partial chunk
-      stream1.add('Partial translation chunk...');
+      stream1.add('{"type": "word", "senses": [{"partOfSpeech": "adj."');
       await Future.delayed(const Duration(milliseconds: 20));
-      expect(controller.aiTranslationText, contains('Partial translation'));
+      expect(controller.aiRawStreamingText, contains('"type": "word"'));
 
-      // 2. User switches to Tab 0 (Dictionary) while translation is generating
+      // 2. User switches to Tab 0 (Dictionary) while generation is running
       controller.setSelectedTab(0);
       expect(controller.selectedTab, 0);
       expect(controller.isAiGenerating, isFalse);
 
       await Future.delayed(const Duration(milliseconds: 20));
 
-      // 3. Verify no error text poisoned the translation field
-      expect(controller.aiTranslationText.contains('cancelled'), isFalse);
-      expect(controller.aiTranslationText.contains('unavailable'), isFalse);
+      // 3. Verify no error text poisoned the state
+      expect(controller.aiErrorMessage, isNull);
 
-      // 4. User returns to AI Translation Tab (Tab 1)
+      // 4. User returns to AI Answer Tab (Tab 1)
       controller.setSelectedTab(1);
       expect(controller.selectedTab, 1);
       expect(controller.isAiGenerating, isTrue);
@@ -177,53 +181,43 @@ void main() {
       final stream2 = mockEngine.activeControllers.last;
       expect(stream2, isNot(same(stream1)));
 
-      stream2.add('New fresh translation response.');
+      stream2.add('{"type": "word", "senses": [{"partOfSpeech": "adj.", "meaning": "有弹性的；适应力强的"}]}');
       await stream2.close();
       await Future.delayed(const Duration(milliseconds: 20));
 
-      expect(controller.aiTranslationText, 'New fresh translation response.');
+      expect(controller.aiAnswer, isA<DictionaryWordAnswer>());
+      final wordAnswer = controller.aiAnswer as DictionaryWordAnswer;
+      expect(wordAnswer.senses.first.partOfSpeech, 'adj.');
+      expect(wordAnswer.senses.first.meaning, contains('适应力强'));
       expect(controller.isAiGenerating, isFalse);
     });
 
-    test('Switching away from AI Explanation cancels without leaving error text', () async {
-      // 1. Switch to AI Explanation Tab
-      controller.setSelectedTab(2);
-      expect(controller.selectedTab, 2);
-      expect(controller.isAiGenerating, isTrue);
+    test('Structured phrase answer parses correctly and stores in vocabulary', () async {
+      await controller.search('take it for granted');
+      controller.setSelectedTab(1);
 
-      final stream1 = mockEngine.activeControllers.last;
-      stream1.add('Partial explanation chunk...');
-      await Future.delayed(const Duration(milliseconds: 20));
+      final stream = mockEngine.activeControllers.last;
+      stream.add('{"type": "phrase", "explanation": "表示“认为某事理所当然”，通常用于描述没有意识到某事物价值的情况。"}');
+      await stream.close();
+      await pumpEventQueue();
 
-      // 2. Switch away to Tab 0
-      controller.setSelectedTab(0);
-      expect(controller.selectedTab, 0);
-      expect(controller.isAiGenerating, isFalse);
+      expect(controller.aiAnswer, isA<DictionaryPhraseAnswer>());
+      final phraseAnswer = controller.aiAnswer as DictionaryPhraseAnswer;
+      expect(phraseAnswer.explanation, contains('理所当然'));
 
-      await Future.delayed(const Duration(milliseconds: 20));
-      expect(controller.aiExplanationText.contains('cancelled'), isFalse);
-      expect(controller.aiExplanationText.contains('unavailable'), isFalse);
-
-      // 3. Return to Tab 2
-      controller.setSelectedTab(2);
-      expect(controller.selectedTab, 2);
-      expect(controller.isAiGenerating, isTrue);
-
-      final stream2 = mockEngine.activeControllers.last;
-      stream2.add('New completed explanation.');
-      await stream2.close();
-      await Future.delayed(const Duration(milliseconds: 20));
-
-      expect(controller.aiExplanationText, 'New completed explanation.');
-      expect(controller.isAiGenerating, isFalse);
+      // Test vocabulary saving with phrase answer
+      await controller.toggleSaveToVocabulary();
+      expect(controller.isSaved, isTrue);
+      final saved = await vocabularyRepo.getWord('take it for granted');
+      expect(saved, isNotNull);
+      expect(saved!.definitionSnapshot, contains('理所当然'));
+      expect(saved.translationSnapshot, contains('理所当然'));
     });
 
     test('Stale chunk protection: old stream emitting after tab change does not pollute state', () async {
-      final unclosedController = StreamController<String>.broadcast();
       final customEngine = ControllableAiEngine();
       final customAiService = AiService(llm: customEngine);
 
-      // Create a handle whose stream will continue to emit after cancel
       final customDictController = DictionaryController(
         dictionaryRepo: dictionaryRepo,
         vocabularyRepo: vocabularyRepo,
@@ -244,12 +238,12 @@ void main() {
       }
       await Future.delayed(const Duration(milliseconds: 20));
 
-      // Active state on Tab 0 or Translation must not contain the rogue chunk
-      expect(customDictController.aiTranslationText, isNot(contains('Late rogue chunk')));
+      // Active state on Tab 0 must not contain the rogue chunk
+      expect(customDictController.aiRawStreamingText, isEmpty);
+      expect(customDictController.aiAnswer, isNull);
 
       customDictController.dispose();
       customAiService.dispose();
-      await unclosedController.close();
     });
 
     test('True generation failure surfaces informative error message', () async {
@@ -259,8 +253,8 @@ void main() {
       controller.setSelectedTab(1);
       await Future.delayed(const Duration(milliseconds: 30));
 
-      expect(controller.aiTranslationText, contains('Translation unavailable'));
-      expect(controller.aiTranslationText, contains('Out of memory'));
+      expect(controller.aiErrorMessage, contains('AI Answer unavailable'));
+      expect(controller.aiErrorMessage, contains('Out of memory'));
       expect(controller.isAiGenerating, isFalse);
     });
   });

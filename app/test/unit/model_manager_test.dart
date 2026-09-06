@@ -477,5 +477,77 @@ void main() {
 
       await extDir.delete(recursive: true);
     });
+
+    test('When storage is unconfigured, catalog is empty and downloads throw', () async {
+      final unconfiguredBackend = FileSystemModelStorageBackend(
+        baseDir: null,
+        isConfigured: false,
+      );
+      final unconfiguredStorage = ModelStorage(backend: unconfiguredBackend);
+      final unconfiguredManager = ModelManager(
+        storage: unconfiguredStorage,
+        downloader: downloader,
+        aiService: aiService,
+      );
+      await unconfiguredManager.initialize();
+
+      expect(unconfiguredManager.isStorageConfigured, isFalse);
+      expect(unconfiguredManager.llmModels, isEmpty);
+      expect(unconfiguredManager.whisperModels, isEmpty);
+
+      expect(
+        () => unconfiguredManager.downloadModel(ModelCatalog.curatedLlmModels.first),
+        throwsA(isA<ModelValidationException>()),
+      );
+
+      unconfiguredManager.dispose();
+    });
+
+    test('Auto-detection of user-placed custom models in llm/ and whisper/ folders', () async {
+      final llmDir = Directory(p.join(tempDir.path, 'llm'));
+      if (!await llmDir.exists()) await llmDir.create(recursive: true);
+      final whisperDir = Directory(p.join(tempDir.path, 'whisper'));
+      if (!await whisperDir.exists()) await whisperDir.create(recursive: true);
+
+      final userLlm = File(p.join(llmDir.path, 'user_model_v1.gguf'));
+      await userLlm.writeAsBytes(List<int>.filled(1024, 0x11));
+
+      final userWhisper = File(p.join(whisperDir.path, 'user_speech_v1.bin'));
+      await userWhisper.writeAsBytes(List<int>.filled(1024, 0x22));
+
+      await manager.refreshModels();
+
+      final detectedLlm = manager.llmModels.where((m) => m.displayName == 'user_model_v1.gguf');
+      expect(detectedLlm.isNotEmpty, isTrue);
+      expect(detectedLlm.first.isCustomImport, isTrue);
+      expect(detectedLlm.first.fileSizeBytes, 1024);
+
+      final detectedWhisper = manager.whisperModels.where((m) => m.displayName == 'user_speech_v1.bin');
+      expect(detectedWhisper.isNotEmpty, isTrue);
+      expect(detectedWhisper.first.isCustomImport, isTrue);
+      expect(detectedWhisper.first.fileSizeBytes, 1024);
+    });
+
+    test('Changing storage folder safely unloads active model if absent in new folder', () async {
+      // 1. Download and load a model in current storage folder
+      final target = ModelCatalog.curatedLlmModels.first;
+      await manager.downloadModel(target);
+      final item = manager.llmModels.firstWhere((m) => m.id == target.id);
+      await manager.loadModel(item);
+      expect(aiService.llmEngine.isLoaded, isTrue);
+
+      // 2. Prepare new empty storage folder
+      final newFolder = await Directory.systemTemp.createTemp('jlexa_new_storage_');
+      final backend = storage.backend as FileSystemModelStorageBackend;
+      backend.configureWithDirectory(newFolder);
+
+      // 3. Switch storage folder
+      await manager.changeStorageFolder();
+
+      // 4. Model should be safely unloaded because it does not exist in newFolder
+      expect(aiService.llmEngine.isLoaded, isFalse);
+
+      await newFolder.delete(recursive: true);
+    });
   });
 }

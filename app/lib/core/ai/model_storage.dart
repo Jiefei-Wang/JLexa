@@ -4,6 +4,9 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'model_catalog.dart';
+import 'model_storage_backend.dart';
+
+export 'model_storage_backend.dart';
 
 class ModelValidationException implements Exception {
   final String message;
@@ -14,12 +17,85 @@ class ModelValidationException implements Exception {
 }
 
 class ModelStorage {
+  final ModelStorageBackend backend;
   final Future<Directory> Function()? _customBaseDirProvider;
 
-  ModelStorage({Future<Directory> Function()? baseDirProvider})
-    : _customBaseDirProvider = baseDirProvider;
+  ModelStorage({
+    ModelStorageBackend? backend,
+    Future<Directory> Function()? baseDirProvider,
+  })  : _customBaseDirProvider = baseDirProvider,
+        backend = backend ??
+            (baseDirProvider != null
+                ? FileSystemModelStorageBackend(
+                    baseDirProvider: baseDirProvider,
+                  )
+                : (Platform.isAndroid
+                    ? AndroidSafModelStorageBackend()
+                    : FileSystemModelStorageBackend()));
 
+  bool get isConfigured => backend.isConfigured;
+  String? get baseLocationDisplay => backend.baseLocationDisplay;
+  String? get baseLocationUriOrPath => backend.baseLocationUriOrPath;
+
+  Future<bool> chooseBaseFolder() => backend.chooseBaseFolder();
+  Future<bool> restorePersistedFolderAccess() => backend.restorePersistedFolderAccess();
+  Future<void> clearConfiguredFolder() => backend.clearConfiguredFolder();
+
+  Future<List<ModelFileEntry>> listModelFiles(ModelType type) => backend.listModelFiles(type);
+
+  Future<String> prepareDownloadPart(ModelType type, String filename) =>
+      backend.prepareDownloadPart(type, filename);
+
+  Future<void> download({
+    required DownloadableModel model,
+    required String destinationPartLocation,
+    required void Function(ModelProgress progress) onProgress,
+  }) =>
+      backend.download(
+        model: model,
+        destinationPartLocation: destinationPartLocation,
+        onProgress: onProgress,
+      );
+
+  void cancelDownload(String modelId) => backend.cancelDownload(modelId);
+
+  bool isDownloading(String modelId) => backend.isDownloading(modelId);
+
+  Future<String> finalizeDownload(
+    String partLocation,
+    String filename,
+    ModelType type, {
+    int? expectedSizeBytes,
+  }) =>
+      backend.finalizeDownload(
+        partLocation,
+        filename,
+        type,
+        expectedSizeBytes: expectedSizeBytes,
+      );
+
+  Future<bool> deleteModel(String location) => backend.deleteModel(location);
+
+  Future<bool> deleteModelFile(String path) => backend.deleteModel(path);
+
+  Future<void> cleanStalePartFiles({
+    Set<String> activePartPaths = const {},
+  }) => backend.cleanStalePartFiles(activeLocations: activePartPaths);
+
+  Future<bool> isModelFileDownloaded(ModelType type, String filename) =>
+      backend.isModelFileDownloaded(type, filename);
+
+  Future<String> getFinalModelLocation(ModelType type, String filename) =>
+      backend.getFinalModelLocation(type, filename);
+
+  Future<int> getFileSize(String location) => backend.getFileSize(location);
+  Future<bool> fileExists(String location) => backend.fileExists(location);
+
+  // Filesystem directory helpers for compatibility with file-based environments/tests
   Future<Directory> getBaseModelsDirectory() async {
+    if (backend is FileSystemModelStorageBackend) {
+      return (backend as FileSystemModelStorageBackend).getBaseDir();
+    }
     if (_customBaseDirProvider != null) {
       final dir = await _customBaseDirProvider();
       return Directory(p.join(dir.path, 'models'));
@@ -34,6 +110,15 @@ class ModelStorage {
   }
 
   Future<Directory> getModelTypeDirectory(ModelType type) async {
+    if (backend is FileSystemModelStorageBackend) {
+      final base = await (backend as FileSystemModelStorageBackend).getBaseDir();
+      final subDirName = type == ModelType.llm ? 'llm' : 'whisper';
+      final dir = Directory(p.join(base.path, subDirName));
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      return dir;
+    }
     final baseDir = await getBaseModelsDirectory();
     final subDirName = type == ModelType.llm ? 'llm' : 'whisper';
     final dir = Directory(p.join(baseDir.path, subDirName));
@@ -44,40 +129,11 @@ class ModelStorage {
   }
 
   Future<String> getFinalModelPath(ModelType type, String filename) async {
-    final dir = await getModelTypeDirectory(type);
-    final safeName = p.basename(filename);
-    return p.join(dir.path, safeName);
+    return backend.getFinalModelLocation(type, filename);
   }
 
   Future<String> getPartModelPath(ModelType type, String filename) async {
-    final dir = await getModelTypeDirectory(type);
-    final safeName = p.basename(filename);
-    return p.join(dir.path, '$safeName.part');
-  }
-
-  Future<void> cleanStalePartFiles({
-    Set<String> activePartPaths = const {},
-  }) async {
-    final activeCanonical =
-        activePartPaths.map((path) => p.canonicalize(path)).toSet();
-    for (final type in ModelType.values) {
-      try {
-        final dir = await getModelTypeDirectory(type);
-        if (await dir.exists()) {
-          final entries = dir.listSync();
-          for (final entry in entries) {
-            if (entry is File && entry.path.endsWith('.part')) {
-              if (activeCanonical.contains(p.canonicalize(entry.path))) {
-                continue;
-              }
-              try {
-                await entry.delete();
-              } catch (_) {}
-            }
-          }
-        }
-      } catch (_) {}
-    }
+    return backend.prepareDownloadPart(type, filename);
   }
 
   Future<String> atomicFinalizeDownload(
@@ -169,14 +225,12 @@ class ModelStorage {
     final fileName = p.basename(sourcePath);
     final targetFile = File(p.join(targetDir.path, fileName));
 
-    // If target file already exists and has the identical size, reuse it
     if (await targetFile.exists()) {
       final sourceLen = await sourceFile.length();
       final targetLen = await targetFile.length();
       if (sourceLen == targetLen) {
         return targetFile.path;
       }
-      // If sizes differ, append unique suffix to avoid overwriting existing managed model
       final nameWithoutExt = p.basenameWithoutExtension(fileName);
       final ext = p.extension(fileName);
       final uniqueName =
@@ -190,40 +244,12 @@ class ModelStorage {
     return targetFile.path;
   }
 
-  Future<bool> deleteModelFile(String path) async {
-    try {
-      final file = File(path);
-      if (await file.exists()) {
-        await file.delete();
-        return true;
-      }
-    } catch (_) {}
-    return false;
-  }
-
   Future<List<File>> listDownloadedModels(ModelType type) async {
-    final dir = await getModelTypeDirectory(type);
-    if (!await dir.exists()) return [];
-
+    final entries = await backend.listModelFiles(type);
     final list = <File>[];
-    final entries = dir.listSync();
     for (final entry in entries) {
-      if (entry is File && !entry.path.endsWith('.part')) {
-        final ext = p.extension(entry.path).toLowerCase();
-        if (type == ModelType.llm && ext == '.gguf') {
-          list.add(entry);
-        } else if (type == ModelType.whisper &&
-            (ext == '.bin' || ext == '.ggml' || ext == '.gguf')) {
-          list.add(entry);
-        }
-      }
+      list.add(File(entry.location));
     }
     return list;
-  }
-
-  Future<bool> isModelFileDownloaded(ModelType type, String filename) async {
-    final finalPath = await getFinalModelPath(type, filename);
-    final file = File(finalPath);
-    return (await file.exists()) && (await file.length() > 0);
   }
 }

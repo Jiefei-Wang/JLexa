@@ -175,58 +175,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
 
               // ==========================================
-              // Section 1: Local Language Model (LLM)
+              // Storage Folder Configuration
               // ==========================================
-              const Text(
-                'Local Language Model (LLM)',
-                style: AppTypography.titleSmall,
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Download an offline model for AI explanations, grammar insights, and translations.',
-                style: AppTypography.bodySmall,
-              ),
-              const SizedBox(height: 10),
-
-              ...llmModels.map((item) => _buildModelCard(item)),
-
-              // Local LLM Import Box
-              _buildImportBox(
-                title: 'Have your own GGUF model?',
-                buttonLabel: 'Import Local GGUF',
-                icon: Icons.file_open,
-                onTap: _controller.isLoading ? null : _controller.pickAndImportLlmModel,
-              ),
-
+              _buildStorageFolderCard(),
               const SizedBox(height: 24),
 
-              // ==========================================
-              // Section 2: Speech Recognition Model (Whisper)
-              // ==========================================
-              const Text(
-                'Speech Recognition Model (Whisper)',
-                style: AppTypography.titleSmall,
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Select an offline speech recognition model for audio lesson transcription.',
-                style: AppTypography.bodySmall,
-              ),
-              const SizedBox(height: 10),
+              if (!_controller.isStorageConfigured) ...[
+                _buildUnconfiguredCatalogPlaceholder(),
+                const SizedBox(height: 24),
+              ] else ...[
+                // ==========================================
+                // Section 1: Local Language Model (LLM)
+                // ==========================================
+                const Text(
+                  'Local Language Model (LLM)',
+                  style: AppTypography.titleSmall,
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Download an offline model for AI explanations, grammar insights, and translations.',
+                  style: AppTypography.bodySmall,
+                ),
+                const SizedBox(height: 10),
 
-              ...whisperModels.map((item) => _buildModelCard(item)),
+                ...llmModels.map((item) => _buildModelCard(item)),
 
-              // Local Whisper Import Box
-              _buildImportBox(
-                title: 'Have your own Whisper model?',
-                buttonLabel: 'Import Local Whisper Model',
-                icon: Icons.file_open,
-                onTap: _controller.isLoading
-                    ? null
-                    : _controller.pickAndImportSpeechModel,
-              ),
+                const SizedBox(height: 24),
 
-              const SizedBox(height: 24),
+                // ==========================================
+                // Section 2: Speech Recognition Model (Whisper)
+                // ==========================================
+                const Text(
+                  'Speech Recognition Model (Whisper)',
+                  style: AppTypography.titleSmall,
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Select an offline speech recognition model for audio lesson transcription.',
+                  style: AppTypography.bodySmall,
+                ),
+                const SizedBox(height: 10),
+
+                ...whisperModels.map((item) => _buildModelCard(item)),
+
+                const SizedBox(height: 16),
+
+                // Custom Models Information Card
+                _buildCustomModelsInfoCard(),
+
+                const SizedBox(height: 24),
+              ],
 
               // ==========================================
               // Section 3: llama.cpp Runtime & Backend Settings
@@ -606,30 +604,131 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildImportBox({
-    required String title,
-    required String buttonLabel,
-    required IconData icon,
-    required VoidCallback? onTap,
-  }) {
+  Widget _buildStorageFolderCard() {
+    final isConfigured = _controller.isStorageConfigured;
+    final location = _controller.storageLocationDisplay ?? 'Not configured';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isConfigured ? AppColors.border : Colors.amber.shade400,
+          width: isConfigured ? 1.0 : 1.5,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isConfigured ? Icons.folder_outlined : Icons.folder_open,
+                color: isConfigured ? AppColors.primary : Colors.amber.shade800,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  isConfigured ? 'Model Storage Directory' : 'Storage Directory Required',
+                  style: AppTypography.labelLarge.copyWith(
+                    color: isConfigured ? AppColors.textPrimary : Colors.amber.shade900,
+                  ),
+                ),
+              ),
+              if (isConfigured)
+                OutlinedButton.icon(
+                  onPressed: _controller.isLoading ? null : _controller.changeStorageFolder,
+                  icon: const Icon(Icons.edit_outlined, size: 14),
+                  label: const Text('Change'),
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (isConfigured) ...[
+            Text(
+              location,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 12,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ] else ...[
+            const Text(
+              'Please select a storage directory on your device. Curated models and any models placed in this directory will be organized into llm/ and whisper/ subfolders.',
+              style: AppTypography.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _controller.isLoading ? null : _controller.chooseStorageFolder,
+              icon: const Icon(Icons.folder_open, size: 18),
+              label: const Text('Select Storage Folder'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUnconfiguredCatalogPlaceholder() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Center(
+        child: Column(
+          children: [
+            Icon(Icons.lock_outline, size: 40, color: AppColors.textTertiary),
+            const SizedBox(height: 8),
+            const Text(
+              'Model Catalog Unavailable',
+              style: AppTypography.titleSmall,
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Configure your storage directory above to browse, download, and manage local models.',
+              style: AppTypography.bodySmall,
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCustomModelsInfoCard() {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border, style: BorderStyle.solid),
+        border: Border.all(color: AppColors.border),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Icon(Icons.info_outline, size: 20, color: AppColors.primary),
+          const SizedBox(width: 10),
           Expanded(
-            child: Text(title, style: AppTypography.labelLarge),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton.icon(
-            onPressed: onTap,
-            icon: Icon(icon, size: 16),
-            label: Text(buttonLabel),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text('Custom Models', style: AppTypography.labelLarge),
+                SizedBox(height: 4),
+                Text(
+                  'Drop any .gguf files directly into the "llm/" subfolder, or Whisper models into "whisper/". They will be automatically recognized and listed above.',
+                  style: AppTypography.bodySmall,
+                ),
+              ],
+            ),
           ),
         ],
       ),
