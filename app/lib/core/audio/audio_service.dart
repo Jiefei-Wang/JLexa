@@ -266,9 +266,18 @@ class AudioService extends ChangeNotifier {
       return;
     }
     _loopSeekInFlight = true;
+    debugPrint(
+      '[JLexaAudio] loop start cut=${target.id} '
+      'bounds=${target.startMs}-${target.endMs} position=$_positionMs',
+    );
     try {
       await seekTo(target.startMs, userInitiated: false);
-      if (_isRepeatOne && loopTarget?.id == target.id) await play();
+      if (_isRepeatOne && loopTarget?.id == target.id) {
+        await play();
+        debugPrint(
+          '[JLexaAudio] loop resumed cut=${target.id} at=${target.startMs}',
+        );
+      }
     } finally {
       _loopSeekInFlight = false;
     }

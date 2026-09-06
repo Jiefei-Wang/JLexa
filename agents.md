@@ -175,3 +175,29 @@ At the end of every agent session after completing work:
   - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`
   - APK Signature Scheme v2: `true` (Verified)
   - Result: Success
+
+---
+
+## Session: 2026-09-06 (Pixel 6 Device Validation Pass)
+- **Focus**: End-to-end validation on Google Pixel 6 (`25311FDF6004PR`, Android 16), including SAF model downloads, CPU/Vulkan generation, WAV/MP3 VAD and Whisper transcription, repeat-one playback, persisted per-cut transcript display, and Auto transcription cancellation races.
+- **Bugs Fixed**:
+  1. *Auto Transcription Cut-Switch Race*: A cancelled Whisper request could return after the active cut changed, persist stale text into the old cut, and leave the controller permanently in `cancelling`. Stale operation results are now rejected before persistence, the owning request always releases the transcription slot, and Auto waits for native terminal completion before transcribing the latest cut.
+  2. *Persisted Transcript Visibility*: Saved transcripts were hidden after reopening a lesson, switching cuts with Auto disabled, or disabling Auto. Valid persisted text is now restored and follows the active cut independently of the currently loaded Whisper model.
+  3. *Repeat-One Observability*: Added concise release-mode loop boundary logging to prove that playback seeks to the selected cut start and resumes after every cut end.
+- **Physical Device Verification**:
+  - In-app SAF download completed for Qwen2.5 0.5B (`491,400,032` bytes; SHA-256 `74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db`) and Whisper Tiny.
+  - CPU and Vulkan (`Mali-G78`) each loaded the real GGUF and produced coherent answers without process restart or native abort; Auto was restored to Vulkan after testing.
+  - A known English WAV and MP3 fixture with leading/trailing silence produced real VAD cuts. Manual per-cut Whisper returned `This is a real speech recognition test`; MP3 Auto mode returned `Hello`; internal control tokens were absent.
+  - Repeat-one completed four consecutive cycles for cut bounds `2652-5049 ms`, seeking back to `2652 ms` each time.
+  - Manual AI sentence explanation generated only after tapping **Generate Explanation**. Existing app data, audio lessons, and model files were preserved across release upgrades.
+- **Test Suite**:
+  - Added 3 regression tests for invalidated-request cleanup, Auto cut-switch serialization, and persisted transcript visibility.
+  - `flutter test --concurrency=1` -> `156 passed`, `0 failed`.
+- **Static Analysis**:
+  - `flutter analyze` -> `No issues found!` (0 errors, 0 warnings).
+- **Fixed Signed Release APK Location**:
+  - Path: `release/app-release.apk` (88,508,239 bytes)
+  - APK SHA-256: `277BE1AC3CFC624FA0084C8C0C09BDD327004B3F75360580FD0BC157B7CB956A`
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`
+  - APK Signature Scheme v2: `true` (Verified)
+  - Pixel 6 installation: Success (`pm install -r`, data preserved; final PID `15562`).

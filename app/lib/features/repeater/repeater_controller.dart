@@ -140,26 +140,67 @@ class RepeaterController extends ChangeNotifier {
     _checkPersistDuration();
     final newSegId = audioService.currentSegment?.id;
     if (newSegId != _activeSegmentId) {
+      debugPrint(
+        '[JLexaWhisper] active cut changed from=$_activeSegmentId to=$newSegId '
+        'state=$_transcriptionState generation=$_transcriptionGeneration',
+      );
       _activeSegmentId = newSegId;
       _invalidateExplanation();
-      _visibleTranscriptCutId = null;
-      _transcriptionGeneration++;
+      final switchGeneration = ++_transcriptionGeneration;
+      final pendingTranscription = _transcriptionCompleter?.future;
       unawaited(cancelTranscription());
       _autoTranscribeDebounce?.cancel();
       final cut = currentSegment;
+      _visibleTranscriptCutId = cut?.hasValidTranscript == true
+          ? cut!.id
+          : null;
       if (_autoTranscribe && cut != null) {
         if (cut.hasValidTranscript &&
             cut.transcriptModelId == aiService.speechEngine.loadedModelPath) {
           _visibleTranscriptCutId = cut.id;
         } else {
-          _autoTranscribeDebounce = Timer(
-            const Duration(milliseconds: 350),
-            () => transcribeCurrentCut(automatic: true),
+          unawaited(
+            _queueAutoTranscriptionAfterCancellation(
+              cutId: cut.id,
+              cutRevision: cut.revision,
+              switchGeneration: switchGeneration,
+              pendingTranscription: pendingTranscription,
+            ),
           );
         }
       }
     }
     notifyListeners();
+  }
+
+  Future<void> _queueAutoTranscriptionAfterCancellation({
+    required String cutId,
+    required int cutRevision,
+    required int switchGeneration,
+    required Future<void>? pendingTranscription,
+  }) async {
+    if (pendingTranscription != null) {
+      try {
+        await pendingTranscription;
+      } catch (_) {}
+    }
+    if (_isDisposed ||
+        !_autoTranscribe ||
+        switchGeneration != _transcriptionGeneration ||
+        currentSegment?.id != cutId ||
+        currentSegment?.revision != cutRevision) {
+      return;
+    }
+    _autoTranscribeDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (!_isDisposed &&
+          _autoTranscribe &&
+          switchGeneration == _transcriptionGeneration &&
+          currentSegment?.id == cutId &&
+          currentSegment?.revision == cutRevision &&
+          _transcriptionState == TranscriptionState.idle) {
+        unawaited(transcribeCurrentCut(automatic: true));
+      }
+    });
   }
 
   // Item 14: Simplified position persistence — throttle to every 5s during playback
@@ -277,6 +318,10 @@ class RepeaterController extends ChangeNotifier {
 
       // Step 3: Show the lesson UI immediately
       _activeSegmentId = audioService.currentSegment?.id;
+      final activeCut = audioService.currentSegment;
+      _visibleTranscriptCutId = activeCut?.hasValidTranscript == true
+          ? activeCut!.id
+          : null;
       _isLoading = false;
       notifyListeners();
 
@@ -343,6 +388,10 @@ class RepeaterController extends ChangeNotifier {
     final targetEndMs = cut.endMs;
     final targetModelId = aiService.speechEngine.loadedModelPath ?? '';
     final operationId = ++_transcriptionGeneration;
+    debugPrint(
+      '[JLexaWhisper] transcription start cut=$targetCutId '
+      'revision=$targetRevision generation=$operationId automatic=$automatic',
+    );
     final reqId = const Uuid().v4();
     _activeTranscriptionRequestId = reqId;
     _transcribingLessonId = targetLessonId;
@@ -386,6 +435,18 @@ class RepeaterController extends ChangeNotifier {
       // If cancelled while transcribeAudio was finishing, reject result
       if (_transcriptionState == TranscriptionState.cancelling) {
         throw const AiCancelledException();
+      }
+
+      // A cut/lesson switch invalidates the operation even when the native
+      // engine races cancellation and returns a plausible final result.
+      // Never persist that stale text into the cut it was started for.
+      if (operationId != _transcriptionGeneration ||
+          _lesson?.id != targetLessonId) {
+        debugPrint(
+          '[JLexaWhisper] rejected stale result cut=$targetCutId '
+          'operation=$operationId current=$_transcriptionGeneration',
+        );
+        return;
       }
 
       final currentIndex = _segments.indexWhere(
@@ -449,8 +510,6 @@ class RepeaterController extends ChangeNotifier {
       }
       if (_transcriptionCompleter == completer) {
         _transcriptionCompleter = null;
-      }
-      if (operationId == _transcriptionGeneration) {
         _activeTranscriptionRequestId = null;
         _transcribingLessonId = null;
         _transcriptionState = TranscriptionState.idle;
@@ -547,8 +606,11 @@ class RepeaterController extends ChangeNotifier {
     _autoTranscribeDebounce?.cancel();
     if (!value) {
       _transcriptionGeneration++;
-      _visibleTranscriptCutId = null;
       await cancelTranscription();
+      final cut = currentSegment;
+      _visibleTranscriptCutId = cut?.hasValidTranscript == true
+          ? cut!.id
+          : null;
     } else if (currentSegment != null) {
       final cut = currentSegment!;
       if (cut.hasValidTranscript &&

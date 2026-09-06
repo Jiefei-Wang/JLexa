@@ -243,6 +243,51 @@ class TestMockSpeechEngine implements SpeechRecognitionEngine {
   }
 }
 
+class ControllableAudioService extends AudioService {
+  AudioLesson? _lesson;
+  List<AudioSegment> _cuts = const [];
+  int _position = 0;
+
+  @override
+  AudioLesson? get currentLesson => _lesson;
+  @override
+  List<AudioSegment> get segments => _cuts;
+  @override
+  int get positionMs => _position;
+  @override
+  int get durationMs => _lesson?.durationMs ?? 0;
+  @override
+  AudioSegment? get currentSegment {
+    for (final cut in _cuts) {
+      if (cut.containsPosition(_position)) return cut;
+    }
+    return null;
+  }
+
+  @override
+  Future<void> loadLesson(
+    AudioLesson lesson,
+    List<AudioSegment> segments,
+  ) async {
+    _lesson = lesson;
+    _cuts = List.of(segments);
+    _position = lesson.currentPositionMs;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> seekTo(int positionMs, {bool userInitiated = true}) async {
+    _position = positionMs;
+    notifyListeners();
+  }
+
+  @override
+  void updateSegments(List<AudioSegment> newSegments) {
+    _cuts = List.of(newSegments);
+    notifyListeners();
+  }
+}
+
 void main() {
   late Directory tempDir;
   late LessonRepository lessonRepo;
@@ -462,6 +507,192 @@ void main() {
         expect(controller.transcriptionState, equals(TranscriptionState.idle));
 
         controller.dispose();
+      },
+    );
+
+    test(
+      '3b. invalidating an active transcription still releases the state slot',
+      () async {
+        final lesson = AudioLesson(
+          id: 'lesson_invalidated_cancel',
+          title: 'Invalidated Cancel',
+          originalFileName: 'test.mp3',
+          localPath: '${tempDir.path}/test_sample.mp3',
+          durationMs: 5000,
+          createdAt: DateTime.now(),
+          lastOpenedAt: DateTime.now(),
+        );
+        await lessonRepo.saveLesson(lesson);
+        await lessonRepo.saveSegments(lesson.id, [
+          AudioSegment(
+            id: 'cut_invalidated_cancel',
+            lessonId: lesson.id,
+            startMs: 0,
+            endMs: 5000,
+            text: '',
+          ),
+        ]);
+
+        final controller = RepeaterController(
+          lessonRepo: lessonRepo,
+          audioService: audioService,
+          waveformService: waveformService,
+          aiService: aiService,
+        );
+        await controller.loadLesson(lesson);
+        speechEngine.transcriptionCompleter = Completer<List<AudioSegment>>();
+
+        final transcription = controller.transcribeLesson();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(controller.transcriptionState, TranscriptionState.transcribing);
+
+        // Disabling Auto invalidates the operation generation before asking
+        // Whisper to cancel. The stale operation must still release the one
+        // shared transcription slot when native work reaches terminal state.
+        final disableAuto = controller.setAutoTranscribe(false);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(controller.transcriptionState, TranscriptionState.cancelling);
+        speechEngine.transcriptionCompleter!.complete(const []);
+        await Future.wait([transcription, disableAuto]);
+
+        expect(controller.transcriptionState, TranscriptionState.idle);
+        expect(controller.isTranscribing, isFalse);
+        controller.dispose();
+      },
+    );
+
+    test('3c. Auto waits for cancelled cut transcription before starting the new cut', () async {
+      final controlledAudio = ControllableAudioService();
+      final lesson = AudioLesson(
+        id: 'lesson_auto_switch',
+        title: 'Auto Switch',
+        originalFileName: 'test.mp3',
+        localPath: '${tempDir.path}/test_sample.mp3',
+        durationMs: 5000,
+        createdAt: DateTime.now(),
+        lastOpenedAt: DateTime.now(),
+      );
+      await lessonRepo.saveLesson(lesson);
+      await lessonRepo.saveSegments(lesson.id, const [
+        AudioSegment(
+          id: 'cut_auto_a',
+          lessonId: 'lesson_auto_switch',
+          startMs: 0,
+          endMs: 2000,
+          text: '',
+        ),
+        AudioSegment(
+          id: 'cut_auto_b',
+          lessonId: 'lesson_auto_switch',
+          startMs: 2500,
+          endMs: 5000,
+          text: '',
+        ),
+      ]);
+
+      final controller = RepeaterController(
+        lessonRepo: lessonRepo,
+        audioService: controlledAudio,
+        waveformService: waveformService,
+        aiService: aiService,
+      );
+      await controller.loadLesson(lesson);
+      speechEngine.transcriptionCompleter = Completer<List<AudioSegment>>();
+      await controller.setAutoTranscribe(true);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(controller.transcriptionState, TranscriptionState.transcribing);
+      expect(controller.currentSegment?.id, 'cut_auto_a');
+
+      await controller.seekTo(3000);
+      expect(controller.currentSegment?.id, 'cut_auto_b');
+      expect(speechEngine.cancelCalled, isTrue);
+      speechEngine.transcriptionCompleter!.complete(const [
+        AudioSegment(
+          id: 'native_result',
+          lessonId: 'lesson_auto_switch',
+          startMs: 0,
+          endMs: 1000,
+          text: 'new cut transcript',
+        ),
+      ]);
+      await Future<void>.delayed(const Duration(milliseconds: 550));
+
+      final saved = await lessonRepo.getSegmentsForLesson(lesson.id);
+      expect(saved.map((cut) => '${cut.id}:${cut.text}').toList(), const [
+        'cut_auto_a:',
+        'cut_auto_b:new cut transcript',
+      ]);
+      expect(saved.singleWhere((cut) => cut.id == 'cut_auto_a').text, isEmpty);
+      expect(
+        saved.singleWhere((cut) => cut.id == 'cut_auto_b').text,
+        'new cut transcript',
+      );
+      expect(controller.transcriptionState, TranscriptionState.idle);
+      controller.dispose();
+      controlledAudio.dispose();
+    });
+
+    test(
+      '3d. persisted per-cut transcripts remain visible with Auto off',
+      () async {
+        final controlledAudio = ControllableAudioService();
+        final lesson = AudioLesson(
+          id: 'lesson_saved_transcripts',
+          title: 'Saved Transcripts',
+          originalFileName: 'test.mp3',
+          localPath: '${tempDir.path}/test_sample.mp3',
+          durationMs: 5000,
+          createdAt: DateTime.now(),
+          lastOpenedAt: DateTime.now(),
+        );
+        await lessonRepo.saveLesson(lesson);
+        await lessonRepo.saveSegments(lesson.id, const [
+          AudioSegment(
+            id: 'saved_a',
+            lessonId: 'lesson_saved_transcripts',
+            startMs: 0,
+            endMs: 2000,
+            text: 'first persisted transcript',
+            transcriptCutRevision: 0,
+            transcriptModelId: '/older/whisper.bin',
+          ),
+          AudioSegment(
+            id: 'saved_b',
+            lessonId: 'lesson_saved_transcripts',
+            startMs: 2500,
+            endMs: 5000,
+            text: 'second persisted transcript',
+            transcriptCutRevision: 0,
+            transcriptModelId: '/older/whisper.bin',
+          ),
+        ]);
+
+        final controller = RepeaterController(
+          lessonRepo: lessonRepo,
+          audioService: controlledAudio,
+          waveformService: waveformService,
+          aiService: aiService,
+        );
+        await controller.loadLesson(lesson);
+        expect(controller.autoTranscribe, isFalse);
+        expect(
+          controller.visibleTranscriptSegment?.text,
+          'first persisted transcript',
+        );
+
+        await controller.seekTo(3000);
+        expect(
+          controller.visibleTranscriptSegment?.text,
+          'second persisted transcript',
+        );
+        await controller.setAutoTranscribe(false);
+        expect(
+          controller.visibleTranscriptSegment?.text,
+          'second persisted transcript',
+        );
+
+        controller.dispose();
+        controlledAudio.dispose();
       },
     );
 
