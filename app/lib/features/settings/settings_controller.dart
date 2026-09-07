@@ -22,7 +22,13 @@ class SettingsController extends ChangeNotifier {
   bool _isDisposed = false;
 
   bool get isLoading => _isProcessing || !modelManager.isInitialized;
-  String? get errorMessage => _errorMessage;
+  String? get errorMessage => _errorMessage ?? modelManager.inventoryError;
+  bool get hasInventoryError => modelManager.inventoryError != null;
+
+  Future<void> refreshModels() async {
+    await modelManager.refreshModels();
+    notifyListeners();
+  }
 
   bool get isStorageConfigured => modelManager.isStorageConfigured;
   String? get storageLocationDisplay => modelManager.storageLocationDisplay;

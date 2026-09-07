@@ -284,6 +284,37 @@ void main() {
       unconfiguredManager.dispose();
     });
 
+    testWidgets('Loaded legacy Whisper remains visible without a selected storage folder', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 2400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      late ModelManager legacyManager;
+      late SettingsController legacyController;
+      await tester.runAsync(() async {
+        final file = File(p.join(tempDir.path, 'ggml-tiny.bin'));
+        await file.writeAsBytes([1, 2, 3]);
+        await aiService.loadSpeechModel(file.path);
+        legacyManager = ModelManager(
+          storage: ModelStorage(backend: FileSystemModelStorageBackend()),
+          downloader: downloader,
+          aiService: aiService,
+        );
+        await legacyManager.initialize();
+        legacyController = SettingsController(aiService: aiService, manager: legacyManager);
+      });
+      await tester.pumpWidget(MaterialApp(home: SettingsScreen(
+        aiService: aiService,
+        controller: legacyController,
+      )));
+      await tester.pump();
+      expect(find.text('ggml-tiny.bin'), findsOneWidget);
+      expect(find.text('LOADED'), findsOneWidget);
+      expect(find.text('Saved model outside the selected folder'), findsOneWidget);
+      expect(find.text('Whisper Tiny (English)'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      legacyController.dispose();
+      legacyManager.dispose();
+    });
+
     testWidgets('Download workflow with progress, completion, use, and unload', (
       WidgetTester tester,
     ) async {

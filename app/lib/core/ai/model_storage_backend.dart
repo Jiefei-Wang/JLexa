@@ -37,6 +37,7 @@ abstract class ModelStorageBackend {
   Future<void> clearConfiguredFolder();
 
   Future<List<ModelFileEntry>> listModelFiles(ModelType type);
+  Future<ModelFileEntry?> getFileEntry(String location);
   Future<String> prepareDownloadPart(ModelType type, String filename);
   Future<void> download({
     required DownloadableModel model,
@@ -375,6 +376,18 @@ class FileSystemModelStorageBackend implements ModelStorageBackend {
     } catch (_) {}
     return false;
   }
+
+  @override
+  Future<ModelFileEntry?> getFileEntry(String location) async {
+    final stat = await File(location).stat();
+    if (stat.type != FileSystemEntityType.file) return null;
+    return ModelFileEntry(
+      location: location,
+      name: p.basename(location),
+      sizeBytes: stat.size,
+      lastModified: stat.modified,
+    );
+  }
 }
 
 /// Android Storage Access Framework (SAF) backend.
@@ -479,9 +492,25 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
               : null,
         );
       }).toList();
-    } catch (_) {
-      return [];
+    } catch (e) {
+      throw ModelValidationException(
+        'Could not read ${type.name} model folder: $e',
+      );
     }
+  }
+
+  @override
+  Future<ModelFileEntry?> getFileEntry(String location) async {
+    if (!Platform.isAndroid) return null;
+    final Map? info = await _channel.invokeMapMethod('getModelFileInfo', {
+      'uri': location,
+    });
+    if (info == null) return null;
+    return ModelFileEntry(
+      location: location,
+      name: info['name'] as String,
+      sizeBytes: (info['size'] as num?)?.toInt() ?? 0,
+    );
   }
 
   @override

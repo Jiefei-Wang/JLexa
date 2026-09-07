@@ -307,3 +307,28 @@ At the end of every agent session after completing work:
   - `apksigner verify --verbose --print-certs`: Verified, APK Signature Scheme v2 true.
   - Existing upstream flutter_tts future Kotlin compatibility warning remains; the release build succeeds. Prior blocked APK-output deletion was not retried or bypassed.
 - **Limits**: Acoustic cuts can still require manual correction around noise/laughter or linguistic pauses. Existing saved cuts change only through explicit Redo segments. Whisper recognizes a selected cut after full-source PCM preparation.
+
+---
+
+## Session: 2026-09-06 (Repeater Actions and Honor Model/AI Corrections)
+- **Focus**: Completed five requested changes: replay control, explicit boundary editing, inline transcription progress, missing model inventory, and PTP_AN00 nonsensical AI output. Evidence: `docs/qa-2026-09-06-repeater-and-honor-ai.md` and `docs/native-cpu-regression.md`.
+- **Changes**:
+  - Added Replay between Next and Repeat; it restarts the selected cut without toggling looping, including post-split left-cut selection.
+  - Added a highlighted Edit toggle before Add. Boundaries are locked by default; waveform seeking remains available. Switching lessons resets editing.
+  - Moved transcription spinner/available percentage into Transcribe, retained cancellation and error reporting, and removed the top Whisper status panel.
+  - Reconciled model inventory with loaded/configured paths, including legacy private storage and SAF metadata. Refreshes on Settings entry, preserves prior rows on scan errors, and displays loaded models even without a newly configured folder.
+  - Fixed CPU mode accidentally enabling Vulkan operation offload. Native CPU loading now supplies an empty accelerator list and disables operation/KQV offloading; GPU selections retain their chosen device.
+- **Verification**:
+  - Pixel 6 (`25311FDF6004PR`, PID `31723`): locked/on/off boundary dragging, replay seeking/playback without changing Repeat, inline native Whisper progress and complete reaction-question transcription. Temporary QA lesson/source removed; existing lessons/models retained. Crash buffer empty.
+  - Honor PTP_AN00 (PID `13889`): final Settings shows Whisper Tiny (English), 74.1 MB, LOADED, outside the selected folder; Qwen2.5 1.5B is also LOADED. Fresh chat now gives related explanations and `早上好。`; crash buffer empty.
+  - Controlled native comparison using identical verified Qwen model bytes and deterministic settings: broken hybrid path produced unrelated text for 2+2; corrected CPU returned `4`, correct morning translation, and relevant say/tell prose. Final release library passes `native/tests/llama_cpu_smoke.cpp`, including descriptor loading; native diagnostics show one CPU backend/graph split.
+  - AI model SHA-256 unchanged: `6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e`. The model file was not damaged; unintended GPU computation caused the observed corrupt output. Small-model semantic limitations still apply.
+- **Static Analysis**: `flutter analyze` -> `No issues found!` (zero errors/warnings).
+- **Tests**: `flutter test --concurrency=1` -> `187 passed`, zero failed; final native CPU smoke test PASS.
+- **Signed Release**:
+  - `flutter build apk --release` succeeded using `app/android/key.properties`; signed upgrade installed successfully on both phones with data preserved.
+  - Fixed path: `release/app-release.apk` (93,326,253 bytes).
+  - APK SHA-256: `B0466185951A0A124C41D9A9FE27D432498B7799C06CA3B40AB6514FF61CF4A5`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
+  - `apksigner verify --verbose --print-certs`: Verified, APK Signature Scheme v2 true.
+  - Existing upstream flutter_tts Kotlin compatibility notice remains; release build succeeds. Prior blocked duplicate APK-output cleanup was not retried or bypassed.

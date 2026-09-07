@@ -747,9 +747,17 @@ class RepeaterController extends ChangeNotifier {
     audioService.nextSentence();
   }
 
-  void repeatCurrentSentence() {
+  Future<void> repeatCurrentSentence() async {
+    // Capture the selected cut before releasing a post-edit selection override.
+    final cut = currentSegment;
+    final lessonId = _lesson?.id;
+    if (cut == null) return;
     _selectedSegmentId = null;
-    audioService.repeatCurrentSentence();
+    await audioService.seekTo(cut.startMs);
+    if (_isDisposed || _lesson?.id != lessonId || currentSegment?.id != cut.id) {
+      return;
+    }
+    await audioService.play();
   }
 
   // Item 12: Rewritten segment boundary algorithm — legal range first, then preferences

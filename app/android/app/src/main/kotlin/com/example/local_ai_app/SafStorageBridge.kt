@@ -180,8 +180,7 @@ class SafStorageBridge(private val context: Context) : MethodChannel.MethodCallH
                     try {
                         val rootDoc = getRootDocument()
                         if (rootDoc == null) {
-                            withContext(Dispatchers.Main) { result.success(emptyList<Map<String, Any>>()) }
-                            return@launch
+                            throw IllegalStateException("The selected model folder is no longer accessible")
                         }
 
                         val subDir = rootDoc.findFile(type)
@@ -567,6 +566,25 @@ class SafStorageBridge(private val context: Context) : MethodChannel.MethodCallH
                 }
                 val doc = DocumentFile.fromSingleUri(context, Uri.parse(uriStr))
                 result.success(doc?.length() ?: 0L)
+            }
+
+            "getModelFileInfo" -> {
+                val uriStr = call.argument<String>("uri")
+                if (uriStr == null) {
+                    result.success(null)
+                    return
+                }
+                scope.launch {
+                    try {
+                        val doc = DocumentFile.fromSingleUri(context, Uri.parse(uriStr))
+                        val info = if (doc != null && doc.exists() && doc.isFile) {
+                            mapOf("name" to (doc.name ?: "Saved model"), "size" to doc.length())
+                        } else null
+                        withContext(Dispatchers.Main) { result.success(info) }
+                    } catch (e: Throwable) {
+                        withContext(Dispatchers.Main) { result.error("FILE_INFO_ERROR", e.message, null) }
+                    }
+                }
             }
 
             "fileExists" -> {

@@ -244,6 +244,12 @@ class TestMockSpeechEngine implements SpeechRecognitionEngine {
 }
 
 class ControllableAudioService extends AudioService {
+  int playCalls = 0;
+  @override
+  Future<void> play() async {
+    playCalls++;
+  }
+
   AudioLesson? _lesson;
   List<AudioSegment> _cuts = const [];
   int _position = 0;
@@ -1047,6 +1053,13 @@ void main() {
         // must not steal the explicit post-split selection from the left cut.
         await controlledAudio.seekTo(2000);
         expect(controller.currentSegment?.id, equals('seg_split'));
+
+        // Replay must use the selected left cut, even if the decoder reports
+        // the right cut's timestamp after a split. Loop mode stays unchanged.
+        await controller.repeatCurrentSentence();
+        expect(controlledAudio.positionMs, 0);
+        expect(controlledAudio.playCalls, 1);
+        expect(controlledAudio.isRepeatOne, isFalse);
 
         // The next explicit user seek releases the selection override and
         // resumes normal playhead-based cut selection.

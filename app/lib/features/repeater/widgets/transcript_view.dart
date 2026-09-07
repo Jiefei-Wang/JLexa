@@ -11,6 +11,11 @@ class TranscriptView extends StatelessWidget {
   final VoidCallback? onTranscribe;
   final ValueChanged<String> onWordTap;
   final VoidCallback? onPlaySentence;
+  final bool isTranscribing;
+  final bool isCancelling;
+  final double? progress;
+  final VoidCallback? onCancel;
+  final String? error;
   const TranscriptView({
     super.key,
     required this.segment,
@@ -19,6 +24,11 @@ class TranscriptView extends StatelessWidget {
     this.onTranscribe,
     required this.onWordTap,
     this.onPlaySentence,
+    this.isTranscribing = false,
+    this.isCancelling = false,
+    this.progress,
+    this.onCancel,
+    this.error,
   });
 
   List<String> _displayParts(String text) => RegExp(
@@ -30,6 +40,15 @@ class TranscriptView extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = segment?.text.trim() ?? '';
     final confidence = segment?.confidence ?? -1;
+    final busy = isTranscribing || isCancelling;
+    final reportedProgress = progress;
+    final fraction =
+        !isCancelling &&
+            reportedProgress != null &&
+            reportedProgress.isFinite &&
+            reportedProgress > 0
+        ? reportedProgress.clamp(0.0, 1.0)
+        : null;
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -52,10 +71,35 @@ class TranscriptView extends StatelessWidget {
               ),
               const Text('Auto', style: AppTypography.bodySmall),
               TextButton.icon(
-                onPressed: onTranscribe,
-                icon: const Icon(Icons.subtitles, size: 17),
-                label: const Text('Transcribe'),
+                onPressed: busy ? null : onTranscribe,
+                icon: busy
+                    ? SizedBox(
+                        width: 17,
+                        height: 17,
+                        child: CircularProgressIndicator(
+                          value: fraction,
+                          strokeWidth: 2,
+                          semanticsLabel: isCancelling
+                              ? 'Cancelling transcription'
+                              : 'Transcribing',
+                        ),
+                      )
+                    : const Icon(Icons.subtitles, size: 17),
+                label: Text(
+                  fraction == null
+                      ? 'Transcribe'
+                      : 'Transcribe ${(fraction * 100).round()}%',
+                ),
               ),
+              if (busy)
+                IconButton(
+                  tooltip: isCancelling
+                      ? 'Cancelling transcription'
+                      : 'Cancel transcription',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: isCancelling ? null : onCancel,
+                  icon: const Icon(Icons.close, size: 18),
+                ),
               if (confidence >= 0 && confidence <= 1)
                 Chip(
                   visualDensity: VisualDensity.compact,
@@ -64,12 +108,14 @@ class TranscriptView extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          if (text.isEmpty)
+          if (error != null && !busy)
+            Text(error!, style: const TextStyle(color: AppColors.error)),
+          if (text.isEmpty && !busy && error == null)
             const Text(
               'No transcript is displayed for the active cut.',
               style: AppTypography.bodySmall,
             )
-          else
+          else if (text.isNotEmpty)
             Wrap(
               spacing: 4,
               runSpacing: 6,

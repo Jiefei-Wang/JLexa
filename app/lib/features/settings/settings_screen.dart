@@ -40,6 +40,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
       _ownsController = true;
     }
+    _controller.refreshModels();
   }
 
   @override
@@ -124,12 +125,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(
-                            Icons.close,
+                          icon: Icon(
+                            _controller.hasInventoryError
+                                ? Icons.refresh
+                                : Icons.close,
                             size: 16,
                             color: AppColors.error,
                           ),
-                          onPressed: _controller.clearError,
+                          tooltip: _controller.hasInventoryError
+                              ? 'Retry model scan'
+                              : 'Dismiss error',
+                          onPressed: _controller.hasInventoryError
+                              ? _controller.refreshModels
+                              : _controller.clearError,
                         ),
                       ],
                     ),
@@ -198,7 +206,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (!_controller.isStorageConfigured) ...[
                   _buildUnconfiguredCatalogPlaceholder(),
                   const SizedBox(height: 24),
-                ] else ...[
+                ],
+                if (llmModels.isNotEmpty || whisperModels.isNotEmpty) ...[
                   // ==========================================
                   // Section 1: Local Language Model (LLM)
                   // ==========================================
@@ -505,7 +514,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 if (!isDownloaded && item.catalogModel != null)
                   FilledButton.tonalIcon(
-                    onPressed: _controller.isLoading
+                    onPressed:
+                        _controller.isLoading || _controller.hasInventoryError
                         ? null
                         : () => _controller.downloadModel(item.catalogModel!),
                     icon: const Icon(Icons.download, size: 18),

@@ -332,7 +332,10 @@ bool JLexaLlamaBridge::loadModel(const std::string& modelPath, const JLexaLlamaR
     }
 
     ggml_backend_dev_t selected_devices[] = {target_gpu_dev, nullptr};
-    if (target_gpu_dev) mparams.devices = selected_devices;
+    // nullptr asks llama.cpp to discover every GPU. An explicit empty list is
+    // required for CPU mode: zero GPU weight layers alone still lets prompt
+    // operations run on a GPU through the context scheduler.
+    mparams.devices = selected_devices;
 
     constexpr const char* procFdPrefix = "/proc/self/fd/";
     if (modelPath.rfind(procFdPrefix, 0) == 0) {
@@ -380,6 +383,8 @@ bool JLexaLlamaBridge::loadModel(const std::string& modelPath, const JLexaLlamaR
     cparams.n_ubatch = config.ubatchSize > 0 ? config.ubatchSize : 512;
     cparams.n_threads = pImpl->n_threads;
     cparams.n_threads_batch = pImpl->n_threads;
+    cparams.offload_kqv = target_gpu_dev != nullptr;
+    cparams.op_offload = target_gpu_dev != nullptr;
 
     if (config.flashAttention == 1) {
         cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;

@@ -284,68 +284,6 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                           ],
                         ),
                       )
-                    else if (_controller.transcriptionState ==
-                            TranscriptionState.transcribing ||
-                        _controller.transcriptionState ==
-                            TranscriptionState.cancelling)
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: AppColors.primary.withValues(alpha: 0.3),
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.5,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    _controller.transcriptionState ==
-                                            TranscriptionState.cancelling
-                                        ? 'Cancelling transcription...'
-                                        : 'Transcribing with Whisper (${(_controller.transcriptionProgress * 100).toInt()}%)...',
-                                    style: AppTypography.titleSmall,
-                                  ),
-                                ),
-                                if (_controller.transcriptionState !=
-                                    TranscriptionState.cancelling)
-                                  TextButton(
-                                    onPressed: _controller.cancelTranscription,
-                                    child: const Text(
-                                      'Cancel',
-                                      style: TextStyle(color: AppColors.error),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            LinearProgressIndicator(
-                              value:
-                                  _controller.transcriptionState ==
-                                      TranscriptionState.cancelling
-                                  ? null
-                                  : (_controller.transcriptionProgress > 0
-                                        ? _controller.transcriptionProgress
-                                        : null),
-                              backgroundColor: AppColors.border,
-                              color: AppColors.primary,
-                            ),
-                          ],
-                        ),
-                      )
                     else if (_controller.segments.isEmpty)
                       Container(
                         margin: const EdgeInsets.only(bottom: 16),
@@ -400,6 +338,7 @@ class RepeaterScreenState extends State<RepeaterScreen> {
 
                     // Local Waveform (10 seconds)
                     WaveformView(
+                      key: ValueKey(_controller.lesson?.id),
                       fullPeaks: _controller.fullWaveformPeaks,
                       totalDurationMs: _controller.durationMs,
                       currentPositionMs: _controller.positionMs,
@@ -434,6 +373,9 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                       onToggleRepeatOne: _controller.toggleRepeatOne,
                       onPrevSentence: _controller.previousSentence,
                       onNextSentence: _controller.nextSentence,
+                      onReplay: _controller.currentSegment == null
+                          ? null
+                          : _controller.repeatCurrentSentence,
                     ),
                     const SizedBox(height: 16),
 
@@ -442,6 +384,13 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                       segment: _controller.visibleTranscriptSegment,
                       auto: _controller.autoTranscribe,
                       onAutoChanged: _controller.setAutoTranscribe,
+                      isTranscribing: _controller.isTranscribing,
+                      isCancelling:
+                          _controller.transcriptionState ==
+                          TranscriptionState.cancelling,
+                      progress: _controller.transcriptionProgress,
+                      onCancel: _controller.cancelTranscription,
+                      error: _controller.transcriptionError,
                       onTranscribe:
                           _controller.currentSegment == null ||
                               _controller.isWhisperBusyElsewhere

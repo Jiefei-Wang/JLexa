@@ -107,6 +107,8 @@ class ModelManager extends ChangeNotifier {
   List<ManagedModelItem> _llmModels = [];
   List<ManagedModelItem> _whisperModels = [];
   bool _isInitialized = false;
+  int _refreshRevision = 0;
+  String? _inventoryError;
 
   bool _isDisposed = false;
 
@@ -115,6 +117,7 @@ class ModelManager extends ChangeNotifier {
   bool get isInitialized => _isInitialized;
   bool get isStorageConfigured => storage.isConfigured;
   String? get storageLocationDisplay => storage.baseLocationDisplay;
+  String? get inventoryError => _inventoryError;
 
   @override
   void notifyListeners() {
@@ -140,11 +143,8 @@ class ModelManager extends ChangeNotifier {
     final restored = await storage.restorePersistedFolderAccess();
     if (restored) {
       await storage.cleanStalePartFiles(activePartPaths: _activePartPaths);
-      await refreshModels();
-    } else {
-      _llmModels = [];
-      _whisperModels = [];
     }
+    await refreshModels();
     _isInitialized = true;
     notifyListeners();
   }
@@ -204,27 +204,41 @@ class ModelManager extends ChangeNotifier {
   }
 
   Future<void> refreshModels() async {
-    if (!storage.isConfigured) {
-      _llmModels = [];
-      _whisperModels = [];
-      return;
-    }
+    final revision = ++_refreshRevision;
+    final errors = <String>[];
 
-    final downloadedLlmEntries = await storage.listModelFiles(ModelType.llm);
-    final downloadedWhisperEntries = await storage.listModelFiles(
-      ModelType.whisper,
+    final downloadedLlmEntries = await _readModelFiles(
+      ModelType.llm,
+      _llmModels,
+      errors,
     );
+    final downloadedWhisperEntries = await _readModelFiles(
+      ModelType.whisper,
+      _whisperModels,
+      errors,
+    );
+    final managedLocations = {
+      ...downloadedLlmEntries.map((entry) => entry.location),
+      ...downloadedWhisperEntries.map((entry) => entry.location),
+    };
+    await _includeSelectedModels(ModelType.llm, downloadedLlmEntries);
+    await _includeSelectedModels(ModelType.whisper, downloadedWhisperEntries);
+    if (_isDisposed || revision != _refreshRevision) return;
+    _inventoryError = errors.isEmpty ? null : errors.join('\n');
 
     // Build curated LLM items
     final llmItems = <ManagedModelItem>[];
     final knownLlmLocations = <String>{};
 
-    for (final catalog in ModelCatalog.curatedLlmModels) {
+    for (final catalog
+        in storage.isConfigured
+            ? ModelCatalog.curatedLlmModels
+            : <DownloadableModel>[]) {
       final matchingFile = downloadedLlmEntries
           .where((f) => f.name.toLowerCase() == catalog.filename.toLowerCase())
           .firstOrNull;
 
-      final exists = matchingFile != null && matchingFile.sizeBytes > 0;
+      final exists = matchingFile != null;
       final fileLoc = matchingFile?.location;
       final size = matchingFile?.sizeBytes ?? 0;
 
@@ -274,7 +288,9 @@ class ModelManager extends ChangeNotifier {
           isRecommended: catalog.isRecommended,
           memoryHint: catalog.memoryHint,
           speedHint: catalog.speedHint,
-          description: catalog.description,
+          description: fileLoc != null && !managedLocations.contains(fileLoc)
+              ? '${catalog.description}\nSaved model outside the selected folder.'
+              : catalog.description,
         ),
       );
     }
@@ -305,7 +321,9 @@ class ModelManager extends ChangeNotifier {
                 : (isLoading
                       ? ModelDownloadState.loading
                       : ModelDownloadState.downloaded),
-            description: 'Custom model in storage folder',
+            description: managedLocations.contains(file.location)
+                ? 'Custom model in storage folder'
+                : 'Saved model outside the selected folder',
             memoryHint: 'Custom',
             speedHint: 'Custom',
           ),
@@ -317,12 +335,15 @@ class ModelManager extends ChangeNotifier {
     final whisperItems = <ManagedModelItem>[];
     final knownWhisperLocations = <String>{};
 
-    for (final catalog in ModelCatalog.curatedWhisperModels) {
+    for (final catalog
+        in storage.isConfigured
+            ? ModelCatalog.curatedWhisperModels
+            : <DownloadableModel>[]) {
       final matchingFile = downloadedWhisperEntries
           .where((f) => f.name.toLowerCase() == catalog.filename.toLowerCase())
           .firstOrNull;
 
-      final exists = matchingFile != null && matchingFile.sizeBytes > 0;
+      final exists = matchingFile != null;
       final fileLoc = matchingFile?.location;
       final size = matchingFile?.sizeBytes ?? 0;
 
@@ -372,7 +393,9 @@ class ModelManager extends ChangeNotifier {
           isRecommended: catalog.isRecommended,
           memoryHint: catalog.memoryHint,
           speedHint: catalog.speedHint,
-          description: catalog.description,
+          description: fileLoc != null && !managedLocations.contains(fileLoc)
+              ? '${catalog.description}\nSaved model outside the selected folder.'
+              : catalog.description,
         ),
       );
     }
@@ -403,7 +426,9 @@ class ModelManager extends ChangeNotifier {
                 : (isLoading
                       ? ModelDownloadState.loading
                       : ModelDownloadState.downloaded),
-            description: 'Custom model in storage folder',
+            description: managedLocations.contains(file.location)
+                ? 'Custom model in storage folder'
+                : 'Saved model outside the selected folder',
             memoryHint: 'Custom',
             speedHint: 'Custom',
           ),
@@ -413,6 +438,84 @@ class ModelManager extends ChangeNotifier {
 
     _llmModels = llmItems;
     _whisperModels = whisperItems;
+  }
+
+  Future<List<ModelFileEntry>> _readModelFiles(
+    ModelType type,
+    List<ManagedModelItem> previous,
+    List<String> errors,
+  ) async {
+    if (!storage.isConfigured) return [];
+    try {
+      final entries = await storage.listModelFiles(type);
+      return entries.where((entry) => entry.sizeBytes > 0).toList();
+    } catch (e) {
+      errors.add('Could not refresh ${type.name} models: $e');
+      // A provider error must not turn known downloaded models into GET rows.
+      return previous.where((item) => item.localPath != null).map((item) {
+        return ModelFileEntry(
+          location: item.localPath!,
+          name: item.catalogModel?.filename ?? item.displayName,
+          sizeBytes: item.fileSizeBytes,
+        );
+      }).toList();
+    }
+  }
+
+  Future<void> _includeSelectedModels(
+    ModelType type,
+    List<ModelFileEntry> entries,
+  ) async {
+    final loadedPath = type == ModelType.llm
+        ? (aiService.llmEngine.isLoaded
+              ? aiService.llmEngine.loadedModelPath
+              : null)
+        : (aiService.speechEngine.isLoaded
+              ? aiService.speechEngine.loadedModelPath
+              : null);
+    final configuredPath = type == ModelType.llm
+        ? aiService.configuredLlmPath
+        : aiService.configuredSpeechPath;
+
+    for (final location in {configuredPath, loadedPath}.nonNulls) {
+      if (location.isEmpty ||
+          entries.any((entry) => _sameLocation(entry.location, location))) {
+        continue;
+      }
+      ModelFileEntry? entry;
+      try {
+        entry = await storage.getModelFileEntry(location);
+      } catch (_) {
+        // Loaded native model state remains authoritative if its provider
+        // cannot supply metadata. Do not guess a catalog variant from its URI.
+      }
+      if (entry != null && entry.sizeBytes > 0) {
+        entries.add(entry);
+      } else if (location == loadedPath) {
+        entries.add(
+          ModelFileEntry(
+            location: location,
+            name: type == ModelType.llm
+                ? 'Active language model'
+                : 'Active speech model',
+            sizeBytes: 0,
+          ),
+        );
+      }
+    }
+    // If two copies share a filename, the catalog row should describe the
+    // actual loaded copy; the other copy remains independently visible.
+    entries.sort(
+      (a, b) =>
+          (b.location == loadedPath ? 1 : 0) -
+          (a.location == loadedPath ? 1 : 0),
+    );
+  }
+
+  bool _sameLocation(String a, String b) {
+    if (a == b) return true;
+    if (a.startsWith('content://') || b.startsWith('content://')) return false;
+    return p.canonicalize(a) == p.canonicalize(b);
   }
 
   void _syncModelStates() {

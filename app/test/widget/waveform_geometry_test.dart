@@ -88,6 +88,18 @@ void main() {
       expect(end.dx, closeTo(shade.right + 1, .01));
       expect(neighbor.left - shade.right, closeTo(2, .01));
       expect(end.dx - start.dx, closeTo(160, .01));
+      // Locked by default: dragging a visible boundary cannot resize the cut.
+      await tester.dragFrom(end, const Offset(-60, 0));
+      await tester.pump();
+      expect(savedEnd, isNull);
+      expect(tester.getCenter(find.byKey(const ValueKey('cut-end-line'))), end);
+      final edit = find.byWidgetPredicate(
+        (w) => w is IconButton && w.tooltip == 'Edit segment boundaries',
+      );
+      expect(tester.widget<IconButton>(edit).isSelected, isFalse);
+      await tester.tap(edit);
+      await tester.pump();
+      expect(tester.widget<IconButton>(edit).isSelected, isTrue);
       final drag = await tester.startGesture(end);
       await drag.moveBy(const Offset(-20, 0));
       await tester.pump();
@@ -103,6 +115,11 @@ void main() {
       expect(previewEnd.dx, closeTo(previewShade.right + 1, .01));
       await drag.up();
       expect(savedEnd, closeTo(3500, 30));
+      await tester.tap(edit);
+      await tester.pump();
+      savedEnd = null;
+      await tester.dragFrom(end, const Offset(-60, 0));
+      expect(savedEnd, isNull);
     },
   );
 }

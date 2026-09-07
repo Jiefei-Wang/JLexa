@@ -10,6 +10,7 @@ class SegmentControls extends StatelessWidget {
   final VoidCallback onToggleRepeatOne;
   final VoidCallback onPrevSentence;
   final VoidCallback onNextSentence;
+  final VoidCallback? onReplay;
   const SegmentControls({
     super.key,
     required this.isPlaying,
@@ -18,6 +19,7 @@ class SegmentControls extends StatelessWidget {
     required this.onToggleRepeatOne,
     required this.onPrevSentence,
     required this.onNextSentence,
+    this.onReplay,
   });
   @override
   Widget build(BuildContext context) => Container(
@@ -48,6 +50,11 @@ class SegmentControls extends StatelessWidget {
           tooltip: 'Next cut',
           onPressed: onNextSentence,
           icon: const Icon(Icons.skip_next),
+        ),
+        IconButton(
+          tooltip: 'Replay active cut',
+          onPressed: onReplay,
+          icon: const Icon(Icons.replay),
         ),
         IconButton(
           tooltip: 'Repeat active cut',

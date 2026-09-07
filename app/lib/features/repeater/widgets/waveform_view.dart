@@ -48,6 +48,7 @@ class WaveformView extends StatefulWidget {
 }
 
 class _WaveformViewState extends State<WaveformView> {
+  bool _editEnabled = false;
   int? _previewStart, _previewEnd;
   AudioSegment? _gestureCut;
   final _plotKey = GlobalKey();
@@ -94,6 +95,25 @@ class _WaveformViewState extends State<WaveformView> {
                 'Local Window (10 seconds)',
                 style: AppTypography.labelLarge,
               ),
+            ),
+            IconButton(
+              tooltip: 'Edit segment boundaries',
+              isSelected: _editEnabled,
+              visualDensity: VisualDensity.compact,
+              style: IconButton.styleFrom(
+                foregroundColor: _editEnabled ? AppColors.primary : null,
+                backgroundColor: _editEnabled
+                    ? AppColors.primary.withValues(alpha: 0.14)
+                    : null,
+              ),
+              onPressed: widget.onSegmentBoundsChanged == null
+                  ? null
+                  : () {
+                      _clearEdit();
+                      setState(() => _editEnabled = !_editEnabled);
+                    },
+              icon: const Icon(Icons.edit_outlined),
+              selectedIcon: const Icon(Icons.edit),
             ),
             IconButton(
               tooltip: 'Add cut at playhead',
@@ -144,58 +164,66 @@ class _WaveformViewState extends State<WaveformView> {
                 width: 32,
                 top: 0,
                 bottom: 0,
-                child: GestureDetector(
-                  key: ValueKey(start ? 'cut-start-handle' : 'cut-end-handle'),
-                  behavior: HitTestBehavior.opaque,
-                  onHorizontalDragStart: (_) {
-                    final c = widget.currentSegment;
-                    if (c != null) {
+                child: IgnorePointer(
+                  ignoring:
+                      !_editEnabled || widget.onSegmentBoundsChanged == null,
+                  child: GestureDetector(
+                    key: ValueKey(
+                      start ? 'cut-start-handle' : 'cut-end-handle',
+                    ),
+                    behavior: HitTestBehavior.opaque,
+                    onHorizontalDragStart: (_) {
+                      final c = widget.currentSegment;
+                      if (c != null) {
+                        setState(() {
+                          _gestureCut = c;
+                          _gestureWindowStart = windowStart;
+                          _previewStart = c.startMs;
+                          _previewEnd = c.endMs;
+                        });
+                        widget.onSeekStart?.call();
+                      }
+                    },
+                    onHorizontalDragUpdate: (d) {
+                      final c = _gestureCut;
+                      if (c == null) return;
+                      final plot =
+                          _plotKey.currentContext!.findRenderObject()
+                              as RenderBox;
+                      final v = toMs(plot.globalToLocal(d.globalPosition).dx);
                       setState(() {
-                        _gestureCut = c;
-                        _gestureWindowStart = windowStart;
-                        _previewStart = c.startMs;
-                        _previewEnd = c.endMs;
+                        if (start && v < (_previewEnd ?? c.endMs)) {
+                          _previewStart = v;
+                        }
+                        if (!start && v > (_previewStart ?? c.startMs)) {
+                          _previewEnd = v;
+                        }
                       });
-                      widget.onSeekStart?.call();
-                    }
-                  },
-                  onHorizontalDragUpdate: (d) {
-                    final c = _gestureCut;
-                    if (c == null) return;
-                    final plot =
-                        _plotKey.currentContext!.findRenderObject()
-                            as RenderBox;
-                    final v = toMs(plot.globalToLocal(d.globalPosition).dx);
-                    setState(() {
-                      if (start && v < (_previewEnd ?? c.endMs)) {
-                        _previewStart = v;
+                    },
+                    onHorizontalDragCancel: _clearEdit,
+                    onHorizontalDragEnd: (_) {
+                      final c = _gestureCut;
+                      if (c != null) {
+                        widget.onSegmentBoundsChanged?.call(
+                          c.id,
+                          c.revision,
+                          _previewStart ?? c.startMs,
+                          _previewEnd ?? c.endMs,
+                        );
                       }
-                      if (!start && v > (_previewStart ?? c.startMs)) {
-                        _previewEnd = v;
-                      }
-                    });
-                  },
-                  onHorizontalDragCancel: _clearEdit,
-                  onHorizontalDragEnd: (_) {
-                    final c = _gestureCut;
-                    if (c != null) {
-                      widget.onSegmentBoundsChanged?.call(
-                        c.id,
-                        c.revision,
-                        _previewStart ?? c.startMs,
-                        _previewEnd ?? c.endMs,
-                      );
-                    }
-                    _clearEdit();
-                  },
-                  child: Center(
-                    child: Container(
-                      key: ValueKey(start ? 'cut-start-line' : 'cut-end-line'),
-                      width: 3,
-                      height: 82,
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(2),
+                      _clearEdit();
+                    },
+                    child: Center(
+                      child: Container(
+                        key: ValueKey(
+                          start ? 'cut-start-line' : 'cut-end-line',
+                        ),
+                        width: 3,
+                        height: 82,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
                       ),
                     ),
                   ),

@@ -73,9 +73,31 @@ class ModelStorage {
     expectedSizeBytes: expectedSizeBytes,
   );
 
-  Future<bool> deleteModel(String location) => backend.deleteModel(location);
+  Future<bool> deleteModel(String location) async {
+    if (location.startsWith('content://')) return backend.deleteModel(location);
+    final file = File(location);
+    if (!await file.exists()) return false;
+    await file.delete();
+    return true;
+  }
 
-  Future<bool> deleteModelFile(String path) => backend.deleteModel(path);
+  Future<bool> deleteModelFile(String path) => deleteModel(path);
+
+  /// A previously selected model can live outside the current SAF folder,
+  /// including the private filesystem storage used by older app versions.
+  Future<ModelFileEntry?> getModelFileEntry(String location) async {
+    if (location.startsWith('content://')) {
+      return backend.getFileEntry(location);
+    }
+    final stat = await File(location).stat();
+    if (stat.type != FileSystemEntityType.file) return null;
+    return ModelFileEntry(
+      location: location,
+      name: p.basename(location),
+      sizeBytes: stat.size,
+      lastModified: stat.modified,
+    );
+  }
 
   Future<void> cleanStalePartFiles({Set<String> activePartPaths = const {}}) =>
       backend.cleanStalePartFiles(activeLocations: activePartPaths);
