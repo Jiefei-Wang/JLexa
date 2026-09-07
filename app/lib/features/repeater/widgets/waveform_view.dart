@@ -62,13 +62,15 @@ class _WaveformViewState extends State<WaveformView> {
 
   @override
   Widget build(BuildContext context) {
-    const windowMs = 10000;
+    const windowMs = 20000;
     final center = widget.currentPositionMs;
-    final windowStart = _gestureWindowStart ?? center - 5000;
+    final windowStart = _gestureWindowStart ?? center - windowMs ~/ 2;
     final bars = widget.waveformService.windowBars(
       peaks: widget.fullPeaks,
       durationMs: widget.totalDurationMs,
       windowStartMs: windowStart,
+      windowMs: windowMs,
+      targetSamples: 160,
     );
     var displayedCuts = widget.segments;
     if (_gestureCut != null) {
@@ -91,10 +93,7 @@ class _WaveformViewState extends State<WaveformView> {
         Row(
           children: [
             const Expanded(
-              child: Text(
-                'Local Window (10 seconds)',
-                style: AppTypography.labelLarge,
-              ),
+              child: Text('Local Window', style: AppTypography.labelLarge),
             ),
             IconButton(
               tooltip: 'Edit segment boundaries',
@@ -137,7 +136,7 @@ class _WaveformViewState extends State<WaveformView> {
             Text(_time(max(0, windowStart)), style: AppTypography.labelSmall),
             Text(_time(center), style: AppTypography.labelSmall),
             Text(
-              _time(min(widget.totalDurationMs, center + 5000)),
+              _time(min(widget.totalDurationMs, windowStart + windowMs)),
               style: AppTypography.labelSmall,
             ),
           ],
@@ -159,76 +158,90 @@ class _WaveformViewState extends State<WaveformView> {
               final ex = active == null
                   ? null
                   : toX(_previewEnd ?? active.endMs);
-              Widget handle(bool start, double x) => Positioned(
-                left: x - 16,
-                width: 32,
-                top: 0,
-                bottom: 0,
-                child: IgnorePointer(
-                  ignoring:
-                      !_editEnabled || widget.onSegmentBoundsChanged == null,
-                  child: GestureDetector(
-                    key: ValueKey(
-                      start ? 'cut-start-handle' : 'cut-end-handle',
-                    ),
-                    behavior: HitTestBehavior.opaque,
-                    onHorizontalDragStart: (_) {
-                      final c = widget.currentSegment;
-                      if (c != null) {
+              Widget handle(bool start, double x) {
+                // Split overlapping touch targets between the visible lines.
+                // Even a short cut must allow its start to be dragged separately.
+                final midpoint = (sx! + ex!) / 2;
+                final hitLeft = start ? x - 16 : max(x - 16, midpoint);
+                final hitRight = start ? min(x + 16, midpoint) : x + 16;
+                return Positioned(
+                  left: hitLeft,
+                  width: hitRight - hitLeft,
+                  top: 0,
+                  bottom: 0,
+                  child: IgnorePointer(
+                    ignoring:
+                        !_editEnabled || widget.onSegmentBoundsChanged == null,
+                    child: GestureDetector(
+                      key: ValueKey(
+                        start ? 'cut-start-handle' : 'cut-end-handle',
+                      ),
+                      behavior: HitTestBehavior.opaque,
+                      onHorizontalDragStart: (_) {
+                        final c = widget.currentSegment;
+                        if (c != null) {
+                          setState(() {
+                            _gestureCut = c;
+                            _gestureWindowStart = windowStart;
+                            _previewStart = c.startMs;
+                            _previewEnd = c.endMs;
+                          });
+                          widget.onSeekStart?.call();
+                        }
+                      },
+                      onHorizontalDragUpdate: (d) {
+                        final c = _gestureCut;
+                        if (c == null) return;
+                        final plot =
+                            _plotKey.currentContext!.findRenderObject()
+                                as RenderBox;
+                        final v = toMs(plot.globalToLocal(d.globalPosition).dx);
                         setState(() {
-                          _gestureCut = c;
-                          _gestureWindowStart = windowStart;
-                          _previewStart = c.startMs;
-                          _previewEnd = c.endMs;
+                          if (start && v < (_previewEnd ?? c.endMs)) {
+                            _previewStart = v;
+                          }
+                          if (!start && v > (_previewStart ?? c.startMs)) {
+                            _previewEnd = v;
+                          }
                         });
-                        widget.onSeekStart?.call();
-                      }
-                    },
-                    onHorizontalDragUpdate: (d) {
-                      final c = _gestureCut;
-                      if (c == null) return;
-                      final plot =
-                          _plotKey.currentContext!.findRenderObject()
-                              as RenderBox;
-                      final v = toMs(plot.globalToLocal(d.globalPosition).dx);
-                      setState(() {
-                        if (start && v < (_previewEnd ?? c.endMs)) {
-                          _previewStart = v;
+                      },
+                      onHorizontalDragCancel: _clearEdit,
+                      onHorizontalDragEnd: (_) {
+                        final c = _gestureCut;
+                        if (c != null) {
+                          widget.onSegmentBoundsChanged?.call(
+                            c.id,
+                            c.revision,
+                            _previewStart ?? c.startMs,
+                            _previewEnd ?? c.endMs,
+                          );
                         }
-                        if (!start && v > (_previewStart ?? c.startMs)) {
-                          _previewEnd = v;
-                        }
-                      });
-                    },
-                    onHorizontalDragCancel: _clearEdit,
-                    onHorizontalDragEnd: (_) {
-                      final c = _gestureCut;
-                      if (c != null) {
-                        widget.onSegmentBoundsChanged?.call(
-                          c.id,
-                          c.revision,
-                          _previewStart ?? c.startMs,
-                          _previewEnd ?? c.endMs,
-                        );
-                      }
-                      _clearEdit();
-                    },
-                    child: Center(
-                      child: Container(
-                        key: ValueKey(
-                          start ? 'cut-start-line' : 'cut-end-line',
-                        ),
-                        width: 3,
-                        height: 82,
-                        decoration: BoxDecoration(
-                          color: AppColors.primary,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
+                        _clearEdit();
+                      },
+                      child: Stack(
+                        children: [
+                          Positioned(
+                            left: x - hitLeft - 1.5,
+                            top: 14,
+                            bottom: 14,
+                            child: Container(
+                              key: ValueKey(
+                                start ? 'cut-start-line' : 'cut-end-line',
+                              ),
+                              width: 3,
+                              decoration: BoxDecoration(
+                                color: AppColors.primary,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-                ),
-              );
+                );
+              }
+
               return DecoratedBox(
                 decoration: BoxDecoration(
                   color: AppColors.surface,
@@ -240,35 +253,6 @@ class _WaveformViewState extends State<WaveformView> {
                   child: Stack(
                     key: _plotKey,
                     children: [
-                      Positioned.fill(
-                        child: GestureDetector(
-                          key: const ValueKey('waveform-seek-area'),
-                          behavior: HitTestBehavior.opaque,
-                          onHorizontalDragStart: (_) {
-                            _seekDx = 0;
-                            _seekOrigin = widget.currentPositionMs;
-                            widget.onSeekStart?.call();
-                          },
-                          onHorizontalDragUpdate: (d) {
-                            _seekDx += d.delta.dx;
-                            widget.onSeek?.call(
-                              (_seekOrigin - _seekDx / width * windowMs)
-                                  .round()
-                                  .clamp(0, widget.totalDurationMs),
-                            );
-                          },
-                          onHorizontalDragEnd: (_) => widget.onSeekEnd?.call(),
-                          onHorizontalDragCancel: () =>
-                              widget.onSeekEnd?.call(),
-                          child: CustomPaint(
-                            painter: _WaveformPainter(
-                              bars,
-                              windowStart,
-                              windowMs,
-                            ),
-                          ),
-                        ),
-                      ),
                       ...displayedCuts
                           .where(
                             (c) => toX(c.endMs) > 0 && toX(c.startMs) < width,
@@ -300,6 +284,35 @@ class _WaveformViewState extends State<WaveformView> {
                               ),
                             );
                           }),
+                      Positioned.fill(
+                        child: GestureDetector(
+                          key: const ValueKey('waveform-seek-area'),
+                          behavior: HitTestBehavior.opaque,
+                          onHorizontalDragStart: (_) {
+                            _seekDx = 0;
+                            _seekOrigin = widget.currentPositionMs;
+                            widget.onSeekStart?.call();
+                          },
+                          onHorizontalDragUpdate: (d) {
+                            _seekDx += d.delta.dx;
+                            widget.onSeek?.call(
+                              (_seekOrigin - _seekDx / width * windowMs)
+                                  .round()
+                                  .clamp(0, widget.totalDurationMs),
+                            );
+                          },
+                          onHorizontalDragEnd: (_) => widget.onSeekEnd?.call(),
+                          onHorizontalDragCancel: () =>
+                              widget.onSeekEnd?.call(),
+                          child: CustomPaint(
+                            painter: _WaveformPainter(
+                              bars,
+                              windowStart,
+                              windowMs,
+                            ),
+                          ),
+                        ),
+                      ),
                       Positioned(
                         left: width / 2 - 1,
                         top: 0,
@@ -311,9 +324,9 @@ class _WaveformViewState extends State<WaveformView> {
                           ),
                         ),
                       ),
-                      if (sx != null && sx >= 0 && sx <= width)
+                      if (_editEnabled && sx != null && sx >= 0 && sx <= width)
                         handle(true, sx),
-                      if (ex != null && ex >= 0 && ex <= width)
+                      if (_editEnabled && ex != null && ex >= 0 && ex <= width)
                         handle(false, ex),
                     ],
                   ),
@@ -348,12 +361,17 @@ class _WaveformPainter extends CustomPainter {
     if (bars.isEmpty) return;
     final p = Paint()
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = 2.5;
+      ..strokeWidth = 1.25
+      ..color = const Color(0xFF858585);
     for (final bar in bars) {
       final x = (bar.timeMs - windowStartMs) / windowMs * size.width;
-      final v = bar.amplitude.clamp(.02, 1.0),
-          h = max(3.0, v * size.height * .78);
-      p.color = v > .25 ? AppColors.waveformSpeech : AppColors.waveformSilence;
+      // A fixed square-root scale reveals quiet sound without a gate or
+      // normalization that changes as the playback window moves. Raw peaks
+      // remain untouched for speech detection.
+      final h = max(
+        1.0,
+        sqrt(bar.amplitude.clamp(0.0, 1.0)) * size.height * .85,
+      );
       canvas.drawLine(
         Offset(x, size.height / 2 - h / 2),
         Offset(x, size.height / 2 + h / 2),

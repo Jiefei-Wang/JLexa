@@ -386,3 +386,24 @@ At the end of every agent session after completing work:
   - `apksigner verify --verbose --print-certs`: Verified, APK Signature Scheme v2 true.
   - Existing upstream flutter_tts Kotlin compatibility notice remains; current release succeeds. Prior policy-blocked duplicate APK-output cleanup was not retried or bypassed.
 - **Limits/Review Decisions**: Restricted OpenCL is validated on Mali-G78 and the supplied model, not all GPUs. Generic OpenCL and revision-aware multi-step segment undo were deferred due to broader implementation/validation scope. Qwen 0.5B still gave an inaccurate say/tell explanation despite numerically correct execution; backend success is not a claim of semantic accuracy. Microphone permission/capture/cancel was tested without supplied speech, so conversational recognition accuracy is not claimed.
+
+---
+
+## Session: 2026-09-07 (Quiet Waveform Visibility and 20-Second View)
+- **Focus**: Addressed the user's quiet/missing-looking waveform, density, window length, color and non-editing boundary visibility requests. Evidence: `docs/qa-waveform-2026-09-07.md`.
+- **Changes**:
+  - Replaced the blue/pale-gray amplitude threshold and flat minimum display with neutral gray 1.25 dp bars and a fixed square-root height scale. Quiet signal becomes visible without altering raw PCM peaks or VAD.
+  - Expanded the view to 20 seconds and 160 target bars, using fixed 125 ms timeline buckets that retain every intersecting source interval. Simplified heading to Local Window. Gray bars are painted above segment shading to avoid tinting.
+  - Hidden boundary lines and touch targets unless Edit is active. Partitioned short-cut touch targets at their midpoint so both ends remain independently draggable.
+- **Investigation/Device Check**:
+  - Independent full TED decode review found no speech passage zeroed by channel averaging; many real quiet peaks were flattened by the old display scale. Extraction, cache format and automatic segmentation were therefore retained.
+  - Pixel 6 `25311FDF6004PR`: Flutter hot reload verified gray/dense waveforms, 20-second timestamps and Edit-dependent boundaries. Final signed upgrade succeeded, existing lessons/models retained, final PID `20503`, no new crash entries; app left on Listening with Edit off.
+- **Static Analysis**: `flutter analyze` -> `No issues found!` (zero errors/warnings).
+- **Tests**: `flutter test --concurrency=1` -> `256 passed`, zero failed (66 seconds). Coverage includes stable scrolling, retained quiet peaks, uniform gray thin strokes, hidden handles, shade alignment and separate endpoint dragging for a 400 ms cut.
+- **Signed Release**:
+  - `flutter build apk --release` succeeded using `app/android/key.properties` (60.3 seconds); temporary debug signing changes removed.
+  - Fixed path: `release/app-release.apk` (94,947,605 bytes).
+  - APK SHA-256: `C5D6D9987082661A23AB26BEAF81D017A7B6CE6E63558FC564D280D45A4C83CD`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
+  - `apksigner verify --verbose --print-certs`: Verified, APK Signature Scheme v2 true.
+  - Existing upstream flutter_tts future Kotlin compatibility notice remains; current release succeeds. Prior policy-blocked duplicate APK-output cleanup was not retried or bypassed.

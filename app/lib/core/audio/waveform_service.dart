@@ -46,7 +46,7 @@ class WaveformService implements IWaveformService {
 
   List<double>? _barSource;
   int _barDuration = 0;
-  int _barGroupSize = 0;
+  double _barStepMs = 0;
   List<WaveformBar> _bars = const [];
 
   /// Aggregate once on the file's time grid. Scrolling changes x coordinates,
@@ -55,27 +55,37 @@ class WaveformService implements IWaveformService {
     required List<double> peaks,
     required int durationMs,
     required int windowStartMs,
-    int windowMs = 10000,
-    int targetSamples = 80,
+    int windowMs = 20000,
+    int targetSamples = 160,
   }) {
-    if (peaks.isEmpty || durationMs <= 0) return const [];
+    if (peaks.isEmpty ||
+        durationMs <= 0 ||
+        windowMs <= 0 ||
+        targetSamples <= 0) {
+      return const [];
+    }
     final msPerPeak = durationMs / peaks.length;
-    final groupSize = max(1, (windowMs / targetSamples / msPerPeak).round());
+    final step = max(msPerPeak, windowMs / targetSamples);
     if (!identical(peaks, _barSource) ||
         _barDuration != durationMs ||
-        _barGroupSize != groupSize) {
+        _barStepMs != step) {
       _barSource = peaks;
       _barDuration = durationMs;
-      _barGroupSize = groupSize;
-      _bars = [
-        for (var i = 0; i < peaks.length; i += groupSize)
-          WaveformBar(
-            (i + min(groupSize, peaks.length - i) / 2) * msPerPeak,
-            peaks.skip(i).take(groupSize).reduce(max),
-          ),
-      ];
+      _barStepMs = step;
+      _bars = List.generate((durationMs / step).ceil(), (i) {
+        final start = i * step;
+        final end = min(durationMs.toDouble(), start + step);
+        // Include every source interval touching this fixed time bucket, so a
+        // brief or quiet peak cannot fall between display samples.
+        final firstPeak = (start / msPerPeak).floor();
+        final lastPeak = min(peaks.length, (end / msPerPeak).ceil());
+        var amplitude = 0.0;
+        for (var j = firstPeak; j < lastPeak; j++) {
+          amplitude = max(amplitude, peaks[j]);
+        }
+        return WaveformBar((start + end) / 2, amplitude);
+      });
     }
-    final step = groupSize * msPerPeak;
     final first = max(0, (windowStartMs / step).floor() - 1);
     final last = min(
       _bars.length,

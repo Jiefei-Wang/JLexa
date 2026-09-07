@@ -336,7 +336,7 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                     ),
                     const SizedBox(height: 14),
 
-                    // Local Waveform (10 seconds)
+                    // Local waveform centered on the playhead.
                     WaveformView(
                       key: ValueKey(_controller.lesson?.id),
                       fullPeaks: _controller.fullWaveformPeaks,

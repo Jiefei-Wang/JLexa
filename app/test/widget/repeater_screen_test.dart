@@ -162,7 +162,7 @@ void main() {
 
         // Verify key Repeater UI components
         expect(find.text('Total Progress'), findsOneWidget);
-        expect(find.text('Local Window (10 seconds)'), findsOneWidget);
+        expect(find.text('Local Window'), findsOneWidget);
         expect(find.text('Adjust Segment'), findsNothing);
         expect(find.byTooltip('Add cut at playhead'), findsOneWidget);
         expect(find.byTooltip('Delete active cut'), findsOneWidget);
