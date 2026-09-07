@@ -232,6 +232,8 @@ object AudioDecoder {
             val totalSamples = (sampleRate.toLong() * durationMs) / 1000L
             val samplesPerPeak = max(1L, totalSamples / numPeaks)
             
+            // Preserve actual silence/quiet phonemes for VAD. The Flutter
+            // painter alone supplies the minimum visible waveform height.
             val peaks = mutableListOf<Double>()
             var currentPeakMax = 0.0
             var samplesInCurrentPeak = 0L
@@ -287,7 +289,7 @@ object AudioDecoder {
                                 samplesInCurrentPeak++
                                 totalSamplesProcessed++
                                 if (samplesInCurrentPeak >= samplesPerPeak) {
-                                    peaks.add(currentPeakMax.coerceIn(0.02, 1.0))
+                                    peaks.add(currentPeakMax.coerceIn(0.0, 1.0))
                                     currentPeakMax = 0.0
                                     samplesInCurrentPeak = 0
                                 }
@@ -307,7 +309,7 @@ object AudioDecoder {
                                 samplesInCurrentPeak++
                                 totalSamplesProcessed++
                                 if (samplesInCurrentPeak >= samplesPerPeak) {
-                                    peaks.add(currentPeakMax.coerceIn(0.02, 1.0))
+                                    peaks.add(currentPeakMax.coerceIn(0.0, 1.0))
                                     currentPeakMax = 0.0
                                     samplesInCurrentPeak = 0
                                 }
@@ -320,7 +322,7 @@ object AudioDecoder {
             
             // Flush remaining samples
             if (samplesInCurrentPeak > 0) {
-                peaks.add(currentPeakMax.coerceIn(0.02, 1.0))
+                peaks.add(currentPeakMax.coerceIn(0.0, 1.0))
             }
 
             return WaveformResult(durationMs, peaks)
@@ -642,7 +644,9 @@ object AudioDecoder {
                         outputDone = true
                         break
                     }
-                    outIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
+                    // Drain only ready output here. Waiting after every decoded
+                    // frame stalls feeding the next MP3 packet by 10 ms.
+                    outIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
                 }
 
                 if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
@@ -688,7 +692,7 @@ object AudioDecoder {
                 val amp = abs(samples16k[j])
                 if (amp > maxAmp) maxAmp = amp
             }
-            peaks.add(maxAmp.toDouble().coerceIn(0.02, 1.0))
+            peaks.add(maxAmp.toDouble().coerceIn(0.0, 1.0))
             i += blockSize
         }
         return peaks

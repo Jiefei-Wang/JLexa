@@ -769,11 +769,11 @@ void main() {
       );
       await controller.redoSegments();
       expect(controller.segments, hasLength(2));
-      expect(controller.segments.first.startMs, greaterThan(800));
+      expect(controller.segments.first.startMs, greaterThanOrEqualTo(500));
       expect(controller.segments.last.endMs, lessThan(5300));
       expect(
         controller.segments.last.startMs - controller.segments.first.endMs,
-        greaterThan(1500),
+        greaterThan(1000),
       );
       expect(
         controller.segments.every((c) => c.text.isEmpty && c.id != 'edited'),
@@ -1142,7 +1142,7 @@ void main() {
     });
 
     test(
-      '15. WaveformService caches with version v3 and file size check',
+      '15. WaveformService caches with version v4 and file size check',
       () async {
         final audioFile = File('${tempDir.path}/test_wave.wav');
         await audioFile.writeAsBytes(List.filled(500, 0));
@@ -1154,7 +1154,7 @@ void main() {
         );
         expect(peaks, isNotNull);
 
-        // Verify cached file exists with v3 prefix
+        // Verify cached file exists with v4 prefix
         final cached = await waveformService.loadCachedWaveform(
           'lesson_wave_test',
           fileSize: 500,

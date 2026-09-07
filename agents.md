@@ -280,3 +280,30 @@ At the end of every agent session after completing work:
   - `apksigner verify --verbose --print-certs`: Verified, APK Signature Scheme v2 true.
   - Existing upstream `flutter_tts` future Kotlin compatibility warning remains; the release build succeeds.
   - Prior automatic approval rejection still blocks deletion of duplicate APK build outputs. It was not bypassed; the fixed release artifact is current.
+
+---
+
+## Session: 2026-09-06 (Conservative Segmentation on Supplied TED Audio)
+- **Focus**: Fixed clipped quiet/rapid sentence openings and excessive splitting at ordinary pauses using the supplied 16:45 TED MP3. Detailed evidence: `docs/qa-2026-09-06-conservative-segmentation.md`.
+- **Changes**:
+  - Removed display amplitude floors from Android and Dart PCM analysis; v4 peak caches re-extract raw energy while preserving saved manual cuts.
+  - Merged raw pauses up to 650 ms, added 400 ms leading and 250 ms trailing context, and retained long silent gaps without overlapping adjacent cuts.
+  - Longer phrases split only at a meaningful internal pause; uninterrupted speech is never cut at an arbitrary timer boundary.
+  - Kept the waveform preparation indicator visible until initial segmentation finishes, preventing a false no-speech message during long-file analysis.
+  - Removed the redundant blocking output-buffer drain wait in Android PCM decoding, reducing preparation delay before per-cut Whisper recognition.
+- **Verification**:
+  - Full supplied-file envelope audit: 263 -> 139 cuts; median cut duration 1.86 -> 4.451 seconds. The reaction-question interval expanded to 25.999–29.250 seconds on the host envelope.
+  - Pixel 6 (`25311FDF6004PR`, Android 16) recognized the complete question: `So what would be your reaction to ideas like that?`.
+  - Final signed upgrade succeeded, preserving existing lessons/models and the new `ted-career-safety` lesson, cuts, position, and cache. Auto OFF hid cached text on reopen until Transcribe was tapped. Final process PID: `30766`.
+  - Added real-envelope and synthetic regression coverage for quiet onsets/tails, hesitation merging, retained silence, valid bounds, no arbitrary timed cuts, cache migration, and loading UI with/without saved cuts.
+  - Final-build uncached native Whisper returned `Do you have children?`; full-MP3 decoding took approximately 128 seconds versus roughly ten minutes before the drain fix. PID remained `30766`, with an empty app crash buffer.
+- **Static Analysis**: `flutter analyze` -> `No issues found!` (zero errors/warnings).
+- **Tests**: `flutter test --concurrency=1` -> `178 passed`, zero failed.
+- **Signed Release**:
+  - `flutter build apk --release` succeeded using `app/android/key.properties`.
+  - Fixed path: `release/app-release.apk` (93,260,625 bytes).
+  - APK SHA-256: `84B8C6228036A2B0D4F04055CF6D27CB2422593CA5304C84DEB22BE21E3EC9F9`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
+  - `apksigner verify --verbose --print-certs`: Verified, APK Signature Scheme v2 true.
+  - Existing upstream flutter_tts future Kotlin compatibility warning remains; the release build succeeds. Prior blocked APK-output deletion was not retried or bypassed.
+- **Limits**: Acoustic cuts can still require manual correction around noise/laughter or linguistic pauses. Existing saved cuts change only through explicit Redo segments. Whisper recognizes a selected cut after full-source PCM preparation.

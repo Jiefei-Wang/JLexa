@@ -354,7 +354,6 @@ class RepeaterController extends ChangeNotifier {
         _fullWaveformPeaks = peaks;
       } catch (_) {}
 
-      _isWaveformLoading = false;
       if (!_lesson!.cutsInitialized &&
           _segments.isEmpty &&
           _fullWaveformPeaks.isNotEmpty) {

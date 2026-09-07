@@ -41,6 +41,7 @@ app/coverage/
 
 # Android build outputs & local config
 app/android/.gradle/
+app/android/.kotlin/
 app/android/local.properties
 app/android/key.properties
 key.properties

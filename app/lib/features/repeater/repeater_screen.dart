@@ -272,7 +272,19 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                           ],
                         ),
                       ),
-                    if (_controller.transcriptionState ==
+                    if (_controller.isWaveformLoading)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Preparing waveform and speech segments…'),
+                            SizedBox(height: 8),
+                            LinearProgressIndicator(),
+                          ],
+                        ),
+                      )
+                    else if (_controller.transcriptionState ==
                             TranscriptionState.transcribing ||
                         _controller.transcriptionState ==
                             TranscriptionState.cancelling)

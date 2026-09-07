@@ -84,13 +84,13 @@ class WaveformService implements IWaveformService {
     return first >= last ? const [] : _bars.sublist(first, last);
   }
 
-  /// Adaptive energy VAD over peaks produced from the fully decoded PCM
-  /// timeline (normally one peak per 50 ms). Short pauses are merged.
+  /// Conservative phrase regions from real PCM peaks (normally every 50 ms).
+  /// Display-only amplitude floors must never be applied to this input.
   List<SpeechRegion> detectSpeechRegions({
     required List<double> peaks,
     required int durationMs,
-    int mergeGapMs = 200,
-    int minimumSpeechMs = 180,
+    int mergeGapMs = 650,
+    int minimumSpeechMs = 100,
   }) {
     if (peaks.isEmpty || durationMs <= 0) return const [];
     final sorted = [...peaks]..sort();
@@ -99,13 +99,13 @@ class WaveformService implements IWaveformService {
       sorted.length - 1,
     );
     final noise = sorted[percentile];
-    final onThreshold = max(0.025, noise * 2.8);
-    final offThreshold = max(0.018, onThreshold * 0.62);
+    final onThreshold = max(0.008, noise * 2.8);
+    final offThreshold = max(0.004, onThreshold * 0.8);
     final msPerPeak = durationMs / peaks.length;
     final raw = <SpeechRegion>[];
     int? start;
     var quietFrames = 0;
-    final releaseFrames = max(1, (120 / msPerPeak).round());
+    final releaseFrames = max(1, (150 / msPerPeak).ceil());
     for (var i = 0; i < peaks.length; i++) {
       if (start == null) {
         if (peaks[i] >= onThreshold) {
@@ -118,8 +118,8 @@ class WaveformService implements IWaveformService {
           final endFrame = i - quietFrames + 1;
           raw.add(
             SpeechRegion(
-              max(0, (start * msPerPeak).floor() - 80),
-              min(durationMs, (endFrame * msPerPeak).ceil() + 80),
+              (start * msPerPeak).floor(),
+              min(durationMs, (endFrame * msPerPeak).ceil()),
             ),
           );
           start = null;
@@ -131,20 +131,80 @@ class WaveformService implements IWaveformService {
     }
     if (start != null) {
       raw.add(
-        SpeechRegion(max(0, (start * msPerPeak).floor() - 80), durationMs),
+        SpeechRegion(
+          (start * msPerPeak).floor(),
+          ((peaks.length - quietFrames) * msPerPeak).ceil().clamp(
+            0,
+            durationMs,
+          ),
+        ),
       );
     }
-    final merged = <SpeechRegion>[];
+    // Group raw speech BEFORE padding: the pause tolerance must describe the
+    // actual pause, not vary with the protective head/tail context below.
+    final groups = <List<SpeechRegion>>[];
     for (final region in raw) {
-      if (merged.isNotEmpty &&
-          region.startMs - merged.last.endMs <= mergeGapMs) {
-        final previous = merged.removeLast();
-        merged.add(SpeechRegion(previous.startMs, region.endMs));
+      if (groups.isNotEmpty &&
+          region.startMs - groups.last.last.endMs <= mergeGapMs) {
+        groups.last.add(region);
       } else {
-        merged.add(region);
+        groups.add([region]);
       }
     }
-    return merged.where((r) => r.endMs - r.startMs >= minimumSpeechMs).toList();
+
+    final phrases = <SpeechRegion>[];
+    void addPhrases(List<SpeechRegion> group) {
+      final start = group.first.startMs, end = group.last.endMs;
+      if (end - start < minimumSpeechMs) return;
+      // A soft length limit: use the strongest internal pause, keeping at least
+      // 2.5 seconds on either side. Continuous speech is never cut on a timer.
+      if (end - start > 16000) {
+        int? split;
+        var bestGap = 349;
+        var bestDistance = double.infinity;
+        for (var i = 1; i < group.length; i++) {
+          final before = group[i - 1], after = group[i];
+          final gap = after.startMs - before.endMs;
+          final distance =
+              ((before.endMs + after.startMs) / 2 - (start + end) / 2).abs();
+          if (before.endMs - start >= 2500 &&
+              end - after.startMs >= 2500 &&
+              (gap > bestGap || (gap == bestGap && distance < bestDistance))) {
+            split = i;
+            bestGap = gap;
+            bestDistance = distance;
+          }
+        }
+        if (split != null) {
+          addPhrases(group.sublist(0, split));
+          addPhrases(group.sublist(split));
+          return;
+        }
+      }
+      phrases.add(SpeechRegion(start, end));
+    }
+
+    for (final group in groups) {
+      addPhrases(group);
+    }
+
+    // Preserve fast/soft leading words and trailing consonants. If two padded
+    // neighbors meet, share only their silent gap; never trim detected speech.
+    return [
+      for (var i = 0; i < phrases.length; i++)
+        SpeechRegion(
+          max(
+            max(0, phrases[i].startMs - 400),
+            i == 0 ? 0 : (phrases[i - 1].endMs + phrases[i].startMs) ~/ 2,
+          ),
+          min(
+            min(durationMs, phrases[i].endMs + 250),
+            i == phrases.length - 1
+                ? durationMs
+                : (phrases[i].endMs + phrases[i + 1].startMs) ~/ 2,
+          ),
+        ),
+    ];
   }
 
   String _buildCacheKey(String lessonId, int? fileSize, int? lastModified) {
@@ -152,15 +212,17 @@ class WaveformService implements IWaveformService {
   }
 
   String _buildFileName(String lessonId, int? fileSize, int? lastModified) {
+    // v3 imposed a display floor that cannot be undone. Re-extract raw peaks;
+    // this cache migration does not regenerate any persisted user segments.
     if (fileSize != null &&
         fileSize > 0 &&
         lastModified != null &&
         lastModified > 0) {
-      return 'v3_${lessonId}_${fileSize}_$lastModified.peaks';
+      return 'v4_${lessonId}_${fileSize}_$lastModified.peaks';
     } else if (fileSize != null && fileSize > 0) {
-      return 'v3_${lessonId}_$fileSize.peaks';
+      return 'v4_${lessonId}_$fileSize.peaks';
     }
-    return 'v3_$lessonId.peaks';
+    return 'v4_$lessonId.peaks';
   }
 
   @override
@@ -370,7 +432,7 @@ class WaveformService implements IWaveformService {
           if (norm > maxAmp) maxAmp = norm;
         }
       }
-      peaks.add(maxAmp.clamp(0.02, 1.0).toDouble());
+      peaks.add(maxAmp.clamp(0.0, 1.0).toDouble());
     }
 
     return peaks;
