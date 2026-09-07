@@ -40,16 +40,23 @@ class AiExplanationCard extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Row(
-                  children: [
-                    Icon(
-                      Icons.psychology,
-                      size: 20,
-                      color: AppColors.accentPurple,
-                    ),
-                    SizedBox(width: 8),
-                    Text('AI Explanation', style: AppTypography.titleSmall),
-                  ],
+                const Expanded(
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.psychology,
+                        size: 20,
+                        color: AppColors.accentPurple,
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'AI Explanation',
+                          style: AppTypography.titleSmall,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 TextButton(
                   onPressed: onToggleExpand,
@@ -105,30 +112,31 @@ class AiExplanationCard extends StatelessWidget {
                   const SizedBox(height: 16),
 
                   // Q&A Button
-                  InkWell(
-                    onTap: onOpenQa,
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.primaryLight,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.chat_bubble_outline,
-                                size: 18,
-                                color: AppColors.primary,
-                              ),
-                              SizedBox(width: 8),
-                              Text(
+                  Semantics(
+                    button: true,
+                    child: InkWell(
+                      onTap: onOpenQa,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryLight,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Icon(
+                              Icons.chat_bubble_outline,
+                              size: 18,
+                              color: AppColors.primary,
+                            ),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
                                 'Q&A about this sentence',
                                 style: TextStyle(
                                   color: AppColors.primary,
@@ -136,14 +144,14 @@ class AiExplanationCard extends StatelessWidget {
                                   fontSize: 13,
                                 ),
                               ),
-                            ],
-                          ),
-                          Icon(
-                            Icons.chevron_right,
-                            size: 18,
-                            color: AppColors.primary,
-                          ),
-                        ],
+                            ),
+                            Icon(
+                              Icons.chevron_right,
+                              size: 18,
+                              color: AppColors.primary,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),

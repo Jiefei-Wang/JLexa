@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -166,6 +167,56 @@ class InventoryTestStorage extends ModelStorage {
   Future<ModelFileEntry?> getModelFileEntry(String location) async {
     if (location.startsWith('content://')) return uriFiles[location];
     return super.getModelFileEntry(location);
+  }
+}
+
+class ControlledModelStorage extends ModelStorage {
+  Completer<void>? prepareGate;
+  Completer<void>? finalizeGate;
+  final preparing = Completer<void>();
+  final finalizing = Completer<void>();
+  int prepareCount = 0;
+  int chooseCount = 0;
+  bool refuseDelete = false;
+
+  ControlledModelStorage(Directory directory)
+    : super(baseDirProvider: () async => directory);
+
+  @override
+  Future<String> prepareDownloadPart(ModelType type, String filename) async {
+    prepareCount++;
+    if (!preparing.isCompleted) preparing.complete();
+    await prepareGate?.future;
+    return super.prepareDownloadPart(type, filename);
+  }
+
+  @override
+  Future<String> finalizeDownload(
+    String partLocation,
+    String filename,
+    ModelType type, {
+    int? expectedSizeBytes,
+  }) async {
+    if (!finalizing.isCompleted) finalizing.complete();
+    await finalizeGate?.future;
+    return super.finalizeDownload(
+      partLocation,
+      filename,
+      type,
+      expectedSizeBytes: expectedSizeBytes,
+    );
+  }
+
+  @override
+  Future<bool> chooseBaseFolder() async {
+    chooseCount++;
+    return super.chooseBaseFolder();
+  }
+
+  @override
+  Future<bool> deleteModelFile(String path) async {
+    if (refuseDelete) return false;
+    return super.deleteModelFile(path);
   }
 }
 
@@ -762,6 +813,140 @@ void main() {
       expect(detectedWhisper.isNotEmpty, isTrue);
       expect(detectedWhisper.first.isCustomImport, isTrue);
       expect(detectedWhisper.first.fileSizeBytes, 1024);
+    });
+
+    test(
+      'Preparing and cancelling a download retain folder and writer ownership',
+      () async {
+        final controlled = ControlledModelStorage(tempDir)
+          ..prepareGate = Completer<void>();
+        manager.dispose();
+        manager = ModelManager(
+          storage: controlled,
+          downloader: downloader,
+          aiService: aiService,
+        );
+        await manager.initialize();
+        final target = ModelCatalog.curatedLlmModels.first;
+        final first = manager.downloadModel(target);
+        final duplicate = manager.downloadModel(target);
+        await controlled.preparing.future;
+        expect(manager.hasActiveDownloads, isTrue);
+        expect(controlled.prepareCount, 1);
+        await expectLater(
+          manager.changeStorageFolder(),
+          throwsA(isA<ModelValidationException>()),
+        );
+        await expectLater(
+          manager.chooseInitialStorageFolder(),
+          throwsA(isA<ModelValidationException>()),
+        );
+        expect(controlled.chooseCount, 0);
+
+        manager.cancelDownload(target.id);
+        expect(manager.hasActiveDownloads, isTrue);
+        controlled.prepareGate!.complete();
+        await Future.wait([first, duplicate]);
+        expect(manager.hasActiveDownloads, isFalse);
+        expect(downloader.isDownloading(target.id), isFalse);
+        expect(
+          manager.llmModels.singleWhere((item) => item.id == target.id).state,
+          ModelDownloadState.notDownloaded,
+        );
+        await manager.downloadModel(target);
+        expect(controlled.prepareCount, 2);
+        expect(manager.hasActiveDownloads, isFalse);
+        expect(
+          manager.llmModels.singleWhere((item) => item.id == target.id).state,
+          ModelDownloadState.downloaded,
+        );
+      },
+    );
+
+    test(
+      'Folder switch remains blocked until final copy has completed',
+      () async {
+        final controlled = ControlledModelStorage(tempDir)
+          ..finalizeGate = Completer<void>();
+        manager.dispose();
+        manager = ModelManager(
+          storage: controlled,
+          downloader: downloader,
+          aiService: aiService,
+        );
+        await manager.initialize();
+        final target = ModelCatalog.curatedWhisperModels.first;
+        final download = manager.downloadModel(target);
+        await controlled.finalizing.future;
+        expect(manager.hasActiveDownloads, isTrue);
+        await expectLater(
+          manager.changeStorageFolder(),
+          throwsA(isA<ModelValidationException>()),
+        );
+        expect(controlled.chooseCount, 0);
+        controlled.finalizeGate!.complete();
+        await download;
+        expect(manager.hasActiveDownloads, isFalse);
+        final item = manager.whisperModels.singleWhere(
+          (item) => item.id == target.id,
+        );
+        expect(item.state, ModelDownloadState.downloaded);
+        expect(await File(item.localPath!).exists(), isTrue);
+      },
+    );
+
+    test('Rejected provider deletion reports failure and keeps selected model path', () async {
+      final controlled = ControlledModelStorage(tempDir);
+      manager.dispose();
+      manager = ModelManager(
+        storage: controlled,
+        downloader: downloader,
+        aiService: aiService,
+      );
+      await manager.initialize();
+      final target = ModelCatalog.curatedLlmModels.first;
+      await manager.downloadModel(target);
+      await manager.loadModel(
+        manager.llmModels.singleWhere((item) => item.id == target.id),
+      );
+      final item = manager.llmModels.singleWhere(
+        (item) => item.id == target.id,
+      );
+      controlled.refuseDelete = true;
+      await expectLater(
+        manager.deleteModel(item),
+        throwsA(isA<ModelValidationException>()),
+      );
+      expect(aiService.configuredLlmPath, item.localPath);
+      expect(await File(item.localPath!).exists(), isTrue);
+      expect(mockLlm.isLoaded, isFalse);
+    });
+
+    test('Same filename in a different folder does not retain the old loaded model', () async {
+      final other = Directory(p.join(tempDir.path, 'different-folder'));
+      final backend = FileSystemModelStorageBackend(
+        baseDir: tempDir,
+        folderPicker: () async => other,
+      );
+      final otherBackend = FileSystemModelStorageBackend(baseDir: other);
+      final name = ModelCatalog.curatedLlmModels.first.filename;
+      final original = File(p.join(tempDir.path, 'llm', name));
+      final otherCopy = File(p.join(otherBackend.baseDir.path, 'llm', name));
+      await original.writeAsBytes([1, 2, 3]);
+      await otherCopy.writeAsBytes([4, 5, 6]);
+      manager.dispose();
+      manager = ModelManager(
+        storage: ModelStorage(backend: backend),
+        downloader: downloader,
+        aiService: aiService,
+      );
+      await manager.initialize();
+      await aiService.loadLlmModel(original.path);
+      expect(await manager.changeStorageFolder(), isTrue);
+      expect(aiService.llmEngine.isLoaded, isFalse);
+      expect(backend.baseDir.path, other.path);
+      expect(await original.exists(), isTrue);
+      expect(await otherCopy.exists(), isTrue);
     });
 
     test('Changing storage folder safely unloads active model if absent in new folder', () async {

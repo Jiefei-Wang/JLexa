@@ -365,7 +365,7 @@ class AudioService extends ChangeNotifier {
 
   Future<void> previousSentence() async {
     if (_segments.isEmpty) return;
-    final before = _segments.where((s) => s.startMs < _positionMs).toList();
+    final before = _segments.where((s) => s.endMs <= _positionMs).toList();
     final target = before.isEmpty ? _segments.first : before.last;
     await seekTo(target.startMs);
   }

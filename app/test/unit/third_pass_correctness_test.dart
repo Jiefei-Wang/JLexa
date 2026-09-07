@@ -309,6 +309,41 @@ class FixedSpeechWaveform extends WaveformService {
   ];
 }
 
+class TerminalControlledSpeech extends TestMockSpeechEngine {
+  final requests = <Completer<List<AudioSegment>>>[];
+
+  @override
+  Future<List<AudioSegment>> transcribeAudio({
+    required String audioPath,
+    required String lessonId,
+    String? requestId,
+    int nThreads = 4,
+    void Function(double progress)? onProgress,
+  }) {
+    final terminal = Completer<List<AudioSegment>>();
+    requests.add(terminal);
+    return terminal.future;
+  }
+}
+
+class LateTokenAiEngine extends TestMockAiEngine {
+  final tokens = StreamController<String>();
+
+  @override
+  AiGenerationHandle startGeneration(
+    String prompt, {
+    AiGenerationSettings? settings,
+    int? seed,
+    List<ChatMessagePayload>? chatMessages,
+    AiRequestPriority priority = AiRequestPriority.user,
+  }) => AiGenerationHandle(
+    requestId: 'late-explanation',
+    stream: tokens.stream,
+    // Cancellation acknowledgement deliberately precedes native terminal.
+    onCancel: () async {},
+  );
+}
+
 void main() {
   late Directory tempDir;
   late LessonRepository lessonRepo;
@@ -354,6 +389,242 @@ void main() {
   tearDown(() async {
     if (await tempDir.exists()) {
       await tempDir.delete(recursive: true);
+    }
+  });
+
+  group('Listening control regressions', () {
+    for (final scenario in ['same cut', 'new cut', 'left off']) {
+      test('Auto OFF/ON waits for native terminal: $scenario', () async {
+        final audio = ControllableAudioService();
+        final speech = TerminalControlledSpeech();
+        final lesson = AudioLesson(
+          id: 'auto-toggle',
+          title: 'Auto toggle',
+          originalFileName: 'test.mp3',
+          localPath: '${tempDir.path}/test_sample.mp3',
+          durationMs: 5000,
+          createdAt: DateTime.now(),
+          lastOpenedAt: DateTime.now(),
+        );
+        await lessonRepo.saveLesson(lesson);
+        await lessonRepo.saveSegments(lesson.id, const [
+          AudioSegment(
+            id: 'a',
+            lessonId: 'auto-toggle',
+            startMs: 0,
+            endMs: 2000,
+            text: '',
+          ),
+          AudioSegment(
+            id: 'b',
+            lessonId: 'auto-toggle',
+            startMs: 2500,
+            endMs: 5000,
+            text: '',
+          ),
+        ]);
+        final controller = RepeaterController(
+          lessonRepo: lessonRepo,
+          audioService: audio,
+          waveformService: waveformService,
+          aiService: AiService(llm: aiEngine, speech: speech),
+        );
+        addTearDown(() {
+          controller.dispose();
+          audio.dispose();
+        });
+        await controller.loadLesson(lesson);
+        await controller.setAutoTranscribe(true);
+        expect(speech.requests, hasLength(1));
+        await controller.setAutoTranscribe(false);
+        await controller.setAutoTranscribe(true);
+        if (scenario == 'new cut') await controller.seekTo(3000);
+        if (scenario == 'left off') await controller.setAutoTranscribe(false);
+        expect(controller.transcriptionState, TranscriptionState.cancelling);
+        expect(controller.visibleTranscriptSegment, isNull);
+        expect(speech.requests, hasLength(1));
+        speech.requests.first.complete(const [
+          AudioSegment(
+            id: 'stale',
+            lessonId: 'auto-toggle',
+            startMs: 0,
+            endMs: 2000,
+            text: 'stale result',
+          ),
+        ]);
+        await Future<void>.delayed(const Duration(milliseconds: 450));
+        if (scenario == 'left off') {
+          expect(speech.requests, hasLength(1));
+          expect(controller.transcriptionState, TranscriptionState.idle);
+          expect(controller.visibleTranscriptSegment, isNull);
+        } else {
+          expect(
+            speech.requests,
+            hasLength(2),
+            reason: 'Only one request may restart after terminal, even with a queued cut switch.',
+          );
+          speech.requests.last.complete(const [
+            AudioSegment(
+              id: 'new',
+              lessonId: 'auto-toggle',
+              startMs: 0,
+              endMs: 2000,
+              text: 'latest result',
+            ),
+          ]);
+          await Future<void>.delayed(const Duration(milliseconds: 30));
+          expect(
+            controller.visibleTranscriptSegment?.id,
+            scenario == 'new cut' ? 'b' : 'a',
+          );
+          expect(controller.visibleTranscriptSegment?.text, 'latest result');
+        }
+        final cuts = await lessonRepo.getSegmentsForLesson(lesson.id);
+        expect(cuts.any((cut) => cut.text == 'stale result'), isFalse);
+        if (scenario == 'new cut') expect(cuts.first.text, isEmpty);
+      });
+    }
+
+    for (final position in [0, 2200, 6000]) {
+      test(
+        'Manual Add rescues missed speech at $position ms without replacing saved cuts',
+        () async {
+          final audio = ControllableAudioService();
+          final lesson = AudioLesson(
+            id: 'manual-add',
+            title: 'Manual Add',
+            originalFileName: 'test.mp3',
+            localPath: '${tempDir.path}/test_sample.mp3',
+            durationMs: 6000,
+            currentPositionMs: position,
+            createdAt: DateTime.now(),
+            lastOpenedAt: DateTime.now(),
+          );
+          final savedCuts = position == 2200
+              ? const [
+                  AudioSegment(
+                    id: 'left',
+                    lessonId: 'manual-add',
+                    startMs: 0,
+                    endMs: 2000,
+                    text: 'saved left',
+                    revision: 3,
+                    transcriptCutRevision: 3,
+                    isUserEdited: true,
+                  ),
+                  AudioSegment(
+                    id: 'right',
+                    lessonId: 'manual-add',
+                    startMs: 2400,
+                    endMs: 6000,
+                    text: 'saved right',
+                    revision: 2,
+                    transcriptCutRevision: 2,
+                    isUserEdited: true,
+                  ),
+                ]
+              : <AudioSegment>[];
+          await lessonRepo.saveLesson(lesson);
+          await lessonRepo.saveSegments(lesson.id, savedCuts);
+          final controller = RepeaterController(
+            lessonRepo: lessonRepo,
+            audioService: audio,
+            waveformService: waveformService,
+            aiService: aiService,
+          );
+          addTearDown(() {
+            controller.dispose();
+            audio.dispose();
+          });
+          await controller.loadLesson(lesson);
+          expect(controller.fullWaveformPeaks, isEmpty);
+          await controller.addCutAtPlayhead();
+          final cut = controller.currentSegment!;
+          expect(cut.isUserEdited, isTrue);
+          expect(cut.text, isEmpty);
+          expect(controller.visibleTranscriptSegment, isNull);
+          expect(controller.notice, contains('manual cut'));
+          expect(
+            (cut.startMs, cut.endMs),
+            switch (position) {
+              0 => (0, 1000),
+              2200 => (2000, 2400),
+              _ => (5000, 6000),
+            },
+          );
+          final persisted = await lessonRepo.getSegmentsForLesson(lesson.id);
+          for (final saved in savedCuts) {
+            expect(
+              persisted.singleWhere((c) => c.id == saved.id).toMap(),
+              saved.toMap(),
+            );
+          }
+          await controller.loadLesson(lesson);
+          expect(
+            controller.segments.map((c) => c.id),
+            persisted.map((c) => c.id),
+          );
+        },
+      );
+    }
+
+    for (final clear in [true, false]) {
+      test(
+        'Late explanation tokens cannot repopulate ${clear ? 'a cleared lesson' : 'a new lesson starting in a gap'}',
+        () async {
+          final audio = ControllableAudioService();
+          final llm = LateTokenAiEngine();
+          final lesson = AudioLesson(
+            id: 'explanation-a',
+            title: 'Explanation A',
+            originalFileName: 'test.mp3',
+            localPath: '${tempDir.path}/test_sample.mp3',
+            durationMs: 5000,
+            createdAt: DateTime.now(),
+            lastOpenedAt: DateTime.now(),
+          );
+          await lessonRepo.saveLesson(lesson);
+          await lessonRepo.saveSegments(lesson.id, const [
+            AudioSegment(
+              id: 'explained',
+              lessonId: 'explanation-a',
+              startMs: 0,
+              endMs: 4000,
+              text: 'A saved sentence',
+              transcriptCutRevision: 0,
+            ),
+          ]);
+          final controller = RepeaterController(
+            lessonRepo: lessonRepo,
+            audioService: audio,
+            waveformService: waveformService,
+            aiService: AiService(llm: llm, speech: speechEngine),
+          );
+          addTearDown(() {
+            controller.dispose();
+            audio.dispose();
+          });
+          await controller.loadLesson(lesson);
+          final generation = controller.generateExplanation();
+          llm.tokens.add('first lesson explanation');
+          await Future<void>.delayed(Duration.zero);
+          expect(controller.aiExplanation, isNotEmpty);
+          if (clear) {
+            await controller.clearLesson();
+          } else {
+            final next = lesson.copyWith(id: 'explanation-b');
+            await lessonRepo.saveLesson(next);
+            await lessonRepo.saveSegments(next.id, []);
+            await controller.loadLesson(next);
+            expect(controller.currentSegment, isNull);
+          }
+          llm.tokens.add('stale trailing tokens');
+          await llm.tokens.close();
+          await generation;
+          expect(controller.aiExplanation, isEmpty);
+          expect(controller.isAiGenerating, isFalse);
+        },
+      );
     }
   });
 
@@ -1070,6 +1341,70 @@ void main() {
         controlledAudio.dispose();
       },
     );
+
+    for (final next in [false, true]) {
+      test(
+        'Post-split ${next ? 'Next' : 'Previous'} follows the selected left cut despite a late decoder boundary',
+        () async {
+          final controlledAudio = ControllableAudioService();
+          final lesson = AudioLesson(
+            id: 'split_adjacent_$next',
+            title: 'Split navigation',
+            originalFileName: 'test.mp3',
+            localPath: '${tempDir.path}/test_sample.mp3',
+            durationMs: 10000,
+            createdAt: DateTime.now(),
+            lastOpenedAt: DateTime.now(),
+          );
+          await lessonRepo.saveLesson(lesson);
+          await lessonRepo.saveSegments(lesson.id, [
+            AudioSegment(
+              id: 'before',
+              lessonId: lesson.id,
+              startMs: 0,
+              endMs: 1000,
+              text: '',
+            ),
+            AudioSegment(
+              id: 'split',
+              lessonId: lesson.id,
+              startMs: 2000,
+              endMs: 4000,
+              text: '',
+            ),
+            AudioSegment(
+              id: 'after',
+              lessonId: lesson.id,
+              startMs: 5000,
+              endMs: 6000,
+              text: '',
+            ),
+          ]);
+          final controller = RepeaterController(
+            lessonRepo: lessonRepo,
+            audioService: controlledAudio,
+            waveformService: waveformService,
+            aiService: aiService,
+          );
+          addTearDown(controller.dispose);
+          addTearDown(controlledAudio.dispose);
+          await controller.loadLesson(lesson);
+          await controller.seekTo(3000);
+          await controller.addCutAtPlayhead();
+          await controlledAudio.seekTo(3000);
+          expect(controller.currentSegment?.id, 'split');
+          if (next) {
+            await controller.nextSentence();
+            expect(controller.positionMs, 3000);
+            expect(controller.currentSegment?.endMs, 4000);
+          } else {
+            await controller.previousSentence();
+            expect(controller.positionMs, 0);
+            expect(controller.currentSegment?.id, 'before');
+          }
+        },
+      );
+    }
 
     test('11. Position persistence throttled during playback and not notifying listeners', () async {
       final lesson = AudioLesson(

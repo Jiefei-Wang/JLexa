@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../../../core/ai/ai_models.dart';
 import '../../../core/theme/app_colors.dart';
@@ -8,12 +10,16 @@ class ChatBubble extends StatelessWidget {
   final ChatMessage message;
   final ValueChanged<String> onSpeak;
   final VoidCallback? onDelete;
+  final bool isSpeaking;
+  final bool canSpeak;
 
   const ChatBubble({
     super.key,
     required this.message,
     required this.onSpeak,
     this.onDelete,
+    this.isSpeaking = false,
+    this.canSpeak = true,
   });
 
   @override
@@ -66,32 +72,65 @@ class ChatBubble extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SelectableText(
-                    message.content,
-                    style: AppTypography.bodyMedium.copyWith(
-                      color: isUser ? Colors.white : AppColors.textPrimary,
-                    ),
-                  ),
-                  if (onDelete != null)
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: IconButton(
-                        tooltip: 'Delete message',
-                        iconSize: 16,
-                        visualDensity: VisualDensity.compact,
-                        onPressed: onDelete,
-                        icon: Icon(
-                          Icons.delete_outline,
-                          color: isUser
-                              ? Colors.white70
-                              : AppColors.textTertiary,
-                        ),
+                  if (isUser)
+                    SelectableText(
+                      message.content,
+                      style: AppTypography.bodyMedium.copyWith(
+                        color: isUser ? Colors.white : AppColors.textPrimary,
                       ),
+                    )
+                  else
+                    MarkdownBody(
+                      data: message.content,
+                      selectable: true,
+                      fitContent: true,
+                      styleSheet:
+                          MarkdownStyleSheet.fromTheme(Theme.of(context))
+                              .copyWith(
+                                p: AppTypography.bodyMedium,
+                                tableColumnWidth: const IntrinsicColumnWidth(),
+                                tableScrollbarThumbVisibility: true,
+                              ),
+                      // Generated images are descriptions only. Never fetch a
+                      // model-provided network, asset, or local-file location.
+                      imageBuilder: (uri, title, alt) => Text(
+                        alt?.isNotEmpty == true
+                            ? 'Image: $alt'
+                            : 'Image omitted',
+                        style: AppTypography.bodySmall,
+                      ),
+                      onTapLink: (text, href, title) {
+                        if (href == null) return;
+                        showDialog<void>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Link'),
+                            content: SingleChildScrollView(
+                              child: SelectableText(href),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () {
+                                  Clipboard.setData(ClipboardData(text: href));
+                                  Navigator.pop(context);
+                                },
+                                child: const Text('Copy link'),
+                              ),
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text('Close'),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
-                  if (message.audioTimestampLabel != null || !isUser) ...[
+                  if (message.audioTimestampLabel != null ||
+                      !isUser ||
+                      onDelete != null) ...[
                     const SizedBox(height: 6),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         if (message.audioTimestampLabel != null)
                           Text(
@@ -103,15 +142,38 @@ class ChatBubble extends StatelessWidget {
                                   : AppColors.textTertiary,
                             ),
                           ),
-                        const SizedBox(width: 6),
-                        InkWell(
-                          onTap: () => onSpeak(message.content),
-                          child: Icon(
-                            Icons.volume_up_outlined,
-                            size: 14,
-                            color: isUser ? Colors.white70 : AppColors.primary,
+                        if (!isUser)
+                          IconButton(
+                            tooltip: isSpeaking
+                                ? 'Stop reading aloud'
+                                : 'Read answer aloud',
+                            constraints: const BoxConstraints(
+                              minWidth: 48,
+                              minHeight: 48,
+                            ),
+                            onPressed: canSpeak
+                                ? () => onSpeak(message.content)
+                                : null,
+                            icon: Icon(
+                              isSpeaking
+                                  ? Icons.stop_circle_outlined
+                                  : Icons.volume_up_outlined,
+                            ),
+                            color: AppColors.primary,
                           ),
-                        ),
+                        if (onDelete != null)
+                          IconButton(
+                            tooltip: 'Delete message',
+                            constraints: const BoxConstraints(
+                              minWidth: 48,
+                              minHeight: 48,
+                            ),
+                            onPressed: onDelete,
+                            icon: const Icon(Icons.delete_outline),
+                            color: isUser
+                                ? Colors.white70
+                                : AppColors.textTertiary,
+                          ),
                       ],
                     ),
                   ],

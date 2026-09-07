@@ -17,12 +17,17 @@ class AiChatScreen extends StatefulWidget {
   final AiService aiService;
   final SpeechRecognitionEngine speechEngine;
   final Map<String, dynamic>? initialContext;
+  final bool isActive;
+  @visibleForTesting
+  final AiChatController Function()? controllerFactory;
 
   const AiChatScreen({
     super.key,
     required this.aiService,
     required this.speechEngine,
     this.initialContext,
+    this.isActive = true,
+    this.controllerFactory,
   });
 
   @override
@@ -34,6 +39,13 @@ class _AiChatScreenState extends State<AiChatScreen>
   late final AiChatController _controller;
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  int _draftRevision = 0;
+  int _voiceDraftRevision = 0;
+  String? _voiceConversationId;
+  String? _pendingVoiceText;
+  bool _appResumed = true;
+  bool _temporarilyInactive = false;
+  bool _routeCurrent = true;
 
   @override
   void initState() {
@@ -59,12 +71,39 @@ class _AiChatScreenState extends State<AiChatScreen>
       sentenceCtx = null;
     }
 
-    _controller = AiChatController(
-      aiService: widget.aiService,
-      speechEngine: widget.speechEngine,
-      initialContext: sentenceCtx,
-    );
+    _controller =
+        widget.controllerFactory?.call() ??
+        AiChatController(
+          aiService: widget.aiService,
+          speechEngine: widget.speechEngine,
+          initialContext: sentenceCtx,
+        );
     _controller.addListener(_onChatChanged);
+    _inputController.addListener(_onDraftChanged);
+    _controller.setActive(widget.isActive);
+  }
+
+  void _onDraftChanged() => _draftRevision++;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _routeCurrent = ModalRoute.of(context)?.isCurrent ?? true;
+    _updateActivity();
+  }
+
+  @override
+  void didUpdateWidget(covariant AiChatScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _updateActivity();
+  }
+
+  void _updateActivity() {
+    _controller.setActive(
+      widget.isActive && _appResumed && _routeCurrent,
+      preserveVoiceStart:
+          widget.isActive && _routeCurrent && _temporarilyInactive,
+    );
   }
 
   @override
@@ -79,7 +118,10 @@ class _AiChatScreenState extends State<AiChatScreen>
 
   void _send() {
     final text = _inputController.text.trim();
-    if (text.isNotEmpty && !_controller.isGenerating && _controller.isReady) {
+    if (text.isNotEmpty &&
+        !_controller.isGenerating &&
+        !_controller.isVoiceBusy &&
+        _controller.isReady) {
       _controller.sendMessage(text);
       _inputController.clear();
       _scrollToBottom();
@@ -99,10 +141,33 @@ class _AiChatScreenState extends State<AiChatScreen>
   }
 
   void _toggleVoiceRecording() async {
+    if (!_controller.isVoiceBusy) {
+      _voiceDraftRevision = _draftRevision;
+      _voiceConversationId = _controller.conversationId;
+    }
     final transcribedText = await _controller.startStopRecording();
     if (!mounted) return;
-    if (transcribedText != null && transcribedText.isNotEmpty) {
-      _inputController.text = transcribedText;
+    if (transcribedText != null &&
+        transcribedText.isNotEmpty &&
+        _voiceConversationId == _controller.conversationId &&
+        widget.isActive &&
+        _appResumed &&
+        _routeCurrent) {
+      if (_draftRevision == _voiceDraftRevision &&
+          _inputController.text.isEmpty) {
+        _inputController.value = TextEditingValue(
+          text: transcribedText,
+          selection: TextSelection.collapsed(offset: transcribedText.length),
+        );
+      } else {
+        setState(() {
+          _pendingVoiceText = [
+            _pendingVoiceText,
+            transcribedText,
+          ].whereType<String>().join('\n');
+        });
+        _scrollToBottom();
+      }
     } else if (_controller.voiceErrorMessage != null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -117,6 +182,9 @@ class _AiChatScreenState extends State<AiChatScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appResumed = state == AppLifecycleState.resumed;
+    _temporarilyInactive = state == AppLifecycleState.inactive;
+    _updateActivity();
     if (state != AppLifecycleState.resumed) {
       unawaited(_controller.saveConversation());
     }
@@ -201,7 +269,9 @@ class _AiChatScreenState extends State<AiChatScreen>
                                   onTap: () async {
                                     Navigator.pop(context);
                                     await _controller.openConversation(chat);
+                                    if (!mounted) return;
                                     _inputController.clear();
+                                    setState(() => _pendingVoiceText = null);
                                     _scrollToBottom();
                                   },
                                   trailing: IconButton(
@@ -246,7 +316,9 @@ class _AiChatScreenState extends State<AiChatScreen>
                 ? null
                 : () async {
                     await _controller.newChat();
+                    if (!mounted) return;
                     _inputController.clear();
+                    setState(() => _pendingVoiceText = null);
                   },
           ),
           IconButton(
@@ -258,135 +330,243 @@ class _AiChatScreenState extends State<AiChatScreen>
       ),
       body: SafeArea(
         top: false,
-        child: Column(
-          children: [
-            if (_controller.storageError != null)
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text(
-                  _controller.storageError!,
-                  style: const TextStyle(color: AppColors.error),
+        child: LayoutBuilder(
+          builder: (context, constraints) => Column(
+            children: [
+              if (_controller.storageError != null)
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Text(
+                    _controller.storageError!,
+                    style: const TextStyle(color: AppColors.error),
+                  ),
                 ),
-              ),
-            Expanded(
-              child: !_controller.isReady
-                  ? const Center(child: CircularProgressIndicator())
-                  : ListView(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.all(16),
-                      children: [
-                        if (_controller.sentenceContext != null)
-                          SentenceSummaryCard(
-                            contextData: _controller.sentenceContext!,
-                            isExpanded: _controller.isSummaryExpanded,
-                            onToggleExpand: _controller.toggleSummaryExpanded,
-                          ),
-                        if (_controller.messages.isEmpty) ...[
-                          const SizedBox(height: 16),
-                          const Text(
-                            'Example Questions',
-                            style: AppTypography.titleSmall,
-                          ),
-                          const SizedBox(height: 8),
-                          _buildExampleQuestionTile(
-                            _controller.sentenceContext == null
-                                ? 'Explain the difference between "say" and "tell".'
-                                : 'Explain this sentence in Chinese.',
-                          ),
-                          _buildExampleQuestionTile(
-                            'Give me three useful English phrases for daily conversation.',
-                          ),
-                        ],
-                        ..._controller.messages
-                            .where((m) => m.content.isNotEmpty)
-                            .map(
-                              (msg) => ChatBubble(
-                                message: msg,
-                                onSpeak: _controller.speak,
-                                onDelete: () =>
-                                    _controller.deleteMessage(msg.id),
-                              ),
+              Expanded(
+                child: !_controller.isReady
+                    ? const Center(child: CircularProgressIndicator())
+                    : ListView(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.all(16),
+                        children: [
+                          if (_controller.sentenceContext != null)
+                            SentenceSummaryCard(
+                              contextData: _controller.sentenceContext!,
+                              isExpanded: _controller.isSummaryExpanded,
+                              onToggleExpand: _controller.toggleSummaryExpanded,
                             ),
-                        if (_controller.isGenerating)
-                          const Center(
-                            child: Padding(
-                              padding: EdgeInsets.all(12),
-                              child: SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
+                          if (_controller.messages.isEmpty) ...[
+                            const SizedBox(height: 16),
+                            const Text(
+                              'Example Questions',
+                              style: AppTypography.titleSmall,
+                            ),
+                            const SizedBox(height: 8),
+                            _buildExampleQuestionTile(
+                              _controller.sentenceContext == null
+                                  ? 'Explain the difference between "say" and "tell".'
+                                  : 'Explain this sentence in Chinese.',
+                            ),
+                            _buildExampleQuestionTile(
+                              'Give me three useful English phrases for daily conversation.',
+                            ),
+                          ],
+                          ..._controller.messages
+                              .where((m) => m.content.isNotEmpty)
+                              .map(
+                                (msg) => ChatBubble(
+                                  message: msg,
+                                  isSpeaking:
+                                      _controller.speakingMessageId == msg.id,
+                                  canSpeak: !_controller.isVoiceBusy,
+                                  onSpeak: (text) async {
+                                    await _controller.speak(
+                                      text,
+                                      messageId: msg.id,
+                                    );
+                                    if (!context.mounted) return;
+                                    if (_controller.speechErrorMessage !=
+                                        null) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                _controller.speechErrorMessage!,
+                                              ),
+                                            ),
+                                          );
+                                    }
+                                  },
+                                  onDelete: () =>
+                                      _controller.deleteMessage(msg.id),
+                                ),
+                              ),
+                          if (_controller.isGenerating)
+                            const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(12),
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        if (_controller.canRegenerate)
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton.icon(
-                              onPressed: _controller.regenerate,
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Regenerate answer'),
+                          if (_controller.canRegenerate)
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton.icon(
+                                onPressed: _controller.regenerate,
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('Regenerate answer'),
+                              ),
                             ),
-                          ),
-                      ],
-                    ),
-            ),
-            if (_controller.isRecording)
-              ListTile(
-                tileColor: AppColors.primaryLight,
-                title: const Text('Listening…'),
-                leading: const Icon(Icons.mic),
-                trailing: TextButton(
-                  onPressed: _toggleVoiceRecording,
-                  child: const Text('Stop recording'),
-                ),
+                          if (_pendingVoiceText != null)
+                            Card(
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Voice transcript',
+                                      style: AppTypography.titleSmall,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    SelectableText(_pendingVoiceText!),
+                                    Wrap(
+                                      spacing: 8,
+                                      children: [
+                                        TextButton(
+                                          onPressed: () {
+                                            final draft = _inputController.text;
+                                            final text = draft.isEmpty
+                                                ? _pendingVoiceText!
+                                                : '$draft\n$_pendingVoiceText';
+                                            _inputController.value =
+                                                TextEditingValue(
+                                                  text: text,
+                                                  selection:
+                                                      TextSelection.collapsed(
+                                                        offset: text.length,
+                                                      ),
+                                                );
+                                            setState(
+                                              () => _pendingVoiceText = null,
+                                            );
+                                          },
+                                          child: const Text(
+                                            'Insert into message',
+                                          ),
+                                        ),
+                                        TextButton(
+                                          onPressed: () => setState(
+                                            () => _pendingVoiceText = null,
+                                          ),
+                                          child: const Text('Dismiss'),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
               ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: const BoxDecoration(
-                color: AppColors.surface,
-                border: Border(top: BorderSide(color: AppColors.border)),
-              ),
-              child: Row(
-                children: [
-                  IconButton(
-                    tooltip: 'Voice Input',
-                    icon: Icon(
-                      _controller.isRecording ? Icons.stop : Icons.mic_none,
-                    ),
-                    onPressed: _toggleVoiceRecording,
+              if (_controller.isVoiceBusy)
+                Container(
+                  color: AppColors.primaryLight,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 4,
                   ),
-                  Expanded(
-                    child: TextField(
-                      controller: _inputController,
-                      minLines: 1,
-                      maxLines: 5,
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _send(),
-                      decoration: const InputDecoration(
-                        hintText: 'Message…',
-                        border: InputBorder.none,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(switch (_controller.voiceState) {
+                          ChatVoiceState.recording => 'Recording…',
+                          ChatVoiceState.transcribing =>
+                            _controller.voiceProgress == null
+                                ? 'Transcribing…'
+                                : 'Transcribing… ${(_controller.voiceProgress! * 100).round()}%',
+                          ChatVoiceState.cancelling => 'Cancelling…',
+                          _ => 'Starting microphone…',
+                        }),
+                      ),
+                      TextButton(
+                        onPressed:
+                            _controller.voiceState == ChatVoiceState.cancelling
+                            ? null
+                            : _controller.cancelVoiceInput,
+                        child: const Text('Cancel'),
+                      ),
+                    ],
+                  ),
+                ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: const BoxDecoration(
+                  color: AppColors.surface,
+                  border: Border(top: BorderSide(color: AppColors.border)),
+                ),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: _controller.isRecording
+                          ? 'Stop recording and transcribe'
+                          : 'Voice Input',
+                      icon: Icon(
+                        _controller.isRecording ? Icons.stop : Icons.mic_none,
+                      ),
+                      onPressed:
+                          _controller.isReady &&
+                              (!_controller.isVoiceBusy ||
+                                  _controller.isRecording)
+                          ? _toggleVoiceRecording
+                          : null,
+                    ),
+                    Expanded(
+                      child: TextField(
+                        controller: _inputController,
+                        minLines: 1,
+                        maxLines: constraints.maxHeight < 300
+                            ? 1
+                            : constraints.maxHeight < 500
+                            ? 3
+                            : 5,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _send(),
+                        decoration: const InputDecoration(
+                          hintText: 'Message…',
+                          border: InputBorder.none,
+                        ),
                       ),
                     ),
-                  ),
-                  IconButton.filled(
-                    tooltip: _controller.isGenerating
-                        ? 'Stop generating'
-                        : 'Send message',
-                    onPressed: !_controller.isReady
-                        ? null
-                        : _controller.isGenerating
-                        ? _controller.stopGeneration
-                        : _send,
-                    icon: Icon(
-                      _controller.isGenerating ? Icons.stop : Icons.send,
+                    IconButton.filled(
+                      tooltip: _controller.isGenerating
+                          ? 'Stop generating'
+                          : 'Send message',
+                      onPressed: !_controller.isReady
+                          ? null
+                          : _controller.isGenerating
+                          ? _controller.stopGeneration
+                          : _controller.isVoiceBusy
+                          ? null
+                          : _send,
+                      icon: Icon(
+                        _controller.isGenerating ? Icons.stop : Icons.send,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     ),

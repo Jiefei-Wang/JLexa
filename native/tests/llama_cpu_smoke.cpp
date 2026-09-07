@@ -12,7 +12,7 @@
 
 int main(int argc, char** argv) {
     if (argc < 2 || argc > 3) {
-        std::fprintf(stderr, "Usage: llama_cpu_smoke <Qwen2.5-Instruct.gguf> [cpu|vulkan]\n");
+        std::fprintf(stderr, "Usage: llama_cpu_smoke <Qwen2.5-Instruct.gguf> [cpu|vulkan|opencl]\n");
         return 2;
     }
     const int fd = open(argv[1], O_RDONLY);
@@ -23,7 +23,7 @@ int main(int argc, char** argv) {
 
     JLexaLlamaRuntimeConfig config;
     config.backend = argc == 3 ? argv[2] : "cpu";
-    if (config.backend != "cpu" && config.backend != "vulkan") {
+    if (config.backend != "cpu" && config.backend != "vulkan" && config.backend != "opencl") {
         close(fd);
         return 2;
     }
@@ -72,6 +72,6 @@ int main(int argc, char** argv) {
     }
     bridge.unloadModel();
     close(fd);
-    std::printf("%s inference smoke test: %s\n", config.backend == "cpu" ? "CPU" : "Vulkan", passed ? "PASS" : "FAIL");
+    std::printf("%s inference smoke test: %s\n", config.backend.c_str(), passed ? "PASS" : "FAIL");
     return passed ? 0 : 1;
 }

@@ -27,6 +27,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late final SettingsController _controller;
   bool _ownsController = false;
+  int? _draftThreads;
 
   @override
   void initState() {
@@ -380,6 +381,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _buildModelCard(ManagedModelItem item) {
     final isDownloading = item.state == ModelDownloadState.downloading;
+    final isCancelling = _controller.isCancellingDownload(item.id);
     final isLoaded = item.state == ModelDownloadState.loaded;
     final isLoading = item.state == ModelDownloadState.loading;
     final isDownloaded = item.isDownloaded;
@@ -415,17 +417,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    Text(item.displayName, style: AppTypography.labelLarge),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Flexible(
-                          child: Text(
-                            item.displayName,
-                            style: AppTypography.labelLarge,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (item.isRecommended) ...[
-                          const SizedBox(width: 6),
+                        if (item.isRecommended)
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 6,
@@ -444,10 +443,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                             ),
                           ),
-                        ],
+                        _buildStateBadge(item.state),
                       ],
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 6),
                     Text(
                       '${item.formattedSize}${item.speedHint.isNotEmpty ? " • ${item.speedHint}" : ""}${item.memoryHint.isNotEmpty ? " • ${item.memoryHint}" : ""}',
                       style: const TextStyle(
@@ -458,27 +457,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ],
                 ),
               ),
-              _buildStateBadge(item.state),
             ],
           ),
           if (item.description.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(item.description, style: AppTypography.bodySmall),
           ],
+          if (item.errorMessage?.isNotEmpty == true) ...[
+            const SizedBox(height: 8),
+            Text(
+              item.errorMessage!,
+              style: const TextStyle(color: AppColors.error, fontSize: 13),
+            ),
+          ],
           if (isDownloading) ...[
             const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  item.progress != null
-                      ? 'Downloading: ${item.progress!.formattedReceived} / ${item.progress!.formattedTotal}'
-                      : 'Downloading...',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.primary,
+                Expanded(
+                  child: Text(
+                    item.progress != null
+                        ? 'Downloading: ${item.progress!.formattedReceived} / ${item.progress!.formattedTotal}'
+                        : 'Downloading...',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.primary,
+                    ),
                   ),
                 ),
+                const SizedBox(width: 8),
                 Text(
                   item.progress?.percentageString ?? '0%',
                   style: const TextStyle(
@@ -500,17 +508,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Align(
               alignment: Alignment.centerRight,
               child: TextButton.icon(
-                onPressed: () => _controller.cancelDownload(item.id),
+                onPressed: isCancelling
+                    ? null
+                    : () => _controller.cancelDownload(item.id),
                 icon: const Icon(Icons.close, size: 16, color: AppColors.error),
-                label: const Text(
-                  'Cancel',
-                  style: TextStyle(color: AppColors.error, fontSize: 13),
+                label: Text(
+                  isCancelling ? 'Cancelling…' : 'Cancel',
+                  style: const TextStyle(color: AppColors.error, fontSize: 13),
                 ),
               ),
             ),
           ] else ...[
             const SizedBox(height: 12),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 if (!isDownloaded && item.catalogModel != null)
                   FilledButton.tonalIcon(
@@ -677,7 +689,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               if (isConfigured)
                 OutlinedButton.icon(
-                  onPressed: _controller.isLoading
+                  onPressed:
+                      _controller.isLoading || _controller.hasActiveDownloads
                       ? null
                       : _controller.changeStorageFolder,
                   icon: const Icon(Icons.edit_outlined, size: 14),
@@ -709,7 +722,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 12),
             FilledButton.icon(
-              onPressed: _controller.isLoading
+              onPressed: _controller.isLoading || _controller.hasActiveDownloads
                   ? null
                   : _controller.chooseStorageFolder,
               icon: const Icon(Icons.folder_open, size: 18),
@@ -823,15 +836,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       size: 20,
                     ),
                     const SizedBox(width: 8),
-                    const Text(
-                      'Active Runtime Status',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.primaryDark,
-                        fontSize: 14,
+                    const Expanded(
+                      child: Text(
+                        'Active Runtime Status',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.primaryDark,
+                          fontSize: 14,
+                        ),
                       ),
                     ),
-                    const Spacer(),
+                    const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8,
@@ -884,12 +899,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ],
+                if (hasLoadedModel && activeInfo.backend == 'opencl') ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Experimental mixed GPU/CPU runtime: Q4_K and Q6_K matrix multiplication runs on GPU. Other operations and the KV cache stay on CPU; speed depends on the model.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
           const SizedBox(height: 16),
 
           // Backend Preference Selection
+          if (_controller.isLoading) ...[
+            const LinearProgressIndicator(),
+            const SizedBox(height: 8),
+            const Text(
+              'Updating models and settings…',
+              style: AppTypography.bodySmall,
+            ),
+            const SizedBox(height: 12),
+          ],
           const Text(
             'Hardware Backend Preference',
             style: AppTypography.labelLarge,
@@ -939,7 +973,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
                             children: [
                               Text(
                                 pref.label,
@@ -996,6 +1032,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   : AppColors.textTertiary,
                             ),
                           ),
+                          if (!isUsable && bInfo.reasonUnavailable != null)
+                            Text(
+                              bInfo.reasonUnavailable!,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -1021,7 +1065,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                 ),
                 subtitle: const Text(
-                  'Context size, threads, batch sizes, and Flash Attention',
+                  'Context size, CPU threads, and Flash Attention',
                   style: TextStyle(
                     fontSize: 11,
                     color: AppColors.textSecondary,
@@ -1033,20 +1077,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   // CPU Threads
                   _buildSliderTile(
                     title: 'CPU Threads',
-                    subtitle: settings.threads == null
+                    subtitle: _draftThreads == null && settings.threads == null
                         ? 'Auto (Default 4)'
-                        : 'Custom: ${settings.threads} threads',
-                    value: (settings.threads ?? 4).toDouble(),
+                        : 'Custom: ${_draftThreads ?? settings.threads} threads',
+                    value: (_draftThreads ?? settings.threads ?? 4).toDouble(),
                     min: 1,
                     max: 16,
                     divisions: 15,
-                    displayValue: settings.threads == null
+                    displayValue:
+                        _draftThreads == null && settings.threads == null
                         ? 'Auto'
-                        : '${settings.threads}',
+                        : '${_draftThreads ?? settings.threads}',
+                    enabled: !_controller.isLoading,
                     onChanged: (val) {
-                      _controller.updateLlamaSettings(
+                      setState(() => _draftThreads = val.round());
+                    },
+                    onChangeEnd: (val) async {
+                      await _controller.updateLlamaSettings(
                         settings.copyWith(threads: val.round()),
                       );
+                      if (mounted) setState(() => _draftThreads = null);
                     },
                   ),
                   const Divider(height: 16),
@@ -1089,7 +1139,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Context Length', style: AppTypography.labelLarge),
+            const Expanded(
+              child: Text('Context Length', style: AppTypography.labelLarge),
+            ),
             Text(
               currentCtx == null ? 'Auto (2048)' : '$currentCtx tokens',
               style: const TextStyle(
@@ -1111,25 +1163,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ChoiceChip(
               label: const Text('Auto (2048)'),
               selected: currentCtx == null,
-              onSelected: (selected) {
-                if (selected) {
-                  _controller.updateLlamaSettings(
-                    settings.copyWith(contextLength: null),
-                  );
-                }
-              },
+              onSelected: _controller.isLoading
+                  ? null
+                  : (selected) {
+                      if (selected) {
+                        _controller.updateLlamaSettings(
+                          settings.copyWith(contextLength: null),
+                        );
+                      }
+                    },
             ),
             ...options.map((opt) {
               return ChoiceChip(
                 label: Text('$opt'),
                 selected: currentCtx == opt,
-                onSelected: (selected) {
-                  if (selected) {
-                    _controller.updateLlamaSettings(
-                      settings.copyWith(contextLength: opt),
-                    );
-                  }
-                },
+                onSelected: _controller.isLoading
+                    ? null
+                    : (selected) {
+                        if (selected) {
+                          _controller.updateLlamaSettings(
+                            settings.copyWith(contextLength: opt),
+                          );
+                        }
+                      },
               );
             }),
           ],
@@ -1145,7 +1201,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Flash Attention', style: AppTypography.labelLarge),
+            const Expanded(
+              child: Text('Flash Attention', style: AppTypography.labelLarge),
+            ),
             Text(
               settings.flashAttention.name.toUpperCase(),
               style: const TextStyle(
@@ -1168,11 +1226,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ButtonSegment(value: LlamaFlashAttention.off, label: Text('Off')),
           ],
           selected: {settings.flashAttention},
-          onSelectionChanged: (set) {
-            _controller.updateLlamaSettings(
-              settings.copyWith(flashAttention: set.first),
-            );
-          },
+          onSelectionChanged: _controller.isLoading
+              ? null
+              : (set) {
+                  _controller.updateLlamaSettings(
+                    settings.copyWith(flashAttention: set.first),
+                  );
+                },
         ),
       ],
     );
@@ -1187,6 +1247,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required int divisions,
     required String displayValue,
     required ValueChanged<double> onChanged,
+    ValueChanged<double>? onChangeEnd,
+    bool enabled = true,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1194,7 +1256,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(title, style: AppTypography.labelLarge),
+            Expanded(child: Text(title, style: AppTypography.labelLarge)),
             Text(
               displayValue,
               style: const TextStyle(
@@ -1211,7 +1273,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           max: max,
           divisions: divisions,
           activeColor: AppColors.primary,
-          onChanged: onChanged,
+          onChanged: enabled ? onChanged : null,
+          onChangeEnd: enabled ? onChangeEnd : null,
         ),
       ],
     );

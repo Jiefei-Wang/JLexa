@@ -13,20 +13,20 @@ enum LlamaBackendPreference {
       case LlamaBackendPreference.vulkan:
         return 'Vulkan';
       case LlamaBackendPreference.opencl:
-        return 'OpenCL';
+        return 'OpenCL (Experimental)';
     }
   }
 
   String get description {
     switch (this) {
       case LlamaBackendPreference.auto:
-        return 'Automatically selects the best compatible backend for this device.';
+        return 'Uses Vulkan when available, otherwise CPU.';
       case LlamaBackendPreference.cpu:
         return 'Universal CPU execution. Most compatible, safe fallback.';
       case LlamaBackendPreference.vulkan:
         return 'Hardware GPU acceleration via Vulkan.';
       case LlamaBackendPreference.opencl:
-        return 'Hardware GPU acceleration via OpenCL.';
+        return 'Experimental Mali-G78 GPU + CPU execution. May be slower than CPU. Auto does not select this backend.';
     }
   }
 

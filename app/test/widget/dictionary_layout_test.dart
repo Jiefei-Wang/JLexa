@@ -26,6 +26,44 @@ class _Vocabulary extends VocabularyRepository {
 void main() {
   setUpAll(setupMockPlatformChannels);
 
+  testWidgets(
+    'Explicit translation entry opens an empty focused AI search and offline entry resets it',
+    (tester) async {
+      final ai = AiService();
+      addTearDown(ai.dispose);
+      final dictionary = _Dictionary();
+      final vocabulary = _Vocabulary();
+      Widget screen({required int tab, required int revision}) => MaterialApp(
+        home: DictionaryScreen(
+          dictionaryRepo: dictionary,
+          vocabularyRepo: vocabulary,
+          aiService: ai,
+          initialWord: '',
+          initialTab: tab,
+          navigationRevision: revision,
+          focusOnNavigation: true,
+        ),
+      );
+      await tester.pumpWidget(screen(tab: 1, revision: 1));
+      await tester.pumpAndSettle();
+      expect(find.text('AI Translation'), findsOneWidget);
+      expect(find.text('Translate a word or sentence'), findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus,
+        isTrue,
+      );
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        isEmpty,
+      );
+      await tester.pumpWidget(screen(tab: 0, revision: 2));
+      await tester.pumpAndSettle();
+      expect(find.text('AI Translation'), findsNothing);
+      expect(find.text('Search a word or sentence'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('Review answer controls stay above Android system navigation', (
     tester,
   ) async {

@@ -43,7 +43,7 @@ if(ANDROID AND ANDROID_ABI STREQUAL "arm64-v8a")
 else()
     set(GGML_VULKAN OFF CACHE BOOL "CPU-only non-ARM64 build" FORCE)
 endif()
-set(GGML_OPENCL OFF CACHE BOOL "Android OpenCL SDK/ABI is not bundled" FORCE)
+set(GGML_OPENCL OFF CACHE BOOL "Use the restricted app-owned Mali OpenCL backend" FORCE)
 
 add_subdirectory("${WHISPER_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/whisper_build" EXCLUDE_FROM_ALL)
 if(GGML_VULKAN)
@@ -53,6 +53,8 @@ if(GGML_VULKAN)
     jlexa_apply_vulkan_shader_compatibility(ggml-vulkan)
 endif()
 add_subdirectory("${LLAMA_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/llama_build" EXCLUDE_FROM_ALL)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/JlexaOpenCLMali.cmake")
+jlexa_add_opencl_mali_backend()
 
 add_library(jlexa_native SHARED
     jlexa_jni.cpp
@@ -76,4 +78,9 @@ target_link_libraries(jlexa_native PRIVATE
 
 if(GGML_VULKAN)
     target_compile_definitions(jlexa_native PRIVATE JLEXA_HAS_VULKAN=1)
+endif()
+if(TARGET jlexa_opencl_mali)
+    target_link_libraries(jlexa_native PRIVATE jlexa_opencl_mali)
+    target_include_directories(jlexa_native PRIVATE "${JLEXA_OPENCL_INCLUDE_DIR}")
+    target_compile_definitions(jlexa_native PRIVATE JLEXA_HAS_OPENCL=1)
 endif()

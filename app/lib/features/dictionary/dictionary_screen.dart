@@ -16,6 +16,8 @@ class DictionaryScreen extends StatefulWidget {
   final AiService aiService;
   final String? initialWord;
   final int navigationRevision;
+  final int initialTab;
+  final bool focusOnNavigation;
 
   const DictionaryScreen({
     super.key,
@@ -24,6 +26,8 @@ class DictionaryScreen extends StatefulWidget {
     required this.aiService,
     this.initialWord,
     this.navigationRevision = 0,
+    this.initialTab = 0,
+    this.focusOnNavigation = false,
   });
 
   @override
@@ -33,6 +37,7 @@ class DictionaryScreen extends StatefulWidget {
 class _DictionaryScreenState extends State<DictionaryScreen> {
   late final DictionaryController _controller;
   final TextEditingController _searchTextController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
 
   @override
   void initState() {
@@ -41,10 +46,18 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
       dictionaryRepo: widget.dictionaryRepo,
       vocabularyRepo: widget.vocabularyRepo,
       aiService: widget.aiService,
-      initialWord: widget.initialWord ?? 'resilient',
+      initialWord: widget.initialWord ?? '',
+      initialTab: widget.initialTab,
     );
-    _searchTextController.text = widget.initialWord ?? 'resilient';
-    if (widget.initialWord == '') _controller.setSelectedTab(1);
+    _searchTextController.text = widget.initialWord ?? '';
+    _focusSearchIfRequested();
+  }
+
+  void _focusSearchIfRequested() {
+    if (!widget.focusOnNavigation) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchFocusNode.requestFocus();
+    });
   }
 
   @override
@@ -54,14 +67,15 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
         (widget.initialWord != oldWidget.initialWord ||
             widget.navigationRevision != oldWidget.navigationRevision)) {
       _searchTextController.text = widget.initialWord!;
-      _controller.search(widget.initialWord!);
-      if (widget.initialWord == '') _controller.setSelectedTab(1);
+      _controller.search(widget.initialWord!, selectedTab: widget.initialTab);
+      _focusSearchIfRequested();
     }
   }
 
   @override
   void dispose() {
     _searchTextController.dispose();
+    _searchFocusNode.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -72,13 +86,18 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
       listenable: _controller,
       builder: (context, _) {
         final entry = _controller.currentEntry;
+        final isTranslationMode =
+            widget.initialTab == 1 && _controller.selectedTab == 1;
 
         return Scaffold(
           backgroundColor: AppColors.background,
           appBar: AppBar(
             backgroundColor: AppColors.surface,
             elevation: 0,
-            title: const Text('Dictionary', style: AppTypography.titleMedium),
+            title: Text(
+              isTranslationMode ? 'AI Translation' : 'Dictionary',
+              style: AppTypography.titleMedium,
+            ),
             actions: [
               IconButton(
                 icon: Icon(
@@ -90,11 +109,27 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                 onPressed:
                     !_controller.isLoading &&
                         !_controller.isSaving &&
-                        (_controller.currentEntry != null ||
+                        (_controller.isSaved ||
+                            _controller.currentEntry != null ||
                             _controller.aiAnswer != null)
                     ? () async {
-                        await _controller.toggleSaveToVocabulary();
-                        if (context.mounted) {
+                        final query = _controller.currentQuery;
+                        try {
+                          await _controller.toggleSaveToVocabulary();
+                        } catch (error) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Could not update vocabulary: $error',
+                                ),
+                              ),
+                            );
+                          }
+                          return;
+                        }
+                        if (context.mounted &&
+                            query == _controller.currentQuery) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text(
@@ -108,7 +143,9 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                         }
                       }
                     : null,
-                tooltip: 'Save to Vocabulary',
+                tooltip: _controller.isSaved
+                    ? 'Remove from Vocabulary'
+                    : 'Save to Vocabulary',
               ),
             ],
           ),
@@ -123,6 +160,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                 ),
                 child: TextField(
                   controller: _searchTextController,
+                  focusNode: _searchFocusNode,
                   onChanged: _controller.onQueryChanged,
                   textInputAction: TextInputAction.search,
                   onSubmitted: (query) {
@@ -130,7 +168,9 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                     _controller.search(query);
                   },
                   decoration: InputDecoration(
-                    hintText: 'Search a word or sentence...',
+                    hintText: isTranslationMode
+                        ? 'Enter text to translate...'
+                        : 'Search a word or sentence...',
                     prefixIcon: const Icon(
                       Icons.search,
                       color: AppColors.textSecondary,
@@ -189,26 +229,38 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                     ? const Center(child: CircularProgressIndicator())
                     : _controller.currentQuery.isEmpty
                     ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(
-                              Icons.search,
-                              size: 48,
-                              color: AppColors.textTertiary,
+                        child: SingleChildScrollView(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  isTranslationMode
+                                      ? Icons.translate
+                                      : Icons.search,
+                                  size: 48,
+                                  color: AppColors.textTertiary,
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  isTranslationMode
+                                      ? 'Translate a word or sentence'
+                                      : 'Search a word or sentence',
+                                  style: AppTypography.titleSmall,
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  isTranslationMode
+                                      ? 'Enter the full text above. The local AI translates it into Chinese.'
+                                      : 'Look up English words offline, or choose AI Answer after searching a sentence.',
+                                  style: AppTypography.bodySmall,
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 12),
-                            const Text(
-                              'Search a word or sentence',
-                              style: AppTypography.titleSmall,
-                            ),
-                            const SizedBox(height: 4),
-                            const Text(
-                              'Try "resilient", "meticulous", "prioritize", "endeavor", etc.',
-                              style: AppTypography.bodySmall,
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
+                          ),
                         ),
                       )
                     : ListView(
@@ -470,9 +522,11 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                     TextButton(
                                       onPressed: _controller.retryAiAnswer,
                                       child: Text(
-                                        _controller.aiAnswer == null
+                                        _controller.aiAnswer != null
+                                            ? 'Regenerate'
+                                            : _controller.aiErrorMessage != null
                                             ? 'Try again'
-                                            : 'Regenerate',
+                                            : 'Generate answer',
                                       ),
                                     ),
                                 ],
@@ -542,21 +596,26 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
   Widget _buildTabButton(int index, String label) {
     final isSelected = _controller.selectedTab == index;
     return Expanded(
-      child: GestureDetector(
-        onTap: () => _controller.setSelectedTab(index),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: isSelected ? AppColors.primaryLight : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-              color: isSelected ? AppColors.primary : AppColors.textSecondary,
+      child: Semantics(
+        button: true,
+        selected: isSelected,
+        child: InkWell(
+          onTap: () => _controller.setSelectedTab(index),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 48),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              color: isSelected ? AppColors.primaryLight : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                color: isSelected ? AppColors.primary : AppColors.textSecondary,
+              ),
             ),
           ),
         ),

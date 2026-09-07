@@ -7,14 +7,14 @@ class QuickToolsGrid extends StatelessWidget {
   final VoidCallback onOpenDictionary;
   final VoidCallback onOpenTranslation;
   final VoidCallback onOpenAiChat;
-  final VoidCallback onOpenSpeechToText;
+  final VoidCallback onOpenVocabulary;
 
   const QuickToolsGrid({
     super.key,
     required this.onOpenDictionary,
     required this.onOpenTranslation,
     required this.onOpenAiChat,
-    required this.onOpenSpeechToText,
+    required this.onOpenVocabulary,
   });
 
   Widget _buildToolItem({
@@ -51,19 +51,9 @@ class QuickToolsGrid extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(
-                    title,
-                    style: AppTypography.labelLarge,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  Text(title, style: AppTypography.labelLarge),
                   const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: AppTypography.bodySmall,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  Text(subtitle, style: AppTypography.bodySmall),
                 ],
               ),
             ),
@@ -85,13 +75,7 @@ class QuickToolsGrid extends StatelessWidget {
       children: [
         const Text('Quick Tools', style: AppTypography.titleSmall),
         const SizedBox(height: 12),
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 2.0,
+        Column(
           children: [
             _buildToolItem(
               title: 'Offline Dictionary',
@@ -101,14 +85,16 @@ class QuickToolsGrid extends StatelessWidget {
               iconBg: AppColors.primaryLight,
               onTap: onOpenDictionary,
             ),
+            const SizedBox(height: 10),
             _buildToolItem(
               title: 'AI Translation',
-              subtitle: 'Translate text instantly',
+              subtitle: 'Translate words and sentences',
               icon: Icons.translate,
               iconColor: AppColors.secondary,
               iconBg: AppColors.secondaryLight,
               onTap: onOpenTranslation,
             ),
+            const SizedBox(height: 10),
             _buildToolItem(
               title: 'Ask AI',
               subtitle: 'Ask questions, get answers',
@@ -117,13 +103,14 @@ class QuickToolsGrid extends StatelessWidget {
               iconBg: AppColors.accentPurpleLight,
               onTap: onOpenAiChat,
             ),
+            const SizedBox(height: 10),
             _buildToolItem(
-              title: 'Speech to Text',
-              subtitle: 'Convert speech to text',
-              icon: Icons.mic_none,
+              title: 'Saved Vocabulary',
+              subtitle: 'Review your saved words and sentences',
+              icon: Icons.style_outlined,
               iconColor: AppColors.warning,
               iconBg: AppColors.warningLight,
-              onTap: onOpenSpeechToText,
+              onTap: onOpenVocabulary,
             ),
           ],
         ),

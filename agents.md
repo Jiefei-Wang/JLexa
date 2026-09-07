@@ -358,3 +358,31 @@ At the end of every agent session after completing work:
   - First Honor installation returned `INSTALL_FAILED_ABORTED: User rejected permissions` while locked. After the user's explicit retry request, `adb install -r` succeeded with existing data preserved. The original failed conversation regenerated a complete, relevant answer; Settings confirmed Vulkan / Adreno 830 / batch 1 / microbatch 1 and the compatibility note. Final PID `2580` had no crash entries, and the app was left showing the user's conversation. Screenshots are in `docs/images/qa-honor-vulkan-*.png`.
   - Existing upstream flutter_tts Kotlin compatibility notice remains; release build succeeds. Prior blocked duplicate APK-output cleanup was not retried or bypassed.
 - **Limit**: Adreno compatibility processes prompts one token at a time and may be slower for long questions. This validates the supplied Qwen models and reported device failure, not every model or language-model answer.
+
+---
+
+## Session: 2026-09-06 (Fresh Pixel 6 Feature Reviews and Experimental Mali OpenCL)
+- **Focus**: Completed independent UX/correctness reviews for Home/Dictionary, Listening, Chat/Study, Settings and OpenCL, followed by a fresh review of the resulting interfaces. Decisions, live evidence and deliberate limits: `docs/qa-pixel6-ux-2026-09-06.md`; native scope and reproduction: `docs/native-opencl-pixel.md`.
+- **Changes**:
+  - Home now opens explicit empty Dictionary/AI Translation flows, offers usable full-width tools, avoids fake badges/selected pills and covering FABs, and confirms lesson deletion. Dictionary retains custom regeneration intent, original saved sentence/Unicode text and current saved state across Study edits.
+  - Study opens complete saved meanings offline, exposes confirmed removal and displays the actual scheduler's review intervals. Constrained mobile/text-scale layouts remain usable.
+  - Listening Previous selects the preceding cut, split navigation follows the selected left cut, and manual Add can recover missed speech in gaps. Hardened rapid Auto toggles, explanation ownership and shared native Whisper cancellation/request ownership.
+  - Chat displays actual sentence context, selectable Markdown and labeled speech controls. Voice capture/transcription respects draft, tab, route and app lifecycle ownership; first permission now records immediately. English pronunciation resets the shared TTS language after Chinese chat speech.
+  - SAF downloads share an event subscription with per-request routing and retain ownership until native stream closure/terminal acknowledgement. Prevented duplicate downloads and folder changes during finalization; fixed identity/deletion error handling. Settings applies CPU thread changes once at drag end, displays errors/cancellation clearly, and wraps full model names with separate badges.
+  - Added an optional, restricted Mali-G78 OpenCL backend without modifying vendor submodules or packaging vendor drivers. Q4_K/Q6_K matmul runs on GPU; unsupported operations and KV remain on CPU. Auto continues to choose Vulkan/CPU. Settings explicitly labels the mixed OpenCL path experimental and potentially slower.
+- **Physical and Native Verification**:
+  - Pixel 6 `25311FDF6004PR`: real offline word lookup, Chinese sentence translation, original-text vocabulary saving/detail/removal and saved-star synchronization; fresh audio import, manual transcription, Auto OFF cache gating, locked/editable bounds, gap-add/split, same-file persistence, Redo and Reset.
+  - Signed app: first microphone grant immediately entered Recording, cancellation returned idle; real OpenCL load and Chinese Hello explanation succeeded; chat cancellation, regeneration, Markdown/history/deletion passed. Per-cut Whisper returned Hello within the roughly four-second capture interval. Replay/Repeat completed over six 1142-2240 ms cycles and stopped on Pause.
+  - Concurrent Whisper Base and SmolLM2 downloads both completed; cancelling a subsequent active download returned GET and removed its partial file. Removed only QA downloads, lesson/source, vocabulary entry and conversations. Original three lessons, three vocabulary entries and Qwen/Whisper models were retained; Auto restored.
+  - Native: 12 Mali kernel comparisons passed (maximum scaled error < 4.4e-5); missing driver/API concurrent loader tests passed. Exact Gradle ARM64 library passed CPU, Vulkan and OpenCL arithmetic/Chinese/grammar smoke. Long-prompt, cancellation/recovery and unload/reload fixtures passed. ARM64 and x86_64 native release builds succeeded.
+  - Final layout-only signed upgrade succeeded with `adb install -r`; full model names and loaded inventory confirmed, final PID `11420`, no new crash entries, app left on Home. Earlier isolated native experiment crash entries are documented separately and were not app crashes.
+- **Static Analysis**: `flutter analyze` -> `No issues found!` (zero errors/warnings).
+- **Tests**: `flutter test --concurrency=1` -> `253 passed`, zero failed (64 seconds).
+- **Signed Release**:
+  - `flutter build apk --release` succeeded using `app/android/key.properties` (58.7 seconds).
+  - Fixed path: `release/app-release.apk` (94,947,605 bytes).
+  - APK SHA-256: `84FA762ACF4B45A0E7FD95741B16DD5644351FA0CB5899ED455A10C0CCF2FB28`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
+  - `apksigner verify --verbose --print-certs`: Verified, APK Signature Scheme v2 true.
+  - Existing upstream flutter_tts Kotlin compatibility notice remains; current release succeeds. Prior policy-blocked duplicate APK-output cleanup was not retried or bypassed.
+- **Limits/Review Decisions**: Restricted OpenCL is validated on Mali-G78 and the supplied model, not all GPUs. Generic OpenCL and revision-aware multi-step segment undo were deferred due to broader implementation/validation scope. Qwen 0.5B still gave an inaccurate say/tell explanation despite numerically correct execution; backend success is not a claim of semantic accuracy. Microphone permission/capture/cancel was tested without supplied speech, so conversational recognition accuracy is not claimed.

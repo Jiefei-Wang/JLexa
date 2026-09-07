@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
@@ -392,6 +393,14 @@ class FileSystemModelStorageBackend implements ModelStorageBackend {
 
 /// Android Storage Access Framework (SAF) backend.
 /// Communicates through `com.jlexa.app/saf_storage` platform channel.
+class _SafDownloadRequest {
+  final String requestId;
+  final Completer<void> completion = Completer<void>();
+  bool cancelRequested = false;
+
+  _SafDownloadRequest(this.requestId);
+}
+
 class AndroidSafModelStorageBackend implements ModelStorageBackend {
   static const MethodChannel _channel = MethodChannel(
     'com.jlexa.app/saf_storage',
@@ -399,21 +408,23 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
   static const EventChannel _downloadEventChannel = EventChannel(
     'com.jlexa.app/saf_download_stream',
   );
+  // EventChannel has one native sink and one messenger handler. Every attempt
+  // must listen to the same broadcast stream, including across backend owners.
+  static final Stream<dynamic> _downloadEvents = _downloadEventChannel
+      .receiveBroadcastStream();
+  static int _nextDownloadRequest = 0;
+  final bool _isAndroid;
 
   bool _isConfigured = false;
   String? _treeUri;
   String? _displayName;
 
-  final Map<String, StreamSubscription> _downloadSubs = {};
-  final Set<String> _activeDownloadIds = {};
+  final Map<String, _SafDownloadRequest> _downloadRequests = {};
 
-  AndroidSafModelStorageBackend() {
-    _initDownloadStream();
-  }
+  AndroidSafModelStorageBackend() : _isAndroid = Platform.isAndroid;
 
-  void _initDownloadStream() {
-    if (!Platform.isAndroid) return;
-  }
+  @visibleForTesting
+  AndroidSafModelStorageBackend.forTesting() : _isAndroid = true;
 
   @override
   bool get isConfigured => _isConfigured && _treeUri != null;
@@ -426,7 +437,7 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
 
   @override
   Future<bool> chooseBaseFolder() async {
-    if (!Platform.isAndroid) return false;
+    if (!_isAndroid) return false;
     try {
       final Map? res = await _channel.invokeMapMethod('chooseBaseFolder');
       if (res != null && res['treeUri'] != null) {
@@ -435,13 +446,15 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
         _isConfigured = true;
         return true;
       }
-    } catch (_) {}
+    } catch (e) {
+      throw ModelValidationException('Could not select the model folder: $e');
+    }
     return false;
   }
 
   @override
   Future<bool> restorePersistedFolderAccess() async {
-    if (!Platform.isAndroid) return false;
+    if (!_isAndroid) return false;
     try {
       final Map? res = await _channel.invokeMapMethod(
         'restorePersistedFolderAccess',
@@ -464,7 +477,7 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
     _treeUri = null;
     _displayName = null;
     _isConfigured = false;
-    if (Platform.isAndroid) {
+    if (_isAndroid) {
       try {
         await _channel.invokeMethod('clearPersistedFolderAccess');
       } catch (_) {}
@@ -473,7 +486,7 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
 
   @override
   Future<List<ModelFileEntry>> listModelFiles(ModelType type) async {
-    if (!isConfigured || !Platform.isAndroid) return [];
+    if (!isConfigured || !_isAndroid) return [];
     try {
       final List? list = await _channel.invokeListMethod('listModelFiles', {
         'type': type.name,
@@ -501,7 +514,7 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
 
   @override
   Future<ModelFileEntry?> getFileEntry(String location) async {
-    if (!Platform.isAndroid) return null;
+    if (!_isAndroid) return null;
     final Map? info = await _channel.invokeMapMethod('getModelFileInfo', {
       'uri': location,
     });
@@ -515,7 +528,7 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
 
   @override
   Future<String> prepareDownloadPart(ModelType type, String filename) async {
-    if (!isConfigured || !Platform.isAndroid) {
+    if (!isConfigured || !_isAndroid) {
       throw const ModelValidationException('Storage not configured.');
     }
     final Map? res = await _channel.invokeMapMethod('prepareDownloadPart', {
@@ -536,19 +549,26 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
     required String destinationPartLocation,
     required void Function(ModelProgress progress) onProgress,
   }) async {
-    if (!isConfigured || !Platform.isAndroid) {
+    if (!isConfigured || !_isAndroid) {
       throw const ModelValidationException('Storage not configured.');
     }
 
-    final completer = Completer<void>();
-    _activeDownloadIds.add(model.id);
+    if (_downloadRequests.containsKey(model.id)) {
+      throw const ModelDownloadException('This model is already downloading.');
+    }
+    final request = _SafDownloadRequest(
+      '${model.id}_${++_nextDownloadRequest}',
+    );
+    final completer = request.completion;
+    _downloadRequests[model.id] = request;
 
-    StreamSubscription? sub;
-    sub = _downloadEventChannel.receiveBroadcastStream().listen(
+    final sub = _downloadEvents.listen(
       (dynamic event) {
-        if (event is Map && event['requestId'] == model.id) {
+        if (event is Map &&
+            event['requestId'] == request.requestId &&
+            !completer.isCompleted) {
           final type = event['type'] as String?;
-          if (type == 'progress') {
+          if (type == 'progress' && !request.cancelRequested) {
             final received = (event['bytesReceived'] as num).toInt();
             final total =
                 (event['totalBytes'] as num?)?.toInt() ??
@@ -561,17 +581,15 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
                 progress: pct,
               ),
             );
+          } else if (type == 'cancelled' ||
+              ((type == 'done' || type == 'error') &&
+                  request.cancelRequested)) {
+            completer.completeError(const ModelDownloadCancelledException());
           } else if (type == 'done') {
-            if (!completer.isCompleted) completer.complete();
-          } else if (type == 'cancelled') {
-            if (!completer.isCompleted) {
-              completer.completeError(const ModelDownloadCancelledException());
-            }
+            completer.complete();
           } else if (type == 'error') {
-            if (!completer.isCompleted) {
-              final msg = event['message'] as String? ?? 'SAF download error';
-              completer.completeError(ModelDownloadException(msg));
-            }
+            final msg = event['message'] as String? ?? 'SAF download error';
+            completer.completeError(ModelDownloadException(msg));
           }
         }
       },
@@ -581,36 +599,52 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
         }
       },
     );
-    _downloadSubs[model.id] = sub;
-
     try {
-      await _channel.invokeMethod('downloadFile', {
-        'url': model.downloadUrl,
-        'targetUri': destinationPartLocation,
-        'requestId': model.id,
-        'expectedSizeBytes': model.expectedSizeBytes,
-      });
-      await completer.future;
+      // Attach the terminal error handler before the launch acknowledgment can
+      // complete. Native progress/terminal events may arrive before that reply.
+      await Future.wait<void>([
+        completer.future,
+        _channel.invokeMethod<void>('downloadFile', {
+          'url': model.downloadUrl,
+          'targetUri': destinationPartLocation,
+          'requestId': request.requestId,
+          'expectedSizeBytes': model.expectedSizeBytes,
+        }),
+      ], eagerError: true);
     } finally {
-      _activeDownloadIds.remove(model.id);
       await sub.cancel();
-      _downloadSubs.remove(model.id);
+      if (identical(_downloadRequests[model.id], request)) {
+        _downloadRequests.remove(model.id);
+      }
     }
   }
 
   @override
   void cancelDownload(String modelId) {
-    if (!Platform.isAndroid) return;
-    try {
-      _channel.invokeMethod('cancelDownload', {'requestId': modelId});
-    } catch (_) {}
-    final sub = _downloadSubs.remove(modelId);
-    sub?.cancel();
-    _activeDownloadIds.remove(modelId);
+    if (!_isAndroid) return;
+    final request = _downloadRequests[modelId];
+    if (request == null ||
+        request.completion.isCompleted ||
+        request.cancelRequested) {
+      return;
+    }
+    request.cancelRequested = true;
+    // Keep the subscription and ownership until native has closed its output
+    // stream and acknowledged termination. Retrying sooner can corrupt a part.
+    unawaited(
+      _channel
+          .invokeMethod<void>('cancelDownload', {
+            'requestId': request.requestId,
+          })
+          .catchError((Object _) {
+            // If cancellation delivery fails, keep waiting for the terminal event;
+            // a later done/error still resolves this user-cancelled attempt safely.
+          }),
+    );
   }
 
   @override
-  bool isDownloading(String modelId) => _activeDownloadIds.contains(modelId);
+  bool isDownloading(String modelId) => _downloadRequests.containsKey(modelId);
 
   @override
   Future<String> finalizeDownload(
@@ -619,7 +653,7 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
     ModelType type, {
     int? expectedSizeBytes,
   }) async {
-    if (!isConfigured || !Platform.isAndroid) {
+    if (!isConfigured || !_isAndroid) {
       throw const ModelValidationException('Storage not configured.');
     }
     final Map? res = await _channel.invokeMapMethod('finalizeDownload', {
@@ -638,7 +672,7 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
 
   @override
   Future<bool> deleteModel(String location) async {
-    if (!isConfigured || !Platform.isAndroid) return false;
+    if (!isConfigured || !_isAndroid) return false;
     try {
       final bool? res = await _channel.invokeMethod('deleteModelFile', {
         'uri': location,
@@ -653,7 +687,7 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
   Future<void> cleanStalePartFiles({
     Set<String> activeLocations = const {},
   }) async {
-    if (!isConfigured || !Platform.isAndroid) return;
+    if (!isConfigured || !_isAndroid) return;
     try {
       await _channel.invokeMethod('cleanStalePartFiles', {
         'activeUris': activeLocations.toList(),
@@ -687,7 +721,7 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
 
   @override
   Future<int> getFileSize(String location) async {
-    if (!Platform.isAndroid) return 0;
+    if (!_isAndroid) return 0;
     try {
       final int? size = await _channel.invokeMethod('getFileSize', {
         'uri': location,
@@ -700,7 +734,7 @@ class AndroidSafModelStorageBackend implements ModelStorageBackend {
 
   @override
   Future<bool> fileExists(String location) async {
-    if (!Platform.isAndroid) return false;
+    if (!_isAndroid) return false;
     try {
       final bool? exists = await _channel.invokeMethod('fileExists', {
         'uri': location,

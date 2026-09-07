@@ -23,7 +23,9 @@ class RecentLookupsSection extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Recent Lookups', style: AppTypography.titleSmall),
+            const Expanded(
+              child: Text('Recent Lookups', style: AppTypography.titleSmall),
+            ),
             TextButton(
               onPressed: () => showModalBottomSheet<void>(
                 context: context,

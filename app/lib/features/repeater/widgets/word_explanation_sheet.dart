@@ -40,6 +40,7 @@ class _WordExplanationSheetState extends State<WordExplanationSheet> {
   String _aiTranslation = '';
   AiGenerationHandle? _aiHandle;
   int _aiGen = 0;
+  int _speechGeneration = 0;
 
   @override
   void initState() {
@@ -79,7 +80,12 @@ class _WordExplanationSheetState extends State<WordExplanationSheet> {
   }
 
   Future<void> _speak(String text) async {
+    if (!mounted) return;
+    final generation = ++_speechGeneration;
     try {
+      // Restore the pronunciation voice after another feature reads Chinese.
+      await _tts.setLanguage('en-US');
+      if (!mounted || generation != _speechGeneration) return;
       await _tts.speak(text);
     } catch (_) {}
   }
@@ -123,6 +129,7 @@ class _WordExplanationSheetState extends State<WordExplanationSheet> {
 
   @override
   void dispose() {
+    ++_speechGeneration;
     _aiHandle?.cancel();
     _tts.stop();
     super.dispose();

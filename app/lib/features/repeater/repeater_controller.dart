@@ -35,6 +35,7 @@ class RepeaterController extends ChangeNotifier {
   bool _isLoading = false;
   bool _isWaveformLoading = false;
   bool _autoTranscribe = false;
+  int _autoPreferenceGeneration = 0;
   bool _isEditingCuts = false;
   bool get isEditingCuts => _isEditingCuts;
   String? _visibleTranscriptCutId;
@@ -136,8 +137,10 @@ class RepeaterController extends ChangeNotifier {
   }
 
   Future<void> _loadAutoPreference() async {
-    _autoTranscribe =
-        (await lessonRepo.getSetting('repeater_auto_transcribe')) == 'true';
+    final generation = _autoPreferenceGeneration;
+    final stored = await lessonRepo.getSetting('repeater_auto_transcribe');
+    if (_isDisposed || generation != _autoPreferenceGeneration) return;
+    _autoTranscribe = stored == 'true';
     if (!_isDisposed) notifyListeners();
   }
 
@@ -271,10 +274,7 @@ class RepeaterController extends ChangeNotifier {
     _isLoading = false;
     _isWaveformLoading = false;
 
-    _activeAiHandle?.cancel();
-    _activeAiHandle = null;
-    _aiExplanation = '';
-    _isAiGenerating = false;
+    _invalidateExplanation();
 
     await audioService.clearLesson();
     notifyListeners();
@@ -306,10 +306,7 @@ class RepeaterController extends ChangeNotifier {
     _lastPersistedPositionMs = -1;
 
     // Cancel active AI explanation for old lesson
-    _activeAiHandle?.cancel();
-    _activeAiHandle = null;
-    _aiExplanation = '';
-    _isAiGenerating = false;
+    _invalidateExplanation();
 
     notifyListeners();
 
@@ -696,24 +693,37 @@ class RepeaterController extends ChangeNotifier {
   }
 
   Future<void> setAutoTranscribe(bool value) async {
+    ++_autoPreferenceGeneration;
     _autoTranscribe = value;
-    await lessonRepo.setSetting('repeater_auto_transcribe', value.toString());
     _autoTranscribeDebounce?.cancel();
+    Future<void>? cancellation;
     if (!value) {
       _transcriptionGeneration++;
-      await cancelTranscription();
-      final cut = currentSegment;
-      _visibleTranscriptCutId =
-          _autoTranscribe && cut?.hasValidTranscript == true ? cut!.id : null;
+      _visibleTranscriptCutId = null;
+      cancellation = cancelTranscription();
     } else if (currentSegment != null) {
       final cut = currentSegment!;
       if (cut.hasValidTranscript) {
         _visibleTranscriptCutId = cut.id;
+      } else if (_transcriptionCompleter != null) {
+        // A quick OFF -> ON must wait for the old native request's terminal
+        // event before starting the latest cut. A new toggle/seek invalidates
+        // this queued restart through the same generation guard as cut changes.
+        unawaited(
+          _queueAutoTranscriptionAfterCancellation(
+            cutId: cut.id,
+            cutRevision: cut.revision,
+            switchGeneration: _transcriptionGeneration,
+            pendingTranscription: _transcriptionCompleter!.future,
+          ),
+        );
       } else {
         unawaited(transcribeCurrentCut(automatic: true));
       }
     }
     notifyListeners();
+    await lessonRepo.setSetting('repeater_auto_transcribe', value.toString());
+    if (cancellation != null) await cancellation;
   }
 
   Future<void> seekTo(int targetMs) async {
@@ -737,14 +747,24 @@ class RepeaterController extends ChangeNotifier {
   }
 
   void toggleRepeatOne() => audioService.toggleRepeatOne();
-  void previousSentence() {
-    _selectedSegmentId = null;
-    audioService.previousSentence();
-  }
+  Future<void> previousSentence() => _navigateCut(-1);
+  Future<void> nextSentence() => _navigateCut(1);
 
-  void nextSentence() {
+  Future<void> _navigateCut(int direction) async {
+    final selectedIndex = _segments.indexWhere(
+      (s) => s.id == _selectedSegmentId,
+    );
     _selectedSegmentId = null;
-    audioService.nextSentence();
+    if (selectedIndex >= 0) {
+      // Post-edit selection can differ from a late decoder timestamp.
+      final target =
+          _segments[(selectedIndex + direction).clamp(0, _segments.length - 1)];
+      await seekTo(target.startMs);
+    } else if (direction < 0) {
+      await audioService.previousSentence();
+    } else {
+      await audioService.nextSentence();
+    }
   }
 
   Future<void> repeatCurrentSentence() async {
@@ -754,7 +774,9 @@ class RepeaterController extends ChangeNotifier {
     if (cut == null) return;
     _selectedSegmentId = null;
     await audioService.seekTo(cut.startMs);
-    if (_isDisposed || _lesson?.id != lessonId || currentSegment?.id != cut.id) {
+    if (_isDisposed ||
+        _lesson?.id != lessonId ||
+        currentSegment?.id != cut.id) {
       return;
     }
     await audioService.play();
@@ -935,16 +957,18 @@ class RepeaterController extends ChangeNotifier {
           r.endMs > gap.startMs,
       orElse: () => null,
     );
-    if (region == null) {
-      _notice = 'No connected speech was detected at the playhead.';
+    final newStart = max(gap.startMs, region?.startMs ?? targetPosition - 1000);
+    final newEnd = min(gap.endMs, region?.endMs ?? targetPosition + 1000);
+    if (newStart >= newEnd) {
+      _notice = 'There is no room for another cut at the playhead.';
       notifyListeners();
       return;
     }
     final newCut = AudioSegment(
       id: _uuid.v4(),
       lessonId: targetLessonId,
-      startMs: max(gap.startMs, region.startMs),
-      endMs: min(gap.endMs, region.endMs),
+      startMs: newStart,
+      endMs: newEnd,
       text: '',
       confidence: -1,
       isUserEdited: true,
@@ -953,9 +977,17 @@ class RepeaterController extends ChangeNotifier {
     final updated = [...snapshot, newCut]
       ..sort((a, b) => a.startMs.compareTo(b.startMs));
     await lessonRepo.commitCutSet(targetLessonId, expected, updated);
+    if (_lesson?.id != targetLessonId || _isDisposed) return;
     _segments = updated;
     _selectedSegmentId = null;
+    _notice = region == null
+        ? 'Added a manual cut. Use Edit to adjust its boundaries.'
+        : null;
     audioService.updateSegments(updated);
+    if (!newCut.containsPosition(targetPosition) &&
+        positionMs == targetPosition) {
+      await audioService.seekTo(newCut.startMs);
+    }
     notifyListeners();
   }
 

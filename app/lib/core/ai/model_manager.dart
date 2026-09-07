@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -103,6 +104,9 @@ class ModelManager extends ChangeNotifier {
   final Set<String> _loadingModelIds = {};
 
   final Set<String> _activePartPaths = {};
+  final Map<String, Completer<void>> _activeDownloads = {};
+  final Set<String> _cancelledDownloadIds = {};
+  bool _isChoosingStorageFolder = false;
 
   List<ManagedModelItem> _llmModels = [];
   List<ManagedModelItem> _whisperModels = [];
@@ -118,6 +122,9 @@ class ModelManager extends ChangeNotifier {
   bool get isStorageConfigured => storage.isConfigured;
   String? get storageLocationDisplay => storage.baseLocationDisplay;
   String? get inventoryError => _inventoryError;
+  bool get hasActiveDownloads => _activeDownloads.isNotEmpty;
+  bool isCancellingDownload(String modelId) =>
+      _cancelledDownloadIds.contains(modelId);
 
   @override
   void notifyListeners() {
@@ -150,57 +157,72 @@ class ModelManager extends ChangeNotifier {
   }
 
   Future<bool> chooseInitialStorageFolder() async {
-    final success = await storage.chooseBaseFolder();
-    if (success) {
-      await storage.cleanStalePartFiles();
-      await refreshModels();
-      notifyListeners();
+    _beginStorageFolderChange();
+    try {
+      final success = await storage.chooseBaseFolder();
+      if (success) {
+        await storage.cleanStalePartFiles();
+        await refreshModels();
+        notifyListeners();
+      }
+      return success;
+    } finally {
+      _isChoosingStorageFolder = false;
     }
-    return success;
   }
 
   Future<bool> changeStorageFolder() async {
-    final previousLlmPath = aiService.llmEngine.isLoaded
-        ? aiService.llmEngine.loadedModelPath
-        : null;
-    final previousSpeechPath = aiService.speechEngine.isLoaded
-        ? aiService.speechEngine.loadedModelPath
-        : null;
+    _beginStorageFolderChange();
+    try {
+      final previousLlmPath = aiService.llmEngine.isLoaded
+          ? aiService.llmEngine.loadedModelPath
+          : null;
+      final previousSpeechPath = aiService.speechEngine.isLoaded
+          ? aiService.speechEngine.loadedModelPath
+          : null;
 
-    final success = await storage.chooseBaseFolder();
-    if (!success) return false;
+      final success = await storage.chooseBaseFolder();
+      if (!success) return false;
 
-    final newLlmFiles = await storage.listModelFiles(ModelType.llm);
-    final newWhisperFiles = await storage.listModelFiles(ModelType.whisper);
+      final newLlmFiles = await storage.listModelFiles(ModelType.llm);
+      final newWhisperFiles = await storage.listModelFiles(ModelType.whisper);
 
-    // Safely unload active LLM model if not in new folder
-    if (previousLlmPath != null) {
-      final existsInNew = newLlmFiles.any(
-        (f) =>
-            f.location == previousLlmPath ||
-            p.basename(f.location) == p.basename(previousLlmPath),
-      );
-      if (!existsInNew) {
-        await aiService.unloadLlmModel();
+      // Safely unload active LLM model if not in new folder
+      if (previousLlmPath != null) {
+        final existsInNew = newLlmFiles.any(
+          (f) => _sameLocation(f.location, previousLlmPath),
+        );
+        if (!existsInNew) {
+          await aiService.unloadLlmModel();
+        }
       }
-    }
 
-    // Safely unload active Whisper model if not in new folder
-    if (previousSpeechPath != null) {
-      final existsInNew = newWhisperFiles.any(
-        (f) =>
-            f.location == previousSpeechPath ||
-            p.basename(f.location) == p.basename(previousSpeechPath),
-      );
-      if (!existsInNew) {
-        await aiService.unloadSpeechModel();
+      // Safely unload active Whisper model if not in new folder
+      if (previousSpeechPath != null) {
+        final existsInNew = newWhisperFiles.any(
+          (f) => _sameLocation(f.location, previousSpeechPath),
+        );
+        if (!existsInNew) {
+          await aiService.unloadSpeechModel();
+        }
       }
-    }
 
-    await storage.cleanStalePartFiles();
-    await refreshModels();
-    notifyListeners();
-    return true;
+      await storage.cleanStalePartFiles();
+      await refreshModels();
+      notifyListeners();
+      return true;
+    } finally {
+      _isChoosingStorageFolder = false;
+    }
+  }
+
+  void _beginStorageFolderChange() {
+    if (hasActiveDownloads || _isChoosingStorageFolder) {
+      throw const ModelValidationException(
+        'Wait for downloads to finish or cancel them before changing the model folder.',
+      );
+    }
+    _isChoosingStorageFolder = true;
   }
 
   Future<void> refreshModels() async {
@@ -247,6 +269,7 @@ class ModelManager extends ChangeNotifier {
       }
 
       final isDownloading =
+          _activeDownloads.containsKey(catalog.id) ||
           downloader.isDownloading(catalog.id) ||
           _downloadProgress.containsKey(catalog.id);
       final isLoading = _loadingModelIds.contains(catalog.id);
@@ -316,6 +339,7 @@ class ModelManager extends ChangeNotifier {
             localPath: file.location,
             fileSizeBytes: file.sizeBytes,
             isCustomImport: true,
+            errorMessage: _modelErrors[itemId],
             state: isCurrentlyLoaded
                 ? ModelDownloadState.loaded
                 : (isLoading
@@ -352,6 +376,7 @@ class ModelManager extends ChangeNotifier {
       }
 
       final isDownloading =
+          _activeDownloads.containsKey(catalog.id) ||
           downloader.isDownloading(catalog.id) ||
           _downloadProgress.containsKey(catalog.id);
       final isLoading = _loadingModelIds.contains(catalog.id);
@@ -421,6 +446,7 @@ class ModelManager extends ChangeNotifier {
             localPath: file.location,
             fileSizeBytes: file.sizeBytes,
             isCustomImport: true,
+            errorMessage: _modelErrors[itemId],
             state: isCurrentlyLoaded
                 ? ModelDownloadState.loaded
                 : (isLoading
@@ -523,30 +549,44 @@ class ModelManager extends ChangeNotifier {
   }
 
   Future<void> downloadModel(DownloadableModel catalogModel) async {
-    if (!storage.isConfigured) {
+    if (!storage.isConfigured || _isChoosingStorageFolder) {
       throw const ModelValidationException(
-        'Storage folder has not been configured.',
+        'Select a model storage folder before downloading.',
       );
     }
     final modelId = catalogModel.id;
+    final existingDownload = _activeDownloads[modelId];
+    if (existingDownload != null) {
+      await existingDownload.future;
+      return;
+    }
+    // Claim before the first async storage call. Rapid taps must not open two
+    // writers on the same .part file or permit a concurrent folder change.
+    final completion = Completer<void>();
+    _activeDownloads[modelId] = completion;
     _modelErrors.remove(modelId);
-
-    final destinationPartLocation = await storage.prepareDownloadPart(
-      catalogModel.modelType,
-      catalogModel.filename,
-    );
-
-    _activePartPaths.add(destinationPartLocation);
-
+    String? destinationPartLocation;
     _downloadProgress[modelId] = const ModelProgress(
       receivedBytes: 0,
       totalBytes: 0,
       progress: 0.0,
     );
-    await refreshModels();
     notifyListeners();
 
     try {
+      destinationPartLocation = await storage.prepareDownloadPart(
+        catalogModel.modelType,
+        catalogModel.filename,
+      );
+      _activePartPaths.add(destinationPartLocation);
+      if (_cancelledDownloadIds.contains(modelId)) {
+        throw const ModelDownloadCancelledException();
+      }
+      await refreshModels();
+      notifyListeners();
+      if (_cancelledDownloadIds.contains(modelId)) {
+        throw const ModelDownloadCancelledException();
+      }
       if (storage.backend is AndroidSafModelStorageBackend) {
         await storage.download(
           model: catalogModel,
@@ -567,6 +607,9 @@ class ModelManager extends ChangeNotifier {
         );
       }
 
+      if (_cancelledDownloadIds.contains(modelId)) {
+        throw const ModelDownloadCancelledException();
+      }
       await storage.finalizeDownload(
         destinationPartLocation,
         catalogModel.filename,
@@ -574,26 +617,26 @@ class ModelManager extends ChangeNotifier {
         expectedSizeBytes: catalogModel.expectedSizeBytes,
       );
 
-      _downloadProgress.remove(modelId);
       _modelErrors.remove(modelId);
-      await refreshModels();
-      notifyListeners();
     } catch (e) {
-      _downloadProgress.remove(modelId);
       if (e is ModelDownloadCancelledException) {
-        await storage.deleteModel(destinationPartLocation);
+        if (destinationPartLocation != null) {
+          await storage.deleteModel(destinationPartLocation);
+        }
         _modelErrors.remove(modelId);
-        await refreshModels();
-        notifyListeners();
         return;
       }
 
       _modelErrors[modelId] = e.toString();
-      await refreshModels();
-      notifyListeners();
       rethrow;
     } finally {
       _activePartPaths.remove(destinationPartLocation);
+      _downloadProgress.remove(modelId);
+      _cancelledDownloadIds.remove(modelId);
+      _activeDownloads.remove(modelId);
+      completion.complete();
+      await refreshModels();
+      notifyListeners();
     }
   }
 
@@ -627,11 +670,13 @@ class ModelManager extends ChangeNotifier {
   }
 
   void cancelDownload(String modelId) {
+    if (!_activeDownloads.containsKey(modelId)) return;
+    _cancelledDownloadIds.add(modelId);
     storage.cancelDownload(modelId);
     downloader.cancel(modelId);
-    _downloadProgress.remove(modelId);
-    _modelErrors.remove(modelId);
-    _syncModelStates();
+    // Keep the busy row and folder guard until the writer has acknowledged
+    // cancellation and the owning download has finished its cleanup.
+    notifyListeners();
   }
 
   Future<void> loadModel(ManagedModelItem item) async {
@@ -715,8 +760,10 @@ class ModelManager extends ChangeNotifier {
 
   Future<void> deleteModel(ManagedModelItem item) async {
     // 1. If actively downloading, cancel download first
-    if (downloader.isDownloading(item.id)) {
+    final activeDownload = _activeDownloads[item.id];
+    if (activeDownload != null) {
       cancelDownload(item.id);
+      await activeDownload.future;
     }
 
     // 2. If currently loaded, unload safely first
@@ -726,7 +773,12 @@ class ModelManager extends ChangeNotifier {
 
     // 3. Delete file
     if (item.localPath != null && item.localPath!.isNotEmpty) {
-      await storage.deleteModelFile(item.localPath!);
+      final deleted = await storage.deleteModelFile(item.localPath!);
+      if (!deleted) {
+        throw const ModelValidationException(
+          'The storage provider could not delete this model file. Check folder access and try again.',
+        );
+      }
     }
 
     // 4. Forget persisted path in AiService if it was the selected model

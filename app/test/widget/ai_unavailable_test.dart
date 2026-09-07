@@ -77,7 +77,7 @@ void main() {
       await tester.pump();
 
       expect(find.text('AI Q&A'), findsOneWidget);
-      expect(find.text('Context Summary'), findsOneWidget);
+      expect(find.text('Selected sentence'), findsOneWidget);
       expect(find.text('Example Questions'), findsOneWidget);
       expect(find.text('Explain this sentence in Chinese.'), findsOneWidget);
 

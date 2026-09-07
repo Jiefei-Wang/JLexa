@@ -2,6 +2,9 @@
 #include "llama.h"
 #include "ggml-backend.h"
 #include "jlexa_vulkan_compat.h"
+#ifdef JLEXA_HAS_OPENCL
+#include "jlexa_opencl_api.h"
+#endif
 #include <mutex>
 #include <atomic>
 #include <vector>
@@ -166,6 +169,9 @@ JLexaLlamaBridge& JLexaLlamaBridge::instance() {
 
 JLexaLlamaBridge::JLexaLlamaBridge() : pImpl(new Impl()) {
     llama_backend_init();
+#ifdef JLEXA_HAS_OPENCL
+    jlexa_opencl::registerMaliBackend();
+#endif
     LOGI("JLexaLlamaBridge initialized with llama_backend_init()");
 }
 
@@ -227,13 +233,13 @@ std::vector<JLexaBackendInfo> JLexaLlamaBridge::getAvailableBackends() {
     result.push_back(vkInfo);
 #endif
 
-#ifdef GGML_USE_OPENCL
+#ifdef JLEXA_HAS_OPENCL
     JLexaBackendInfo clInfo;
     clInfo.backend = "opencl";
     clInfo.compiled = true;
     clInfo.available = openclFound;
     clInfo.deviceName = openclFound ? openclDevName : "";
-    clInfo.reasonUnavailable = openclFound ? "" : "No compatible OpenCL compute device found on this system.";
+    clInfo.reasonUnavailable = openclFound ? "" : jlexa_opencl::unavailableReason();
     result.push_back(clInfo);
 #else
     JLexaBackendInfo clInfo;
@@ -316,7 +322,9 @@ bool JLexaLlamaBridge::loadModel(const std::string& modelPath, const JLexaLlamaR
         mparams.n_gpu_layers = config.gpuLayers >= 0 ? config.gpuLayers : -1;
         resolvedGpuLayers = mparams.n_gpu_layers;
     } else { // "auto"
-        target_gpu_dev = vulkan_dev ? vulkan_dev : opencl_dev;
+        // Experimental partial OpenCL offload is explicit opt-in. Auto retains
+        // the established Vulkan/CPU selection and CPU stays fully isolated.
+        target_gpu_dev = vulkan_dev;
         if (target_gpu_dev) {
             selectedBackend = jlexa_backend_name(target_gpu_dev);
             activeDeviceName = ggml_backend_dev_description(target_gpu_dev) ? ggml_backend_dev_description(target_gpu_dev) : "Accelerated GPU";
@@ -393,7 +401,9 @@ bool JLexaLlamaBridge::loadModel(const std::string& modelPath, const JLexaLlamaR
     }
     cparams.n_threads = pImpl->n_threads;
     cparams.n_threads_batch = pImpl->n_threads;
-    cparams.offload_kqv = target_gpu_dev != nullptr;
+    // This OpenCL backend admits quantized matmul only. KV cache must be CPU
+    // resident so SET_ROWS and attention can run on the CPU scheduler backend.
+    cparams.offload_kqv = target_gpu_dev != nullptr && selectedBackend != "opencl";
     cparams.op_offload = target_gpu_dev != nullptr;
 
     if (config.flashAttention == 1) {

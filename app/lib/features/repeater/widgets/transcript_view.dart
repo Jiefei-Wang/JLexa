@@ -59,53 +59,69 @@ class TranscriptView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 6,
-            children: [
-              const Text('Transcript', style: AppTypography.titleSmall),
-              Checkbox(
-                value: auto,
-                onChanged: (v) => onAutoChanged(v ?? false),
-                visualDensity: VisualDensity.compact,
-              ),
-              const Text('Auto', style: AppTypography.bodySmall),
-              TextButton.icon(
-                onPressed: busy ? null : onTranscribe,
-                icon: busy
-                    ? SizedBox(
-                        width: 17,
-                        height: 17,
-                        child: CircularProgressIndicator(
-                          value: fraction,
-                          strokeWidth: 2,
-                          semanticsLabel: isCancelling
-                              ? 'Cancelling transcription'
-                              : 'Transcribing',
+          LayoutBuilder(
+            builder: (context, constraints) => Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 6,
+              children: [
+                const Text('Transcript', style: AppTypography.titleSmall),
+                Checkbox(
+                  value: auto,
+                  onChanged: (v) => onAutoChanged(v ?? false),
+                  visualDensity: VisualDensity.compact,
+                ),
+                const Text('Auto', style: AppTypography.bodySmall),
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: TextButton.icon(
+                          onPressed: busy ? null : onTranscribe,
+                          icon: busy
+                              ? SizedBox(
+                                  width: 17,
+                                  height: 17,
+                                  child: CircularProgressIndicator(
+                                    value: fraction,
+                                    strokeWidth: 2,
+                                    semanticsLabel: isCancelling
+                                        ? 'Cancelling transcription'
+                                        : 'Transcribing',
+                                  ),
+                                )
+                              : const Icon(Icons.subtitles, size: 17),
+                          label: Text(
+                            isCancelling
+                                ? 'Cancelling…'
+                                : isTranscribing
+                                ? fraction == null
+                                      ? 'Transcribing…'
+                                      : 'Transcribing ${(fraction * 100).round()}%'
+                                : 'Transcribe',
+                          ),
                         ),
-                      )
-                    : const Icon(Icons.subtitles, size: 17),
-                label: Text(
-                  fraction == null
-                      ? 'Transcribe'
-                      : 'Transcribe ${(fraction * 100).round()}%',
+                      ),
+                      if (busy)
+                        IconButton(
+                          tooltip: isCancelling
+                              ? 'Cancelling transcription'
+                              : 'Cancel transcription',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: isCancelling ? null : onCancel,
+                          icon: const Icon(Icons.close, size: 18),
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-              if (busy)
-                IconButton(
-                  tooltip: isCancelling
-                      ? 'Cancelling transcription'
-                      : 'Cancel transcription',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: isCancelling ? null : onCancel,
-                  icon: const Icon(Icons.close, size: 18),
-                ),
-              if (confidence >= 0 && confidence <= 1)
-                Chip(
-                  visualDensity: VisualDensity.compact,
-                  label: Text('Confidence ${(confidence * 100).round()}%'),
-                ),
-            ],
+                if (confidence >= 0 && confidence <= 1)
+                  Chip(
+                    visualDensity: VisualDensity.compact,
+                    label: Text('Confidence ${(confidence * 100).round()}%'),
+                  ),
+              ],
+            ),
           ),
           const SizedBox(height: 10),
           if (error != null && !busy)

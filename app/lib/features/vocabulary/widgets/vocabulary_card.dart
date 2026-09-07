@@ -75,6 +75,23 @@ class VocabularyCard extends StatelessWidget {
                     ],
                   ),
                 ),
+                PopupMenuButton<String>(
+                  tooltip: 'Saved entry actions',
+                  onSelected: (_) => onDelete(),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'remove',
+                      child: Text('Remove from Study'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
@@ -122,8 +139,9 @@ class VocabularyCard extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
               children: [
                 Text(
                   'Reviews: ${word.reviewCount} • Interval: ${word.intervalDays}d',

@@ -20,6 +20,8 @@ class DictionaryController extends ChangeNotifier {
   int _queryGeneration = 0;
   int _searchGeneration = 0;
   int _aiGeneration = 0;
+  int _savedStateGeneration = 0;
+  int _speechGeneration = 0;
   bool _isSaving = false;
 
   String _currentQuery = '';
@@ -33,6 +35,7 @@ class DictionaryController extends ChangeNotifier {
   String? _aiErrorMessage;
   String _aiRawStreamingText = '';
   bool _isAiGenerating = false;
+  String? _lastAiPrompt;
   AiGenerationHandle? _activeAiHandle;
   bool _isDisposed = false;
 
@@ -52,15 +55,16 @@ class DictionaryController extends ChangeNotifier {
     required this.dictionaryRepo,
     required this.vocabularyRepo,
     required this.aiService,
-    String initialWord = 'resilient',
+    String initialWord = '',
+    int initialTab = 0,
   }) {
+    vocabularyRepo.addListener(_onVocabularyChanged);
     _initTts();
-    search(initialWord);
+    search(initialWord, selectedTab: initialTab);
   }
 
   void _initTts() {
     try {
-      _tts.setLanguage('en-US');
       _tts.setSpeechRate(0.45);
     } catch (_) {}
   }
@@ -78,7 +82,7 @@ class DictionaryController extends ChangeNotifier {
     _selectedTab = index;
     final query = _currentEntry?.word ?? _currentQuery;
     if (_selectedTab == 1 && _aiAnswer == null && query.isNotEmpty) {
-      _fetchAiAnswer();
+      retryAiAnswer();
     }
     notifyListeners();
   }
@@ -100,21 +104,24 @@ class DictionaryController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> search(String word) async {
+  Future<void> search(String word, {int? selectedTab}) async {
     final clean = word.trim().replaceAll(RegExp(r'\s+'), ' ');
 
     ++_queryGeneration; // Invalidate any pending suggestion queries
     final gen = ++_searchGeneration;
+    ++_savedStateGeneration;
     ++_aiGeneration; // Invalidate any running AI requests
     _activeAiHandle?.cancel();
     _activeAiHandle = null;
 
     _isLoading = true;
+    if (selectedTab != null) _selectedTab = selectedTab;
     _currentQuery = clean;
     _currentEntry = null;
     _isSaved = false;
     _suggestions = [];
     _aiAnswer = null;
+    _lastAiPrompt = null;
     _aiErrorMessage = null;
     _aiRawStreamingText = '';
     _isAiGenerating = false;
@@ -129,6 +136,7 @@ class DictionaryController extends ChangeNotifier {
     final entry = await dictionaryRepo.lookupWord(clean);
     if (gen != _searchGeneration || _isDisposed) return;
 
+    final savedGeneration = ++_savedStateGeneration;
     bool saved = false;
     if (entry != null) {
       saved = await vocabularyRepo.isWordSaved(entry.word);
@@ -138,7 +146,7 @@ class DictionaryController extends ChangeNotifier {
     if (gen != _searchGeneration || _isDisposed) return;
 
     _currentEntry = entry;
-    _isSaved = saved;
+    if (savedGeneration == _savedStateGeneration) _isSaved = saved;
     _isLoading = false;
     notifyListeners();
 
@@ -146,9 +154,39 @@ class DictionaryController extends ChangeNotifier {
   }
 
   Future<void> speak(String text) async {
+    if (_isDisposed) return;
+    final generation = ++_speechGeneration;
     try {
+      // FlutterTts wrappers share Android's engine with Chinese chat reading.
+      await _tts.setLanguage('en-US');
+      if (_isDisposed || generation != _speechGeneration) return;
       await _tts.speak(text);
     } catch (_) {}
+  }
+
+  void _onVocabularyChanged() {
+    _refreshSavedState();
+  }
+
+  Future<void> _refreshSavedState() async {
+    final targetWord = _currentEntry?.word ?? _currentQuery;
+    final searchGeneration = _searchGeneration;
+    final savedGeneration = ++_savedStateGeneration;
+    try {
+      final saved =
+          targetWord.isNotEmpty && await vocabularyRepo.isWordSaved(targetWord);
+      if (_isDisposed ||
+          searchGeneration != _searchGeneration ||
+          savedGeneration != _savedStateGeneration) {
+        return;
+      }
+      if (_isSaved != saved) {
+        _isSaved = saved;
+        notifyListeners();
+      }
+    } catch (_) {
+      // Keep the last known state if a background refresh cannot read storage.
+    }
   }
 
   Future<void> toggleSaveToVocabulary() async {
@@ -163,9 +201,9 @@ class DictionaryController extends ChangeNotifier {
         final existing = await vocabularyRepo.getWord(targetWord);
         if (existing != null) {
           await vocabularyRepo.deleteWord(existing.id);
-          if (!_isDisposed && searchGeneration == _searchGeneration) {
-            _isSaved = false;
-          }
+        }
+        if (!_isDisposed && searchGeneration == _searchGeneration) {
+          _isSaved = false;
         }
       } else {
         String defSnap = '';
@@ -255,9 +293,7 @@ class DictionaryController extends ChangeNotifier {
         targetWord,
         dictionaryContext: _currentEntry == null
             ? null
-            : [
-                ..._currentEntry!.chineseDefinitions.take(4),
-              ].join('\n'),
+            : [..._currentEntry!.chineseDefinitions.take(4)].join('\n'),
       );
       _activeAiHandle = handle;
 
@@ -311,12 +347,16 @@ class DictionaryController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> retryAiAnswer() => _fetchAiAnswer();
+  Future<void> retryAiAnswer() {
+    final prompt = _lastAiPrompt;
+    return prompt == null ? _fetchAiAnswer() : askAiAboutWord(prompt);
+  }
 
   Future<void> askAiAboutWord(String prompt) async {
     if (_isLoading || _isDisposed || _isAiGenerating) return;
     final targetWord = _currentEntry?.word ?? _currentQuery;
     if (targetWord.isEmpty) return;
+    _lastAiPrompt = prompt;
     final gen = ++_aiGeneration;
     _activeAiHandle?.cancel();
     _activeAiHandle = null;
@@ -408,6 +448,8 @@ class DictionaryController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    ++_speechGeneration;
+    vocabularyRepo.removeListener(_onVocabularyChanged);
     ++_aiGeneration;
     _activeAiHandle?.cancel();
     _activeAiHandle = null;

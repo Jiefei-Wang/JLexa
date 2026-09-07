@@ -20,6 +20,8 @@ class HomeScreen extends StatefulWidget {
   final Future<void> Function(String lessonId)? onDeleteLesson;
   final VoidCallback onOpenSettings;
   final VoidCallback onOpenAiChat;
+  final VoidCallback onOpenTranslation;
+  final VoidCallback onOpenListening;
   final VoidCallback onOpenVocabulary;
   final VoidCallback onImportAudio;
 
@@ -33,6 +35,8 @@ class HomeScreen extends StatefulWidget {
     this.onDeleteLesson,
     required this.onOpenSettings,
     required this.onOpenAiChat,
+    required this.onOpenTranslation,
+    required this.onOpenListening,
     required this.onOpenVocabulary,
     required this.onImportAudio,
   });
@@ -44,7 +48,6 @@ class HomeScreen extends StatefulWidget {
 class HomeScreenState extends State<HomeScreen> {
   late final HomeController _controller;
   final TextEditingController _searchController = TextEditingController();
-  int _selectedFilterIndex = 0; // 0: Dictionary, 1: Repeater, 2: AI
 
   void refresh() {
     _controller.loadData();
@@ -68,6 +71,7 @@ class HomeScreenState extends State<HomeScreen> {
 
   void _handleSearchSubmit(String query) {
     if (query.trim().isNotEmpty) {
+      FocusManager.instance.primaryFocus?.unfocus();
       widget.onOpenDictionary(query.trim());
       _searchController.clear();
       _controller.loadData();
@@ -84,41 +88,7 @@ class HomeScreenState extends State<HomeScreen> {
           appBar: AppBar(
             backgroundColor: AppColors.surface,
             elevation: 0,
-            title: Row(
-              children: [
-                const Text('JLexa', style: AppTypography.titleLarge),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryLight,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.workspace_premium,
-                        size: 14,
-                        color: AppColors.primary,
-                      ),
-                      SizedBox(width: 4),
-                      Text(
-                        'Pro',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.primary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+            title: const Text('JLexa', style: AppTypography.titleLarge),
             actions: [
               IconButton(
                 icon: const Icon(
@@ -135,21 +105,23 @@ class HomeScreenState extends State<HomeScreen> {
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               children: [
-                // Top Segmented Pill Filter
-                Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Row(
-                    children: [
-                      _buildPillButton(0, 'Dictionary'),
-                      _buildPillButton(1, 'Repeater'),
-                      _buildPillButton(2, 'AI'),
-                    ],
-                  ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _buildShortcut(
+                      'Dictionary',
+                      () => widget.onOpenDictionary(''),
+                    ),
+                    _buildShortcut('Listening', () {
+                      if (_controller.lessons.isEmpty) {
+                        widget.onOpenListening();
+                      } else {
+                        widget.onOpenLesson(_controller.lessons.first);
+                      }
+                    }),
+                    _buildShortcut('Ask AI', widget.onOpenAiChat),
+                  ],
                 ),
                 const SizedBox(height: 14),
 
@@ -165,20 +137,19 @@ class HomeScreenState extends State<HomeScreen> {
                     onSubmitted: _handleSearchSubmit,
                     textInputAction: TextInputAction.search,
                     decoration: InputDecoration(
-                      hintText: 'Search words, phrases or sentences',
+                      hintText: 'Word, phrase or sentence',
                       prefixIcon: const Icon(
                         Icons.search,
                         color: AppColors.textSecondary,
                       ),
                       suffixIcon: IconButton(
                         icon: const Icon(
-                          Icons.mic_none,
+                          Icons.arrow_forward,
                           color: AppColors.textSecondary,
                         ),
-                        onPressed: () {
-                          // Quick voice search / AI Q&A
-                          widget.onOpenAiChat();
-                        },
+                        tooltip: 'Search dictionary',
+                        onPressed: () =>
+                            _handleSearchSubmit(_searchController.text),
                       ),
                       border: InputBorder.none,
                       enabledBorder: InputBorder.none,
@@ -206,9 +177,11 @@ class HomeScreenState extends State<HomeScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      'Imported Audio Lessons',
-                      style: AppTypography.titleSmall,
+                    const Expanded(
+                      child: Text(
+                        'Imported Audio Lessons',
+                        style: AppTypography.titleSmall,
+                      ),
                     ),
                     TextButton.icon(
                       onPressed: widget.onImportAudio,
@@ -290,10 +263,10 @@ class HomeScreenState extends State<HomeScreen> {
 
                 // Quick Tools Grid
                 QuickToolsGrid(
-                  onOpenDictionary: () => widget.onOpenDictionary('resilient'),
-                  onOpenTranslation: () => widget.onOpenDictionary(''),
+                  onOpenDictionary: () => widget.onOpenDictionary(''),
+                  onOpenTranslation: widget.onOpenTranslation,
                   onOpenAiChat: widget.onOpenAiChat,
-                  onOpenSpeechToText: widget.onOpenAiChat,
+                  onOpenVocabulary: widget.onOpenVocabulary,
                 ),
                 const SizedBox(height: 30),
               ],
@@ -304,41 +277,11 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildPillButton(int index, String label) {
-    final isSelected = _selectedFilterIndex == index;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () {
-          setState(() {
-            _selectedFilterIndex = index;
-          });
-          if (index == 0) {
-            widget.onOpenDictionary('resilient');
-          }
-          if (index == 1 && _controller.lessons.isNotEmpty) {
-            widget.onOpenLesson(_controller.lessons.first);
-          }
-          if (index == 2) {
-            widget.onOpenAiChat();
-          }
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: isSelected ? AppColors.primary : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-              color: isSelected ? Colors.white : AppColors.textSecondary,
-            ),
-          ),
-        ),
-      ),
+  Widget _buildShortcut(String label, VoidCallback onPressed) {
+    return OutlinedButton(
+      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+      onPressed: onPressed,
+      child: Text(label),
     );
   }
 }

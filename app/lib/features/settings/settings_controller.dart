@@ -24,6 +24,9 @@ class SettingsController extends ChangeNotifier {
   bool get isLoading => _isProcessing || !modelManager.isInitialized;
   String? get errorMessage => _errorMessage ?? modelManager.inventoryError;
   bool get hasInventoryError => modelManager.inventoryError != null;
+  bool get hasActiveDownloads => modelManager.hasActiveDownloads;
+  bool isCancellingDownload(String modelId) =>
+      modelManager.isCancellingDownload(modelId);
 
   Future<void> refreshModels() async {
     await modelManager.refreshModels();

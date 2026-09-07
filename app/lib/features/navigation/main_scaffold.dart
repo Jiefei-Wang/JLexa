@@ -61,6 +61,8 @@ class MainScaffoldState extends State<MainScaffold> {
   DateTime? _lastExitBack;
   bool _isImporting = false;
   String? _targetDictionaryWord;
+  int _dictionaryInitialTab = 0;
+  bool _focusDictionaryInput = false;
   int _dictionaryNavigationRevision = 0;
   AudioLesson? _activeLesson;
 
@@ -89,6 +91,7 @@ class MainScaffoldState extends State<MainScaffold> {
 
   void switchToTab(int index) {
     if (index == _currentIndex) return;
+    FocusManager.instance.primaryFocus?.unfocus();
     _lastExitBack = null;
     if (index == 0) {
       _tabHistory.clear();
@@ -112,10 +115,12 @@ class MainScaffoldState extends State<MainScaffold> {
     }
   }
 
-  void openDictionaryForWord(String word) {
+  void openDictionaryForWord(String word, {int selectedTab = 0}) {
     switchToTab(1);
     setState(() {
       _targetDictionaryWord = word;
+      _dictionaryInitialTab = selectedTab;
+      _focusDictionaryInput = word.trim().isEmpty;
       _dictionaryNavigationRevision++;
       _currentIndex = 1; // Dictionary tab
     });
@@ -160,6 +165,7 @@ class MainScaffoldState extends State<MainScaffold> {
   Future<void> importAudioFile() async {
     if (_isImporting) return;
     _isImporting = true;
+    ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? progressNotice;
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -167,6 +173,23 @@ class MainScaffoldState extends State<MainScaffold> {
       );
 
       if (result != null && result.files.single.path != null) {
+        if (!mounted) return;
+        progressNotice = ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            duration: Duration(hours: 1),
+            content: Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 12),
+                Expanded(child: Text('Importing audio…')),
+              ],
+            ),
+          ),
+        );
         final originalPath = result.files.single.path!;
         final hash = await widget.lessonRepo.audioFingerprint(originalPath);
         final existing = await widget.lessonRepo.findByAudioFingerprint(hash);
@@ -233,7 +256,7 @@ class MainScaffoldState extends State<MainScaffold> {
           );
         }
 
-        openRepeaterForLesson(newLesson);
+        if (mounted) openRepeaterForLesson(newLesson);
       }
     } catch (e) {
       if (mounted) {
@@ -241,6 +264,7 @@ class MainScaffoldState extends State<MainScaffold> {
             .showSnackBar(SnackBar(content: Text('Error importing audio: $e')));
       }
     } finally {
+      progressNotice?.close();
       _isImporting = false;
     }
   }
@@ -299,6 +323,9 @@ class MainScaffoldState extends State<MainScaffold> {
                 );
               },
               onOpenAiChat: () => switchToTab(4),
+              onOpenTranslation: () =>
+                  openDictionaryForWord('', selectedTab: 1),
+              onOpenListening: () => switchToTab(2),
               onOpenVocabulary: () => switchToTab(3),
               onImportAudio: importAudioFile,
             ),
@@ -308,6 +335,8 @@ class MainScaffoldState extends State<MainScaffold> {
               aiService: widget.aiService,
               initialWord: _targetDictionaryWord,
               navigationRevision: _dictionaryNavigationRevision,
+              initialTab: _dictionaryInitialTab,
+              focusOnNavigation: _focusDictionaryInput,
             ),
             RepeaterScreen(
               key: _repeaterKey,
@@ -328,20 +357,10 @@ class MainScaffoldState extends State<MainScaffold> {
             AiChatScreen(
               aiService: widget.aiService,
               speechEngine: widget.aiService.speechEngine,
+              isActive: _currentIndex == 4,
             ),
           ],
         ),
-        floatingActionButton: _currentIndex == 0
-            ? FloatingActionButton(
-                onPressed: importAudioFile,
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                elevation: 3,
-                tooltip: 'Import Audio Lesson',
-                child: const Icon(Icons.add, size: 28),
-              )
-            : null,
-        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
         bottomNavigationBar: Container(
           decoration: const BoxDecoration(
             color: AppColors.surface,

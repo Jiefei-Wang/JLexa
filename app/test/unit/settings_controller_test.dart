@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -16,6 +17,27 @@ import 'package:jlexa/features/settings/settings_controller.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../test_helper.dart';
+
+class StartedModelDownloader extends FakeModelDownloader {
+  final started = Completer<void>();
+
+  StartedModelDownloader() : super(stepDelay: const Duration(milliseconds: 30));
+
+  @override
+  Future<void> download({
+    required DownloadableModel model,
+    required String destinationPartPath,
+    required void Function(ModelProgress progress) onProgress,
+  }) async {
+    final result = super.download(
+      model: model,
+      destinationPartPath: destinationPartPath,
+      onProgress: onProgress,
+    );
+    started.complete();
+    await result;
+  }
+}
 
 class MockAiEngine implements AiEngine {
   bool _isLoaded = false;
@@ -135,7 +157,8 @@ class MockSpeechEngine implements SpeechRecognitionEngine {
   Future<void> cancelRequest(String requestId) async {}
 
   @override
-  Future<Map<String, dynamic>?> getAudioMetadata(String audioPath) async => null;
+  Future<Map<String, dynamic>?> getAudioMetadata(String audioPath) async =>
+      null;
 
   @override
   Future<List<AudioSegment>> transcribeAudio({
@@ -224,9 +247,7 @@ void main() {
     });
 
     test('Simulate navigation: start download -> leave Settings -> reopen Settings -> download persists without part deletion', () async {
-      final slowDownloader = FakeModelDownloader(
-        stepDelay: const Duration(milliseconds: 30),
-      );
+      final slowDownloader = StartedModelDownloader();
       final appLevelManager = ModelManager(
         storage: storage,
         downloader: slowDownloader,
@@ -245,7 +266,7 @@ void main() {
 
       // 2. User starts download
       final downloadFuture = controller1.downloadModel(targetModel);
-      await Future.delayed(const Duration(milliseconds: 20));
+      await slowDownloader.started.future;
 
       // Part file should be active
       expect(slowDownloader.isDownloading(targetModel.id), isTrue);
@@ -312,7 +333,9 @@ void main() {
       await downloadFuture;
 
       expect(controller.errorMessage, isNull);
-      final item = controller.llmModels.firstWhere((m) => m.id == targetModel.id);
+      final item = controller.llmModels.firstWhere(
+        (m) => m.id == targetModel.id,
+      );
       expect(item.state, ModelDownloadState.notDownloaded);
 
       controller.dispose();

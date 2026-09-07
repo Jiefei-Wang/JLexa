@@ -117,9 +117,29 @@ class LessonCard extends StatelessWidget {
             ),
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, color: AppColors.textSecondary),
-              onSelected: (val) {
+              tooltip: 'Lesson options',
+              onSelected: (val) async {
                 if (val == 'delete' && onDelete != null) {
-                  onDelete!();
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (dialogContext) => AlertDialog(
+                      title: const Text('Delete lesson?'),
+                      content: Text(
+                        'Delete “${lesson.title}” and its saved segments and transcripts?',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(dialogContext, false),
+                          child: const Text('Cancel'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(dialogContext, true),
+                          child: const Text('Delete'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmed == true && context.mounted) onDelete!();
                 }
               },
               itemBuilder: (ctx) => [

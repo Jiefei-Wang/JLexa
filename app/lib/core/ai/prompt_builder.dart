@@ -124,6 +124,7 @@ Provide:
     if (context.uncertainWords.isNotEmpty) {
       buffer.writeln('以下词语的语音识别可能不准确：${context.uncertainWords.join(', ')}');
     }
+    buffer.writeln('请用简体中文解释当前句子的意思，并简短说明重点词语或用法。');
     return [
       const ChatMessagePayload(
         role: 'system',

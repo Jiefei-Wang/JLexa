@@ -85,14 +85,21 @@ void main() {
       );
       expect(find.textContaining('No transcript'), findsNothing);
       expect(find.textContaining('Whisper'), findsNothing);
-      await tester.tap(find.text('Transcribe'));
+      await tester.tap(find.text('Transcribing…'));
       expect(requests, 1);
       await show(busy: true, progress: .42);
-      expect(find.text('Transcribe 42%'), findsOneWidget);
+      expect(find.text('Transcribing 42%'), findsOneWidget);
+      expect(
+        tester.getCenter(find.text('Transcribing 42%')).dy,
+        closeTo(tester.getCenter(find.byTooltip('Cancel transcription')).dy, 1),
+        reason:
+            'Cancel must remain next to the busy action when the group wraps.',
+      );
       await tester.tap(find.byTooltip('Cancel transcription'));
       expect(cancellations, 1);
       await show(cancelling: true, progress: .42);
-      expect(find.text('Transcribe 42%'), findsNothing);
+      expect(find.text('Transcribing 42%'), findsNothing);
+      expect(find.text('Cancelling…'), findsOneWidget);
       final cancelButton = tester.widget<IconButton>(
         find.byWidgetPredicate(
           (w) => w is IconButton && w.tooltip == 'Cancelling transcription',
@@ -105,4 +112,37 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('Transcribing and cancel fit together at large text sizes', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+          child: Scaffold(
+            body: SizedBox(
+              width: 320,
+              child: TranscriptView(
+                segment: null,
+                auto: false,
+                onAutoChanged: (_) {},
+                onWordTap: (_) {},
+                isTranscribing: true,
+                progress: .42,
+                onCancel: () {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Transcribing 42%'), findsOneWidget);
+    expect(find.byTooltip('Cancel transcription'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    expect(
+      tester.getCenter(find.text('Transcribing 42%')).dy,
+      closeTo(tester.getCenter(find.byTooltip('Cancel transcription')).dy, 1),
+    );
+  });
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
@@ -288,6 +289,17 @@ class NativeLlamaEngine implements AiEngine {
   }
 }
 
+class _WhisperRequest {
+  final String id;
+  final void Function(double)? onProgress;
+  final done = Completer<void>();
+  bool started = false;
+  bool cancelled = false;
+  Future<void>? cancellation;
+
+  _WhisperRequest(this.id, this.onProgress);
+}
+
 class NativeWhisperEngine implements SpeechRecognitionEngine {
   static const MethodChannel _channel = MethodChannel('com.jlexa.app/whisper');
   static const EventChannel _eventChannel = EventChannel(
@@ -298,33 +310,37 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
   bool _isLoaded = false;
   String? _loadedModelPath;
 
-  final Map<String, void Function(double)> _progressCallbacks = {};
   StreamSubscription? _streamSubscription;
+  final bool _isAndroid;
+  _WhisperRequest? _activeRequest;
+  bool _isChangingModel = false;
+  bool _isDisposed = false;
 
-  String? _activeRequestId;
-  bool _isCancelling = false;
-  Completer<void>? _activeTranscriptionCompleter;
-  Map<String, Object?>? _cutRequestArgs;
+  NativeWhisperEngine() : _isAndroid = Platform.isAndroid {
+    _initStream();
+  }
 
-  NativeWhisperEngine() {
+  @visibleForTesting
+  NativeWhisperEngine.forTesting() : _isAndroid = true {
     _initStream();
   }
 
   void _initStream() {
-    if (!Platform.isAndroid) return;
+    if (!_isAndroid) return;
     _streamSubscription = _eventChannel.receiveBroadcastStream().listen((
       dynamic event,
     ) {
       if (event is Map) {
         final requestId = event['requestId'] as String?;
         final type = event['type'] as String?;
+        final active = _activeRequest;
         if (type == 'progress' &&
-            requestId != null &&
-            _progressCallbacks.containsKey(requestId)) {
+            active != null &&
+            active.id == requestId &&
+            !active.cancelled &&
+            !_isDisposed) {
           final progress = (event['progress'] as num?)?.toDouble() ?? 0.0;
-          _progressCallbacks[requestId]?.call(
-            progress.clamp(0.0, 1.0).toDouble(),
-          );
+          active.onProgress?.call(progress.clamp(0.0, 1.0).toDouble());
         }
       }
     }, onError: (_) {});
@@ -338,23 +354,29 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
 
   @override
   Future<void> loadModel(String modelPath) async {
-    if (!Platform.isAndroid) {
+    if (!_isAndroid) {
       throw const AiUnsupportedPlatformException();
     }
-
-    final bool success =
-        await _channel.invokeMethod('loadModel', {'modelPath': modelPath}) ??
-        false;
-
-    if (success) {
-      _isLoaded = true;
-      _loadedModelPath = modelPath;
-    } else {
-      _isLoaded = false;
-      _loadedModelPath = null;
-      throw const AiGenerationException(
-        'The selected speech model could not be loaded.',
-      );
+    if (_isDisposed) throw StateError('The speech engine is disposed.');
+    if (_isChangingModel) {
+      throw const AiBusyException('Whisper is changing its speech model.');
+    }
+    _isChangingModel = true;
+    try {
+      await _finishActiveRequest();
+      if (_isDisposed) throw StateError('The speech engine is disposed.');
+      final bool success =
+          await _channel.invokeMethod('loadModel', {'modelPath': modelPath}) ??
+          false;
+      _isLoaded = success;
+      _loadedModelPath = success ? modelPath : null;
+      if (!success) {
+        throw const AiGenerationException(
+          'The selected speech model could not be loaded.',
+        );
+      }
+    } finally {
+      _isChangingModel = false;
     }
   }
 
@@ -365,48 +387,56 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
     String? requestId,
     int nThreads = 4,
     void Function(double progress)? onProgress,
+  }) => _transcribe(
+    audioPath: audioPath,
+    lessonId: lessonId,
+    requestId: requestId,
+    nThreads: nThreads,
+    onProgress: onProgress,
+  );
+
+  Future<List<AudioSegment>> _transcribe({
+    required String audioPath,
+    required String lessonId,
+    String? requestId,
+    required int nThreads,
+    void Function(double progress)? onProgress,
+    Map<String, Object?> cutArguments = const {},
   }) async {
-    if (!Platform.isAndroid) {
+    if (!_isAndroid) {
       throw const AiUnsupportedPlatformException();
     }
-
+    if (_isDisposed) throw StateError('The speech engine is disposed.');
+    // Claim one slot before invoking callbacks or awaiting platform work.
+    // Cancellation acknowledgement does not mean native work has finished.
+    if (_activeRequest != null || _isChangingModel) {
+      throw const AiBusyException(
+        'Whisper is busy finishing another transcription or model change. Try again when it finishes.',
+      );
+    }
     if (!_isLoaded) {
       throw const AiModelNotLoadedException(
         'Speech model not configured. Please select a Whisper model.',
       );
     }
 
-    // If an earlier request is actively cancelling, wait for it to reach terminal before starting
-    if (_isCancelling && _activeTranscriptionCompleter != null) {
-      try {
-        await _activeTranscriptionCompleter!.future;
-      } catch (_) {}
-    }
-
     final reqId = requestId ?? _uuid.v4();
-    _activeRequestId = reqId;
-    _isCancelling = false;
-    final completer = Completer<void>();
-    _activeTranscriptionCompleter = completer;
-
-    if (onProgress != null) {
-      _progressCallbacks[reqId] = onProgress;
-      onProgress(0.0);
-    }
-
+    final active = _WhisperRequest(reqId, onProgress);
+    _activeRequest = active;
     try {
+      onProgress?.call(0.0);
+      if (active.cancelled) throw const AiCancelledException();
+      active.started = true;
       final dynamic rawResult = await _channel.invokeMethod('transcribeAudio', {
         'audioPath': audioPath,
         'lessonId': lessonId,
         'requestId': reqId,
         'threads': nThreads,
-        ...?_cutRequestArgs,
+        ...cutArguments,
       });
-
-      if (onProgress != null) {
-        onProgress(1.0);
-      }
-
+      if (active.cancelled) throw const AiCancelledException();
+      onProgress?.call(1.0);
+      if (active.cancelled) throw const AiCancelledException();
       if (rawResult is List) {
         return rawResult
             .map(
@@ -417,6 +447,9 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
 
       return [];
     } on PlatformException catch (e) {
+      if (active.cancelled || e.code == 'CANCELLED') {
+        throw const AiCancelledException();
+      }
       if (e.code == 'BUSY' || e.message?.contains('BUSY') == true) {
         throw const AiBusyException(
           'Whisper is busy finishing another transcription.',
@@ -424,15 +457,8 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
       }
       rethrow;
     } finally {
-      _progressCallbacks.remove(reqId);
-      if (!completer.isCompleted) {
-        completer.complete();
-      }
-      if (_activeRequestId == reqId) {
-        _activeRequestId = null;
-        _isCancelling = false;
-        _activeTranscriptionCompleter = null;
-      }
+      if (identical(_activeRequest, active)) _activeRequest = null;
+      active.done.complete();
     }
   }
 
@@ -447,30 +473,24 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
     String? requestId,
     int nThreads = 4,
     void Function(double progress)? onProgress,
-  }) async {
-    _cutRequestArgs = {
+  }) => _transcribe(
+    audioPath: audioPath,
+    lessonId: lessonId,
+    requestId: requestId,
+    nThreads: nThreads,
+    onProgress: onProgress,
+    cutArguments: {
       'cutId': cutId,
       'cutRevision': cutRevision,
       'cutStartMs': startMs,
       'cutEndMs': endMs,
       'modelId': modelId,
-    };
-    try {
-      return await transcribeAudio(
-        audioPath: audioPath,
-        lessonId: lessonId,
-        requestId: requestId,
-        nThreads: nThreads,
-        onProgress: onProgress,
-      );
-    } finally {
-      _cutRequestArgs = null;
-    }
-  }
+    },
+  );
 
   @override
   Future<Map<String, dynamic>?> getAudioMetadata(String audioPath) async {
-    if (!Platform.isAndroid) return null;
+    if (!_isAndroid || _isDisposed) return null;
     try {
       final dynamic raw = await _channel.invokeMethod('getAudioMetadata', {
         'audioPath': audioPath,
@@ -486,7 +506,7 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
     String audioPath, {
     int numPeaks = 200,
   }) async {
-    if (!Platform.isAndroid) return null;
+    if (!_isAndroid || _isDisposed) return null;
     try {
       final dynamic raw = await _channel.invokeMethod('extractAudioInfo', {
         'audioPath': audioPath,
@@ -501,41 +521,54 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
 
   @override
   Future<void> cancelRequest(String requestId) async {
-    if (!Platform.isAndroid) return;
-    if (_activeRequestId == requestId) {
-      _isCancelling = true;
-    }
+    final active = _activeRequest;
+    if (!_isAndroid || active == null || active.id != requestId) return;
+    active.cancelled = true;
+    if (!active.started) return;
+    await (active.cancellation ??= _cancelNativeRequest(active));
+  }
+
+  Future<void> _cancelNativeRequest(_WhisperRequest active) async {
     try {
       await _channel.invokeMethod('cancelTranscription', {
-        'requestId': requestId,
+        'requestId': active.id,
       });
     } catch (_) {}
   }
 
   @override
   Future<void> cancel() async {
-    if (!Platform.isAndroid) return;
-    if (_activeRequestId != null) {
-      _isCancelling = true;
-    }
-    try {
-      await _channel.invokeMethod('cancelTranscription');
-    } catch (_) {}
+    final active = _activeRequest;
+    if (active != null) await cancelRequest(active.id);
+  }
+
+  Future<void> _finishActiveRequest() async {
+    final active = _activeRequest;
+    if (active == null) return;
+    await cancelRequest(active.id);
+    await active.done.future;
   }
 
   @override
   Future<void> unload() async {
-    if (!Platform.isAndroid) return;
+    if (!_isAndroid || _isDisposed) return;
+    if (_isChangingModel) {
+      throw const AiBusyException('Whisper is changing its speech model.');
+    }
+    _isChangingModel = true;
     try {
-      await cancel();
+      await _finishActiveRequest();
       await _channel.invokeMethod('unloadModel');
       _isLoaded = false;
       _loadedModelPath = null;
-    } catch (_) {}
+    } finally {
+      _isChangingModel = false;
+    }
   }
 
   void dispose() {
+    _isDisposed = true;
+    unawaited(cancel());
     _streamSubscription?.cancel();
-    _progressCallbacks.clear();
   }
 }

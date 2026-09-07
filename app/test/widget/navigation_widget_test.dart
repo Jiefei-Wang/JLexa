@@ -81,7 +81,7 @@ void main() {
 
       // Verify Study screen is active
       expect(find.byType(VocabularyScreen), findsOneWidget);
-      expect(find.text('Vocabulary Study'), findsOneWidget);
+      expect(find.widgetWithText(AppBar, 'Study'), findsOneWidget);
       await tester.binding.handlePopRoute();
       await tester.pump();
       expect(find.byType(DictionaryScreen), findsOneWidget);

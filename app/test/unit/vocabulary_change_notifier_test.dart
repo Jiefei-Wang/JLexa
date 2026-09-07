@@ -78,10 +78,10 @@ void main() {
       await repo.saveWord(word);
       expect(notificationCount, equals(1));
 
-      // Verify word was normalized
+      // Lookup normalizes the key; the saved text remains readable as entered.
       final saved = await repo.getWord('serendipity');
       expect(saved, isNotNull);
-      expect(saved!.word, equals('serendipity'));
+      expect(saved!.word, equals('Serendipity!'));
 
       // Review word
       await repo.reviewWord('voc_test_notifier_1', ReviewRating.good);
@@ -93,6 +93,110 @@ void main() {
 
       final deleted = await repo.getWord('serendipity');
       expect(deleted, isNull);
+    },
+  );
+
+  test(
+    'Sentences and Unicode text preserve display and match lookup variants',
+    () async {
+      final repo = VocabularyRepository();
+      final examples = {
+        'I will meet Alice tomorrow.': 'i will meet alice tomorrow',
+        '明天见！': '明天见',
+        '“École française”': 'ÉCOLE FRANÇAISE',
+        'Will Alice visit 北京 tomorrow?': 'will alice visit 北京 tomorrow',
+        '日本語': '日本語',
+        'தமிழ்': 'தமிழ்',
+      };
+      for (final entry in examples.entries) {
+        await repo.saveWord(
+          VocabularyWord(
+            id: entry.key,
+            word: '  ${entry.key}  ',
+            definitionSnapshot: 'Explanation',
+            dateAdded: DateTime.now(),
+          ),
+        );
+        expect((await repo.getWord(entry.value))?.word, entry.key);
+      }
+      expect(await repo.getAllWords(), hasLength(examples.length));
+      expect(
+        await repo.getWord('தமிழ'),
+        isNull,
+        reason: 'Combining marks belong to non-Latin letters.',
+      );
+    },
+  );
+
+  test(
+    'Legacy entries keep their ID and review progress when saved again',
+    () async {
+      final repo = VocabularyRepository();
+      final legacy = VocabularyWord(
+        id: 'legacy-sentence',
+        word: 'i will meet alice tomorrow',
+        definitionSnapshot: 'Old explanation',
+        dateAdded: DateTime(2025, 1, 2),
+        state: VocabularyState.review,
+        reviewCount: 7,
+        intervalDays: 20,
+        easeFactor: 2.7,
+        lastReviewed: DateTime(2026, 9, 1),
+        nextReview: DateTime(2026, 9, 21),
+      );
+      await db!.insert('vocabulary', legacy.toMap());
+      expect(
+        (await repo.getWord('I will meet Alice tomorrow.'))?.id,
+        legacy.id,
+      );
+
+      await Future.wait(
+        List.generate(
+          2,
+          (index) => repo.saveWord(
+            VocabularyWord(
+              id: 'duplicate-$index',
+              word: 'I will meet Alice tomorrow.',
+              definitionSnapshot: 'Updated explanation',
+              dateAdded: DateTime.now(),
+            ),
+          ),
+        ),
+      );
+      final words = await repo.getAllWords();
+      expect(words, hasLength(1));
+      final saved = words.single;
+      expect(saved.id, legacy.id);
+      expect(saved.word, 'I will meet Alice tomorrow.');
+      expect(saved.definitionSnapshot, 'Updated explanation');
+      expect(saved.state, legacy.state);
+      expect(saved.dateAdded, legacy.dateAdded);
+      expect(saved.reviewCount, legacy.reviewCount);
+      expect(saved.intervalDays, legacy.intervalDays);
+      expect(saved.easeFactor, legacy.easeFactor);
+      expect(saved.lastReviewed, legacy.lastReviewed);
+      expect(saved.nextReview, legacy.nextReview);
+    },
+  );
+
+  test(
+    'Empty and punctuation-only saves cannot create inaccessible cards',
+    () async {
+      final repo = VocabularyRepository();
+      for (final text in ['', '   ', '...', '！？']) {
+        await expectLater(
+          repo.saveWord(
+            VocabularyWord(
+              id: 'invalid',
+              word: text,
+              definitionSnapshot: '',
+              dateAdded: DateTime.now(),
+            ),
+          ),
+          throwsArgumentError,
+        );
+      }
+      expect(await repo.getAllWords(), isEmpty);
     },
   );
 }

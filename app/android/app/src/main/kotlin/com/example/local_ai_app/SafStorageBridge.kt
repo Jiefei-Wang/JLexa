@@ -68,22 +68,25 @@ class SafStorageBridge(private val context: Context) : MethodChannel.MethodCallH
                 )
                 context.contentResolver.takePersistableUriPermission(treeUri, takeFlags)
 
+                val rootDoc = DocumentFile.fromTreeUri(context, treeUri)
+                if (rootDoc == null || !rootDoc.exists()) {
+                    throw IllegalStateException("Selected model folder is not accessible")
+                }
+                getOrCreateDirectory(rootDoc, "llm")
+                    ?: throw IllegalStateException("Cannot access or create the llm model subfolder")
+                getOrCreateDirectory(rootDoc, "whisper")
+                    ?: throw IllegalStateException("Cannot access or create the whisper model subfolder")
+
+                // Keep the previous selection if provider validation fails. Dart
+                // must not display the old folder while native uses a new one.
                 val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 prefs.edit().putString(KEY_BASE_TREE_URI, treeUri.toString()).apply()
-
-                val rootDoc = DocumentFile.fromTreeUri(context, treeUri)
-                if (rootDoc != null && rootDoc.exists()) {
-                    getOrCreateDirectory(rootDoc, "llm")
-                    getOrCreateDirectory(rootDoc, "whisper")
-                    result.success(
-                        mapOf(
-                            "treeUri" to treeUri.toString(),
-                            "displayName" to (rootDoc.name ?: "Models")
-                        )
+                result.success(
+                    mapOf(
+                        "treeUri" to treeUri.toString(),
+                        "displayName" to (rootDoc.name ?: "Models")
                     )
-                } else {
-                    result.success(null)
-                }
+                )
             } catch (e: Throwable) {
                 result.error("SAF_PERMISSION_ERROR", e.message, null)
             }
@@ -271,8 +274,7 @@ class SafStorageBridge(private val context: Context) : MethodChannel.MethodCallH
                     var conn: HttpURLConnection? = null
                     var inStream: InputStream? = null
                     var outStream: OutputStream? = null
-
-                    cancelledRequests.remove(requestId)
+                    var terminalEvent: Map<String, Any>? = null
 
                     try {
                         val targetUri = Uri.parse(targetUriStr)
@@ -291,18 +293,23 @@ class SafStorageBridge(private val context: Context) : MethodChannel.MethodCallH
                             }
                         }
                         activeDownloads[requestId] = conn
+                        if (cancelledRequests.contains(requestId)) {
+                            terminalEvent = mapOf(
+                                "requestId" to requestId,
+                                "type" to "cancelled"
+                            )
+                            return@launch
+                        }
                         conn.connect()
 
                         val code = conn.responseCode
                         if (code == 416 &&
                             expectedSizeBytes > 0L && resumeOffset == expectedSizeBytes) {
-                            sendDownloadEvent(
-                                mapOf(
-                                    "requestId" to requestId,
-                                    "type" to "done",
-                                    "bytesReceived" to resumeOffset,
-                                    "totalBytes" to expectedSizeBytes
-                                )
+                            terminalEvent = mapOf(
+                                "requestId" to requestId,
+                                "type" to "done",
+                                "bytesReceived" to resumeOffset,
+                                "totalBytes" to expectedSizeBytes
                             )
                             return@launch
                         }
@@ -336,11 +343,9 @@ class SafStorageBridge(private val context: Context) : MethodChannel.MethodCallH
 
                         while (true) {
                             if (cancelledRequests.contains(requestId)) {
-                                sendDownloadEvent(
-                                    mapOf(
-                                        "requestId" to requestId,
-                                        "type" to "cancelled"
-                                    )
+                                terminalEvent = mapOf(
+                                    "requestId" to requestId,
+                                    "type" to "cancelled"
                                 )
                                 return@launch
                             }
@@ -368,37 +373,29 @@ class SafStorageBridge(private val context: Context) : MethodChannel.MethodCallH
                         out.flush()
 
                         if (cancelledRequests.contains(requestId)) {
-                            sendDownloadEvent(
-                                mapOf(
-                                    "requestId" to requestId,
-                                    "type" to "cancelled"
-                                )
+                            terminalEvent = mapOf(
+                                "requestId" to requestId,
+                                "type" to "cancelled"
                             )
                         } else {
-                            sendDownloadEvent(
-                                mapOf(
-                                    "requestId" to requestId,
-                                    "type" to "done",
-                                    "bytesReceived" to bytesReceived,
-                                    "totalBytes" to totalBytes
-                                )
+                            terminalEvent = mapOf(
+                                "requestId" to requestId,
+                                "type" to "done",
+                                "bytesReceived" to bytesReceived,
+                                "totalBytes" to totalBytes
                             )
                         }
                     } catch (e: Throwable) {
                         if (cancelledRequests.contains(requestId)) {
-                            sendDownloadEvent(
-                                mapOf(
-                                    "requestId" to requestId,
-                                    "type" to "cancelled"
-                                )
+                            terminalEvent = mapOf(
+                                "requestId" to requestId,
+                                "type" to "cancelled"
                             )
                         } else {
-                            sendDownloadEvent(
-                                mapOf(
-                                    "requestId" to requestId,
-                                    "type" to "error",
+                            terminalEvent = mapOf(
+                                "requestId" to requestId,
+                                "type" to "error",
                                 "message" to "${e.javaClass.simpleName}: ${e.message ?: "Download failed"}. Partial download was kept for retry."
-                                )
                             )
                         }
                     } finally {
@@ -407,6 +404,9 @@ class SafStorageBridge(private val context: Context) : MethodChannel.MethodCallH
                         try { conn?.disconnect() } catch (_: Throwable) {}
                         activeDownloads.remove(requestId)
                         cancelledRequests.remove(requestId)
+                        // Dart may delete/finalize this document or start a retry
+                        // on receipt. Release the writer before acknowledging it.
+                        terminalEvent?.let { sendDownloadEvent(it) }
                     }
                 }
             }
