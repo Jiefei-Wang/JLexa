@@ -1,6 +1,7 @@
 #include "jlexa_llama_bridge.h"
 #include "llama.h"
 #include "ggml-backend.h"
+#include "jlexa_vulkan_compat.h"
 #include <mutex>
 #include <atomic>
 #include <vector>
@@ -381,6 +382,15 @@ bool JLexaLlamaBridge::loadModel(const std::string& modelPath, const JLexaLlamaR
     cparams.n_ctx = config.contextLength > 0 ? config.contextLength : 2048;
     cparams.n_batch = config.batchSize > 0 ? config.batchSize : 512;
     cparams.n_ubatch = config.ubatchSize > 0 ? config.ubatchSize : 512;
+    // This driver compiles/executes the scalar quantized path correctly after
+    // the shader compatibility fix, but batched prompt kernels remain invalid.
+    // Keep inference on Vulkan and report the effective sizes in activeInfo.
+    if (selectedBackend == "vulkan" &&
+        jlexa::isAdreno830Name(activeDeviceName)) {
+        cparams.n_batch = 1;
+        cparams.n_ubatch = 1;
+        LOGW("Adreno 830 Vulkan compatibility: batch=1, ubatch=1");
+    }
     cparams.n_threads = pImpl->n_threads;
     cparams.n_threads_batch = pImpl->n_threads;
     cparams.offload_kqv = target_gpu_dev != nullptr;

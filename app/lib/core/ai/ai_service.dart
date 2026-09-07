@@ -30,6 +30,8 @@ class AiService extends ChangeNotifier {
 
   LlamaRuntimeSettings _llamaRuntimeSettings = const LlamaRuntimeSettings();
   LlamaRuntimeSettings get llamaRuntimeSettings => _llamaRuntimeSettings;
+  LlamaRuntimeSettings? _loadedLlamaRuntimeSettings;
+  bool _isUpdatingLlamaRuntime = false;
 
   List<LlamaBackendInfo> _availableBackends = const [];
   List<LlamaBackendInfo> get availableBackends => _availableBackends;
@@ -134,6 +136,7 @@ class AiService extends ChangeNotifier {
               runtimeSettings: _llamaRuntimeSettings,
             );
             _activeBackendInfo = await llmEngine.getActiveBackendInfo();
+            _loadedLlamaRuntimeSettings = _llamaRuntimeSettings;
           } catch (e) {
             _llmRestorationError =
                 'Could not reload saved LLM: ${e.toString()}';
@@ -210,10 +213,15 @@ class AiService extends ChangeNotifier {
       _configuredLlmPath = path;
       _llmRestorationError = null;
       _activeBackendInfo = await llmEngine.getActiveBackendInfo();
+      _loadedLlamaRuntimeSettings = rSettings;
       await saveSetting('llm_model_path', path);
       notifyListeners();
     } catch (e) {
       _configuredLlmPath = prevPath;
+      if (!llmEngine.isLoaded) {
+        _activeBackendInfo = const LlamaActiveBackendInfo();
+        _loadedLlamaRuntimeSettings = null;
+      }
       notifyListeners();
       rethrow;
     }
@@ -222,6 +230,7 @@ class AiService extends ChangeNotifier {
   /// Unloads the native LLM model from RAM while preserving the configured path.
   Future<void> unloadLlmModel() async {
     await llmEngine.unload();
+    _loadedLlamaRuntimeSettings = null;
     _activeBackendInfo = const LlamaActiveBackendInfo();
     notifyListeners();
   }
@@ -230,6 +239,7 @@ class AiService extends ChangeNotifier {
   Future<void> forgetLlmModel({bool deleteFile = false}) async {
     final oldPath = _configuredLlmPath;
     await llmEngine.unload();
+    _loadedLlamaRuntimeSettings = null;
     _configuredLlmPath = null;
     _llmRestorationError = null;
     _activeBackendInfo = const LlamaActiveBackendInfo();
@@ -290,17 +300,42 @@ class AiService extends ChangeNotifier {
     LlamaRuntimeSettings newSettings, {
     bool autoReload = true,
   }) async {
-    _llamaRuntimeSettings = newSettings;
-    await saveSetting(
-      'llama_runtime_settings',
-      jsonEncode(newSettings.toMap()),
-    );
-    notifyListeners();
-
-    if (autoReload && llmEngine.isLoaded && _configuredLlmPath != null) {
-      try {
-        await loadLlmModel(_configuredLlmPath!, runtimeSettings: newSettings);
-      } catch (_) {}
+    if (_isUpdatingLlamaRuntime || isGenerating) {
+      throw const AiBusyException(
+        'Wait for the current AI operation to finish before changing runtime settings.',
+      );
+    }
+    _isUpdatingLlamaRuntime = true;
+    final previousRuntime =
+        _loadedLlamaRuntimeSettings ?? _llamaRuntimeSettings;
+    final previousModel = llmEngine.isLoaded ? llmEngine.loadedModelPath : null;
+    try {
+      if (autoReload && previousModel != null) {
+        try {
+          await loadLlmModel(previousModel, runtimeSettings: newSettings);
+        } catch (error) {
+          try {
+            await loadLlmModel(previousModel, runtimeSettings: previousRuntime);
+          } catch (restoreError) {
+            throw AiGenerationException(
+              'Could not apply runtime settings: $error. Restoring the previous runtime also failed: $restoreError',
+            );
+          }
+          throw AiGenerationException(
+            'Could not apply runtime settings: $error. The previous working runtime has been restored.',
+          );
+        }
+      }
+      // Save only an accepted configuration; failed reloads must not poison
+      // the next launch or leave Settings claiming that the switch succeeded.
+      _llamaRuntimeSettings = newSettings;
+      await saveSetting(
+        'llama_runtime_settings',
+        jsonEncode(newSettings.toMap()),
+      );
+    } finally {
+      _isUpdatingLlamaRuntime = false;
+      notifyListeners();
     }
   }
 

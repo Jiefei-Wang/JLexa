@@ -785,6 +785,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final settings = _controller.llamaSettings;
     final activeInfo = _controller.activeBackendInfo;
     final backends = _controller.availableBackends;
+    final hasLoadedModel = _controller.aiService.llmEngine.isLoaded;
+    final usesSmallerBatches =
+        hasLoadedModel &&
+        activeInfo.backend == 'vulkan' &&
+        (activeInfo.batchSize < settings.resolvedBatchSize ||
+            activeInfo.ubatchSize < settings.resolvedMicroBatchSize);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -836,7 +842,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        activeInfo.backend.toUpperCase(),
+                        hasLoadedModel
+                            ? activeInfo.backend.toUpperCase()
+                            : 'NOT LOADED',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 10,
@@ -848,20 +856,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Device: ${activeInfo.deviceName.isNotEmpty ? activeInfo.deviceName : "CPU"}',
+                  hasLoadedModel
+                      ? 'Device: ${activeInfo.deviceName.isNotEmpty ? activeInfo.deviceName : "CPU"}'
+                      : 'Load an AI model to activate a runtime.',
                   style: const TextStyle(
                     fontSize: 12,
                     color: AppColors.textPrimary,
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  'Context: ${activeInfo.contextLength} tokens • Threads: ${activeInfo.threads} • Batch: ${activeInfo.batchSize}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondary,
+                if (hasLoadedModel) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'Context: ${activeInfo.contextLength} tokens • Threads: ${activeInfo.threads} • Batch: ${activeInfo.batchSize} • Microbatch: ${activeInfo.ubatchSize}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
-                ),
+                ],
+                if (usesSmallerBatches) ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'GPU compatibility mode uses smaller batches on this device. Longer questions may take more time to process.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -893,7 +915,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 (bInfo.compiled && bInfo.available);
 
             return InkWell(
-              onTap: isUsable
+              onTap: isUsable && !_controller.isLoading
                   ? () => _controller.updateBackendPreference(pref)
                   : null,
               borderRadius: BorderRadius.circular(10),
@@ -1041,7 +1063,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Align(
                     alignment: Alignment.centerRight,
                     child: OutlinedButton.icon(
-                      onPressed: () => _controller.resetLlamaSettings(),
+                      onPressed: _controller.isLoading
+                          ? null
+                          : () => _controller.resetLlamaSettings(),
                       icon: const Icon(Icons.refresh, size: 16),
                       label: const Text('Reset llama.cpp Settings'),
                     ),

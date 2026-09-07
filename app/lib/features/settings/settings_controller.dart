@@ -125,31 +125,24 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> updateLlamaSettings(LlamaRuntimeSettings newSettings) async {
+    if (_isProcessing) return;
     _errorMessage = null;
+    _isProcessing = true;
+    notifyListeners();
     try {
       await aiService.updateLlamaRuntimeSettings(newSettings, autoReload: true);
     } catch (e) {
       if (!_isDisposed) {
         _errorMessage = 'Failed to apply llama settings: $e';
       }
-    }
-    if (!_isDisposed) {
+    } finally {
+      _isProcessing = false;
       notifyListeners();
     }
   }
 
   Future<void> resetLlamaSettings() async {
-    _errorMessage = null;
-    try {
-      await aiService.resetLlamaRuntimeSettings(autoReload: true);
-    } catch (e) {
-      if (!_isDisposed) {
-        _errorMessage = 'Failed to reset settings: $e';
-      }
-    }
-    if (!_isDisposed) {
-      notifyListeners();
-    }
+    await updateLlamaSettings(LlamaRuntimeSettings.defaultSettings);
   }
 
   void updateAiGenerationSettings(AiGenerationSettings settings) {

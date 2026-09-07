@@ -332,3 +332,29 @@ At the end of every agent session after completing work:
   - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
   - `apksigner verify --verbose --print-certs`: Verified, APK Signature Scheme v2 true.
   - Existing upstream flutter_tts Kotlin compatibility notice remains; release build succeeds. Prior blocked duplicate APK-output cleanup was not retried or bypassed.
+
+---
+
+## Session: 2026-09-06 (Honor Adreno 830 Vulkan Generation Compatibility)
+- **Focus**: Fixed the user's explicit Vulkan `createComputePipeline: ErrorUnknown` failure on PTP_AN00. Diagnosis, controlled variants, reproduction, and limitations: `docs/native-vulkan-regression.md`.
+- **Changes**:
+  - Added reproducible CMake overlays that leave pinned vendor submodules clean. Q4_K/Q6_K matvec shaders use equivalent 32-bit byte unpacking; Adreno 830 alone receives rolled SPIR-V loops and effective Vulkan batch/microbatch 1. CPU isolation and Mali batch sizes remain unchanged.
+  - Fixed the related permanent hang after a failed pipeline compile: cache the failure, clean partially created handles, clear pending, notify waiters, and return the failure on subsequent requests.
+  - Made runtime setting changes transactional and serialized. Failed model reload restores the prior actual runtime; rollback failure is visible and clears stale active details. Active generation cannot be interrupted by a settings switch.
+  - Settings shows effective batch/microbatch, explains the smaller-batch performance tradeoff, and distinguishes an unloaded model from an active CPU runtime.
+- **Native Device Verification**:
+  - Honor PTP_AN00: the final release library completed three sequential Vulkan generations on Adreno 830 with batch/microbatch 1, returning `4`, `早上好。`, and relevant say/tell prose. Same-model CPU regression also passed with batch/microbatch 512.
+  - Pixel 6: the final release library passed the same Vulkan arithmetic/translation fixture on Mali-G78 with batch/microbatch 512; no Adreno cap applied.
+  - A raw llama.cpp fixture deliberately bypassed the app's batch cap to trigger the actual Honor driver failure twice. Both attempts returned `ErrorUnknown` promptly and the context was freed; the previous retry hang did not recur.
+  - Native SPIR-V fixture passed device/kernel scoping, control-bit preservation, idempotence, and malformed-input checks. Test sources are under `native/tests/`.
+- **Static Analysis**: `flutter analyze` -> `No issues found!` (zero errors/warnings).
+- **Tests**: `flutter test --concurrency=1` -> `191 passed`, zero failed; native GPU/CPU/compatibility/retry fixtures passed.
+- **Signed Release**:
+  - `flutter build apk --release` succeeded using `app/android/key.properties`.
+  - Fixed path: `release/app-release.apk` (93,342,637 bytes).
+  - APK SHA-256: `0374BF4D86BEA820F24513B5F8315EB163FBC328D9CAEE1DF00AF8D2AA3D4326`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
+  - `apksigner verify --verbose --print-certs`: Verified, APK Signature Scheme v2 true.
+  - First Honor installation returned `INSTALL_FAILED_ABORTED: User rejected permissions` while locked. After the user's explicit retry request, `adb install -r` succeeded with existing data preserved. The original failed conversation regenerated a complete, relevant answer; Settings confirmed Vulkan / Adreno 830 / batch 1 / microbatch 1 and the compatibility note. Final PID `2580` had no crash entries, and the app was left showing the user's conversation. Screenshots are in `docs/images/qa-honor-vulkan-*.png`.
+  - Existing upstream flutter_tts Kotlin compatibility notice remains; release build succeeds. Prior blocked duplicate APK-output cleanup was not retried or bypassed.
+- **Limit**: Adreno compatibility processes prompts one token at a time and may be slower for long questions. This validates the supplied Qwen models and reported device failure, not every model or language-model answer.

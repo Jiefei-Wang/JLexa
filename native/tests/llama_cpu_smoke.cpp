@@ -11,8 +11,8 @@
 #include <unistd.h>
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        std::fprintf(stderr, "Usage: llama_cpu_smoke <Qwen2.5-Instruct.gguf>\n");
+    if (argc < 2 || argc > 3) {
+        std::fprintf(stderr, "Usage: llama_cpu_smoke <Qwen2.5-Instruct.gguf> [cpu|vulkan]\n");
         return 2;
     }
     const int fd = open(argv[1], O_RDONLY);
@@ -22,7 +22,11 @@ int main(int argc, char** argv) {
     }
 
     JLexaLlamaRuntimeConfig config;
-    config.backend = "cpu";
+    config.backend = argc == 3 ? argv[2] : "cpu";
+    if (config.backend != "cpu" && config.backend != "vulkan") {
+        close(fd);
+        return 2;
+    }
     config.contextLength = 2048;
     config.batchSize = config.ubatchSize = 512;
     config.n_threads = 4;
@@ -32,7 +36,11 @@ int main(int argc, char** argv) {
         return 3;
     }
 
-    bool passed = bridge.getActiveBackendInfo().backend == "cpu";
+    const auto active = bridge.getActiveBackendInfo();
+    bool passed = active.backend == config.backend;
+    std::printf("ACTIVE: %s / %s, batch=%d, ubatch=%d\n",
+        active.backend.c_str(), active.deviceName.c_str(),
+        active.batchSize, active.ubatchSize);
     const std::string prompts[] = {
         "What is 2 plus 2? Reply with only the number.",
         "Translate into Chinese: Good morning.",
@@ -64,6 +72,6 @@ int main(int argc, char** argv) {
     }
     bridge.unloadModel();
     close(fd);
-    std::printf("CPU inference smoke test: %s\n", passed ? "PASS" : "FAIL");
+    std::printf("%s inference smoke test: %s\n", config.backend == "cpu" ? "CPU" : "Vulkan", passed ? "PASS" : "FAIL");
     return passed ? 0 : 1;
 }

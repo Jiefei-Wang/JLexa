@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -18,14 +19,19 @@ class MockTestAiEngine implements AiEngine {
   String? _loadedPath;
   LlamaRuntimeSettings? lastRuntimeSettings;
   bool shouldFail = false;
+  LlamaBackendPreference? failingBackend;
+  bool generating = false;
+  Completer<void>? loadGate;
+  Completer<void>? loadStarted;
 
   @override
   bool get isLoaded => _isLoaded;
   @override
   String? get loadedModelPath => _loadedPath;
   @override
-  AiModelState get state =>
-      _isLoaded ? AiModelState.ready : AiModelState.noModel;
+  AiModelState get state => generating
+      ? AiModelState.generating
+      : (_isLoaded ? AiModelState.ready : AiModelState.noModel);
 
   @override
   Future<void> loadModel(
@@ -33,7 +39,13 @@ class MockTestAiEngine implements AiEngine {
     AiGenerationSettings? settings,
     LlamaRuntimeSettings? runtimeSettings,
   }) async {
-    if (shouldFail) {
+    _isLoaded = false; // Native reload releases the previous model first.
+    _loadedPath = null;
+    if (loadStarted?.isCompleted == false) loadStarted!.complete();
+    if (loadGate != null) await loadGate!.future;
+    if (shouldFail ||
+        (failingBackend != null &&
+            runtimeSettings?.backend == failingBackend)) {
       throw Exception('Simulated engine load failure');
     }
     _isLoaded = true;
@@ -411,6 +423,119 @@ void main() {
       expect(service.activeBackendInfo.backend, 'vulkan');
       expect(service.activeBackendInfo.threads, 8);
 
+      service.dispose();
+    });
+
+    test('Failed Vulkan reload restores the actual prior runtime and saved preference', () async {
+      final service = AiService(llm: aiEngine, speech: speechEngine);
+      await service.updateLlamaRuntimeSettings(
+        const LlamaRuntimeSettings(backend: LlamaBackendPreference.cpu),
+      );
+      await service.loadLlmModel(
+        mockLlmFile.path,
+        runtimeSettings: const LlamaRuntimeSettings(
+          backend: LlamaBackendPreference.cpu,
+          threads: 6,
+        ),
+      );
+      aiEngine.failingBackend = LlamaBackendPreference.vulkan;
+      await expectLater(
+        service.updateLlamaRuntimeSettings(
+          const LlamaRuntimeSettings(backend: LlamaBackendPreference.vulkan),
+        ),
+        throwsA(
+          isA<AiGenerationException>().having(
+            (e) => e.message,
+            'message',
+            contains('restored'),
+          ),
+        ),
+      );
+      expect(aiEngine.isLoaded, isTrue);
+      expect(aiEngine.loadedModelPath, mockLlmFile.path);
+      expect(service.activeBackendInfo.backend, 'cpu');
+      expect(service.activeBackendInfo.threads, 6);
+      expect(service.llamaRuntimeSettings.backend, LlamaBackendPreference.cpu);
+      final rows = await (await AppDatabase.instance.database).query(
+        'app_settings',
+        where: 'key = ?',
+        whereArgs: ['llama_runtime_settings'],
+      );
+      expect(jsonDecode(rows.single['value'] as String)['backend'], 'cpu');
+      service.dispose();
+    });
+
+    test(
+      'Failed rollback reports both failures and clears stale active runtime',
+      () async {
+        final service = AiService(llm: aiEngine, speech: speechEngine);
+        await service.updateLlamaRuntimeSettings(
+          const LlamaRuntimeSettings(backend: LlamaBackendPreference.cpu),
+        );
+        await service.loadLlmModel(mockLlmFile.path);
+        aiEngine.shouldFail = true;
+        await expectLater(
+          service.updateLlamaRuntimeSettings(
+            const LlamaRuntimeSettings(backend: LlamaBackendPreference.vulkan),
+          ),
+          throwsA(
+            isA<AiGenerationException>().having(
+              (e) => e.message,
+              'message',
+              contains('previous runtime also failed'),
+            ),
+          ),
+        );
+        expect(aiEngine.isLoaded, isFalse);
+        expect(
+          service.activeBackendInfo.toMap(),
+          const LlamaActiveBackendInfo().toMap(),
+        );
+        expect(
+          service.llamaRuntimeSettings.backend,
+          LlamaBackendPreference.cpu,
+        );
+        service.dispose();
+      },
+    );
+
+    test('Concurrent runtime switch is rejected while the accepted switch finishes', () async {
+      final service = AiService(llm: aiEngine, speech: speechEngine);
+      await service.loadLlmModel(mockLlmFile.path);
+      aiEngine.loadStarted = Completer<void>();
+      aiEngine.loadGate = Completer<void>();
+      final switchFuture = service.updateLlamaRuntimeSettings(
+        const LlamaRuntimeSettings(backend: LlamaBackendPreference.vulkan),
+      );
+      await aiEngine.loadStarted!.future;
+      await expectLater(
+        service.updateLlamaRuntimeSettings(
+          const LlamaRuntimeSettings(backend: LlamaBackendPreference.cpu),
+        ),
+        throwsA(isA<AiBusyException>()),
+      );
+      aiEngine.loadGate!.complete();
+      await switchFuture;
+      expect(
+        service.llamaRuntimeSettings.backend,
+        LlamaBackendPreference.vulkan,
+      );
+      expect(service.activeBackendInfo.backend, 'vulkan');
+      service.dispose();
+    });
+
+    test('Runtime settings cannot interrupt an active generation', () async {
+      final service = AiService(llm: aiEngine, speech: speechEngine);
+      await service.loadLlmModel(mockLlmFile.path);
+      aiEngine.generating = true;
+      await expectLater(
+        service.updateLlamaRuntimeSettings(
+          const LlamaRuntimeSettings(backend: LlamaBackendPreference.vulkan),
+        ),
+        throwsA(isA<AiBusyException>()),
+      );
+      expect(aiEngine.isLoaded, isTrue);
+      expect(service.llamaRuntimeSettings.backend, LlamaBackendPreference.auto);
       service.dispose();
     });
   });

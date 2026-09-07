@@ -46,6 +46,12 @@ endif()
 set(GGML_OPENCL OFF CACHE BOOL "Android OpenCL SDK/ABI is not bundled" FORCE)
 
 add_subdirectory("${WHISPER_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/whisper_build" EXCLUDE_FROM_ALL)
+if(GGML_VULKAN)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/JlexaVulkanCompatibility.cmake")
+    jlexa_apply_vulkan_compatibility()
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/JlexaVulkanShaderCompatibility.cmake")
+    jlexa_apply_vulkan_shader_compatibility(ggml-vulkan)
+endif()
 add_subdirectory("${LLAMA_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/llama_build" EXCLUDE_FROM_ALL)
 
 add_library(jlexa_native SHARED
