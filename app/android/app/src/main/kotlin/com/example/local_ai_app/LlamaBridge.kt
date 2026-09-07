@@ -1,5 +1,6 @@
 package com.example.local_ai_app
 
+import android.content.Intent
 import android.content.Context
 import android.net.Uri
 import android.os.Handler
@@ -19,6 +20,12 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 @Keep
 class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
+
+    private val plugins by lazy { BackendPlugins(requireNotNull(context)) }
+    private val isMutating = AtomicBoolean(false)
+
+    fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?) =
+        plugins.handleActivityResult(requestCode, resultCode, data)
 
     private var activePfd: ParcelFileDescriptor? = null
 
@@ -162,22 +169,52 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
             return
         }
 
+        scope.launch {
+            try {
+                plugins.initialize()
+                withContext(Dispatchers.Main) { dispatch(call, result) }
+            } catch (e: Throwable) {
+                withContext(Dispatchers.Main) { result.error("PLUGIN_ERROR", e.message, null) }
+            }
+        }
+    }
+
+    private fun dispatch(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
+            "pluginStatus" -> result.success(plugins.snapshot())
+            "importPlugin", "useBuiltinPlugin" -> {
+                if (isGenerating.get() || !isMutating.compareAndSet(false, true)) {
+                    result.error("BUSY", "Wait for the current inference operation to finish", null)
+                    return
+                }
+                scope.launch {
+                    try {
+                        if (call.method == "importPlugin") plugins.importPlugin() else plugins.useBuiltin()
+                        withContext(Dispatchers.Main) { isMutating.set(false); result.success(plugins.snapshot()) }
+                    } catch (e: Throwable) {
+                        withContext(Dispatchers.Main) { isMutating.set(false); result.error("PLUGIN_ERROR", e.message, null) }
+                    }
+                }
+            }
             "getAvailableBackends" -> {
-                try {
-                    val backends = nativeGetAvailableBackends()
-                    result.success(backends)
-                } catch (e: Throwable) {
-                    result.error("BACKEND_DISCOVERY_ERROR", e.message, null)
+                scope.launch {
+                    try {
+                        val value = nativeGetAvailableBackends()
+                        withContext(Dispatchers.Main) { result.success(value) }
+                    } catch (e: Throwable) {
+                        withContext(Dispatchers.Main) { result.error("BACKEND_DISCOVERY_ERROR", e.message, null) }
+                    }
                 }
             }
 
             "getActiveBackendInfo" -> {
-                try {
-                    val info = nativeGetActiveBackendInfo()
-                    result.success(info)
-                } catch (e: Throwable) {
-                    result.error("BACKEND_INFO_ERROR", e.message, null)
+                scope.launch {
+                    try {
+                        val value = nativeGetActiveBackendInfo()
+                        withContext(Dispatchers.Main) { result.success(value) }
+                    } catch (e: Throwable) {
+                        withContext(Dispatchers.Main) { result.error("BACKEND_INFO_ERROR", e.message, null) }
+                    }
                 }
             }
 
@@ -196,6 +233,10 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
                     return
                 }
 
+                if (isGenerating.get() || !isMutating.compareAndSet(false, true)) {
+                    result.error("BUSY", "Wait for the current inference operation to finish", null)
+                    return
+                }
                 scope.launch {
                     var newPfd: ParcelFileDescriptor? = null
                     try {
@@ -209,7 +250,8 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
                             modelPath
                         }
 
-                        val loaded = nativeLoadModel(
+                        plugins.beginModelLoad()
+                        val loaded = try { nativeLoadModel(
                             effectivePath,
                             backend,
                             contextLength,
@@ -218,7 +260,13 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
                             batchSize,
                             ubatchSize,
                             flashAttention
-                        )
+                        ) } catch (e: Throwable) {
+                            if (!plugins.isExternal()) throw e
+                            plugins.fallback(e.message ?: "Plugin model load failed")
+                            nativeLoadModel(effectivePath, "auto", contextLength, threads, gpuLayers,
+                                batchSize, ubatchSize, flashAttention)
+                        }
+                        plugins.endModelLoad()
 
                         if (loaded) {
                             try {
@@ -232,13 +280,16 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
                         }
 
                         withContext(Dispatchers.Main) {
+                            isMutating.set(false)
                             result.success(loaded)
                         }
                     } catch (e: Throwable) {
                         try {
                             newPfd?.close()
                         } catch (_: Throwable) {}
+                        plugins.endModelLoad()
                         withContext(Dispatchers.Main) {
+                            isMutating.set(false)
                             result.error("LOAD_ERROR", e.message, null)
                         }
                     }
@@ -246,6 +297,10 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
             }
 
             "unloadModel" -> {
+                if (isGenerating.get() || !isMutating.compareAndSet(false, true)) {
+                    result.error("BUSY", "Wait for the current inference operation to finish", null)
+                    return
+                }
                 scope.launch {
                     try {
                         nativeUnloadModel()
@@ -254,6 +309,7 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
                         } catch (_: Throwable) {}
                         activePfd = null
                         withContext(Dispatchers.Main) {
+                            isMutating.set(false)
                             result.success(null)
                         }
                     } catch (e: Throwable) {
@@ -262,6 +318,7 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
                         } catch (_: Throwable) {}
                         activePfd = null
                         withContext(Dispatchers.Main) {
+                            isMutating.set(false)
                             result.error("UNLOAD_ERROR", e.message, null)
                         }
                     }
@@ -269,10 +326,13 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
             }
 
             "isModelLoaded" -> {
-                try {
-                    result.success(nativeIsModelLoaded())
-                } catch (e: Throwable) {
-                    result.error("STATUS_ERROR", e.message, null)
+                scope.launch {
+                    try {
+                        val value = nativeIsModelLoaded()
+                        withContext(Dispatchers.Main) { result.success(value) }
+                    } catch (e: Throwable) {
+                        withContext(Dispatchers.Main) { result.error("STATUS_ERROR", e.message, null) }
+                    }
                 }
             }
 
@@ -289,7 +349,7 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
                 val chatRoles = rolesList?.toTypedArray()
                 val chatContents = contentsList?.toTypedArray()
 
-                if (!isGenerating.compareAndSet(false, true)) {
+                if (isMutating.get() || !isGenerating.compareAndSet(false, true)) {
                     result.error("BUSY", "Another generation is already in progress", null)
                     return
                 }

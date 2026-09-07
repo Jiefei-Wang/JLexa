@@ -433,3 +433,32 @@ At the end of every agent session after completing work:
   - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
   - `apksigner verify --verbose --print-certs`: Verified, APK Signature Scheme v2 true. Final Pixel install: `adb install -r`, Success.
   - Existing upstream flutter_tts Kotlin compatibility notice remains; current release succeeds. Prior policy-blocked duplicate APK-output cleanup was not retried or bypassed.
+
+---
+
+## Session: 2026-09-07 (Dynamic LLM Backend Plugins)
+- **Focus**: Added user-imported ARM64 native LLM plugins with a small stable C ABI, preserving the bundled backend, model storage, Whisper and existing inference/UI behavior. Contract: `native/plugin/README.md`; device evidence: `docs/qa-backend-plugins-2026-09-07.md`.
+- **Changes**:
+  - Split the real llama.cpp adapter into bundled `libjlexa_llama.so`. JNI/host uses `jlexa_plugin_get_api` and app-owned C structures through `dlopen`/`dlsym`; it does not link llama.cpp. Hidden engine symbols avoid ggml interposition.
+  - Added Settings Backend Plugins import and status card. Android file picker streams a selected `.so` into private, UUID-named app storage; files become read-only, ELF ARM64 architecture is checked, and the ABI version/table is validated. No external-storage code execution, downloader or dependency manager.
+  - Added a disposable, non-exported probe process for constructor/API/create/destroy crashes and timeouts. Failures restore bundled inference; persisted initialization markers recover to built-in on the next launch after an in-process activation/model-load crash.
+  - Persisted selected backend and errors; kept SAF model descriptors, chat messages, runtime options, streaming/cancellation, reload-on-switch and picker cancellation behavior. Native queries run off the UI thread; model/backend mutations reject concurrent generation.
+- **Pixel 6 Verification** (`25311FDF6004PR`, Android 16):
+  - Built-in Vulkan and real imported llama.cpp each loaded Qwen2.5 0.5B via SAF and generated complete English answers.
+  - Small C fixture imported, generated its deterministic response and restored after force-stop/relaunch.
+  - Invalid file, real x86_64 library, API 99, missing entry symbol, unresolved dependency and create failure each rejected clearly and restored built-in/model.
+  - Intentional create abort killed only `:plugin_probe`; main PID remained stable. Repeated on final release, main PID `29677` remained alive, and fallback Qwen generation passed.
+  - Final signed update restored the real selected plugin after its original Downloads file was deleted. Logs confirmed private copy mode `0400`; the host's independent fixture also rejected writable mode `0644`.
+  - Native lifecycle fixture passed create/load/generate/stop/reset/unload/destroy/recreate. Dynamic symbol audit found only `jlexa_plugin_get_api` exported by the engine adapter, and no llama dependency in host `DT_NEEDED`.
+- **Static Analysis**: `flutter analyze` -> `No issues found!` (zero errors/warnings).
+- **Tests**: `flutter test --concurrency=1` -> `299 passed`, zero failed (80 seconds), including six new plugin channel/ownership/restoration regressions.
+- **Signed Release**:
+  - `flutter build apk --release` succeeded using `app/android/key.properties` (64 seconds); ARM64 and x86_64 built.
+  - Fixed path: `release/app-release.apk` (108,153,596 bytes).
+  - APK SHA-256: `DB0B371CF5D93232672457E728C590078640B17B72193028692F35C94CC933A0`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
+  - `apksigner verify --verbose --print-certs`: verified, APK Signature Scheme v2 true. Final signed Pixel upgrade succeeded.
+  - Importable example: `release/jlexa-llama-plugin.so` (29,088,624 bytes), SHA-256 `C0956F5E4CF85A7823ADA03028E1F4BB3AB03E3D9D23191D33646B9C3E62D1C4`.
+  - Automatic approval review rejected duplicate APK removal under `app/build` (`blocked by policy`); these generated copies remain and deletion was not bypassed. Existing upstream flutter_tts future Kotlin compatibility notice remains.
+- **Limits**: Probe containment covers library/create/destroy initialization, not arbitrary later inference crashes. In-process activation/model-load crashes recover on next launch; generation crashes still require restart. Trusted native code runs with app permissions. No claim of universal third-party binary compatibility or model-answer accuracy.
+- **Final cleanup**: Removed temporary device fixtures and QA conversations; left Pixel on Home with built-in/Auto restored, original three audio lessons and models preserved, PID `29677`. Pre-existing untracked host `artifacts/` was left untouched.

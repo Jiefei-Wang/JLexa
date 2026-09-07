@@ -50,7 +50,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (!safStorageBridge.handleActivityResult(requestCode, resultCode, data)) {
+        if (!llamaBridge.handleActivityResult(requestCode, resultCode, data) &&
+            !safStorageBridge.handleActivityResult(requestCode, resultCode, data)) {
             super.onActivityResult(requestCode, resultCode, data)
         }
     }

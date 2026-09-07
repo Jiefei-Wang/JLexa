@@ -122,6 +122,21 @@ class SettingsController extends ChangeNotifier {
     }
   }
 
+  Future<void> changeBackendPlugin({required bool import}) async {
+    if (_isProcessing) return;
+    _isProcessing = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      await aiService.changeBackendPlugin(import: import);
+    } catch (e) {
+      _errorMessage = 'Could not change backend: $e';
+    } finally {
+      _isProcessing = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> updateBackendPreference(LlamaBackendPreference pref) async {
     final updated = llamaSettings.copyWith(backend: pref);
     await updateLlamaSettings(updated);

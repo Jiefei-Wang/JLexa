@@ -42,6 +42,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _ownsController = true;
     }
     _controller.refreshModels();
+    _controller.aiService.refreshPluginInfo();
   }
 
   @override
@@ -50,6 +51,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _controller.dispose();
     }
     super.dispose();
+  }
+
+  Widget _buildBackendPluginsCard() {
+    final service = _controller.aiService;
+    final plugin = service.pluginInfo;
+    final busy =
+        _controller.isLoading ||
+        service.isGenerating ||
+        service.initState == AiServiceInitState.initializing;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Backend Plugins', style: AppTypography.titleSmall),
+            const SizedBox(height: 8),
+            Text(plugin.external ? plugin.name : 'Built-in: ${plugin.name}'),
+            Text('${plugin.engine} / ${plugin.version}'),
+            Text(plugin.backendType),
+            Text('Status: ${plugin.status}'),
+            if (plugin.error.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              if (plugin.fileName.isNotEmpty) Text(plugin.fileName),
+              Text(
+                plugin.error,
+                style: const TextStyle(color: AppColors.error),
+              ),
+            ],
+            const SizedBox(height: 8),
+            const Text(
+              'Import a trusted ARM64 JLexa backend .so. It is copied to private app storage. Your loaded model will reload.',
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: busy || !service.backendPlugins.supported
+                      ? null
+                      : () => _controller.changeBackendPlugin(import: true),
+                  icon: const Icon(Icons.file_open_outlined),
+                  label: const Text('Import .so'),
+                ),
+                TextButton(
+                  onPressed: busy || (!plugin.external && plugin.error.isEmpty)
+                      ? null
+                      : () => _controller.changeBackendPlugin(import: false),
+                  child: const Text('Use built-in'),
+                ),
+              ],
+            ),
+            if (busy) const LinearProgressIndicator(),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _confirmDeleteModel({
@@ -201,6 +260,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 // ==========================================
                 // Storage Folder Configuration
                 // ==========================================
+                _buildBackendPluginsCard(),
+                const SizedBox(height: 24),
                 _buildStorageFolderCard(),
                 const SizedBox(height: 24),
 

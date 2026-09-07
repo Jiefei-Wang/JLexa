@@ -7,6 +7,7 @@ import 'package:sqflite/sqflite.dart';
 import '../database/app_database.dart';
 import 'ai_engine.dart';
 import 'ai_models.dart';
+import 'backend_plugins.dart';
 import 'native_ai_bridge.dart';
 import 'prompt_builder.dart';
 import 'speech_engine.dart';
@@ -19,6 +20,8 @@ enum AiServiceInitState {
 }
 
 class AiService extends ChangeNotifier {
+  final BackendPlugins backendPlugins;
+  BackendPluginInfo pluginInfo = const BackendPluginInfo();
   final AiEngine llmEngine;
   final SpeechRecognitionEngine speechEngine;
 
@@ -53,9 +56,13 @@ class AiService extends ChangeNotifier {
 
   bool get isGenerating => llmEngine.state == AiModelState.generating;
 
-  AiService({AiEngine? llm, SpeechRecognitionEngine? speech})
-    : llmEngine = llm ?? NativeLlamaEngine(),
-      speechEngine = speech ?? NativeWhisperEngine();
+  AiService({
+    AiEngine? llm,
+    SpeechRecognitionEngine? speech,
+    BackendPlugins? plugins,
+  }) : backendPlugins = plugins ?? BackendPlugins(),
+       llmEngine = llm ?? NativeLlamaEngine(),
+       speechEngine = speech ?? NativeWhisperEngine();
 
   Future<void> initialize() async {
     if (_initState == AiServiceInitState.initializing ||
@@ -112,6 +119,8 @@ class AiService extends ChangeNotifier {
         );
       }
 
+      await refreshPluginInfo();
+
       // Discover available backends from native engine
       try {
         _availableBackends = await llmEngine.getAvailableBackends();
@@ -146,6 +155,8 @@ class AiService extends ChangeNotifier {
               'Configured LLM file not found: $_configuredLlmPath';
         }
       }
+
+      await refreshPluginInfo();
 
       // 2. Independent Whisper restoration
       if (_configuredSpeechPath != null && _configuredSpeechPath!.isNotEmpty) {
@@ -215,6 +226,7 @@ class AiService extends ChangeNotifier {
       _activeBackendInfo = await llmEngine.getActiveBackendInfo();
       _loadedLlamaRuntimeSettings = rSettings;
       await saveSetting('llm_model_path', path);
+      await refreshPluginInfo();
       notifyListeners();
     } catch (e) {
       _configuredLlmPath = prevPath;
@@ -294,6 +306,47 @@ class AiService extends ChangeNotifier {
     _settings = newSettings;
     saveSetting('ai_generation_settings', jsonEncode(newSettings.toMap()));
     notifyListeners();
+  }
+
+  Future<void> refreshPluginInfo() async {
+    try {
+      pluginInfo = await backendPlugins.status();
+    } catch (e) {
+      pluginInfo = BackendPluginInfo(status: 'Failed', error: '$e');
+    }
+    notifyListeners();
+  }
+
+  Future<void> changeBackendPlugin({required bool import}) async {
+    if (_initState == AiServiceInitState.initializing ||
+        _isUpdatingLlamaRuntime ||
+        isGenerating ||
+        llmEngine.state == AiModelState.loading) {
+      throw const AiBusyException(
+        'Wait for the current AI operation to finish.',
+      );
+    }
+    _isUpdatingLlamaRuntime = true;
+    final path = llmEngine.isLoaded ? llmEngine.loadedModelPath : null;
+    try {
+      await unloadLlmModel();
+      try {
+        pluginInfo = import
+            ? await backendPlugins.importPlugin()
+            : await backendPlugins.useBuiltin();
+      } finally {
+        // A cancelled picker or rejected plugin still restores the current model.
+        if (path != null) await loadLlmModel(path);
+      }
+    } finally {
+      try {
+        _availableBackends = await llmEngine.getAvailableBackends();
+        await refreshPluginInfo();
+      } finally {
+        _isUpdatingLlamaRuntime = false;
+        notifyListeners();
+      }
+    }
   }
 
   Future<void> updateLlamaRuntimeSettings(

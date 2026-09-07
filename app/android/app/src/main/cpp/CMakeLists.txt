@@ -56,31 +56,28 @@ add_subdirectory("${LLAMA_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/llama_build" EXCLUD
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/JlexaOpenCLMali.cmake")
 jlexa_add_opencl_mali_backend()
 
-add_library(jlexa_native SHARED
-    jlexa_jni.cpp
-    "${BINDINGS_DIR}/jlexa_whisper_bridge.cpp"
-    "${BINDINGS_DIR}/jlexa_llama_bridge.cpp"
-)
-
-target_include_directories(jlexa_native PRIVATE
-    "${BINDINGS_DIR}"
-    "${WHISPER_DIR}/include"
-    "${WHISPER_DIR}/ggml/include"
-    "${LLAMA_DIR}/include"
-    "${LLAMA_DIR}/ggml/include"
-)
-
-target_link_libraries(jlexa_native PRIVATE
-    whisper
-    llama
-    log
-)
-
+# The host and Whisper never link llama.cpp. Both bundled and imported LLMs
+# enter through jlexa_plugin_get_api. Hide engine symbols to prevent ggml interposition.
+set(PLUGIN_DIR "${JLEXA_ROOT}/native/plugin")
+add_library(jlexa_llama SHARED
+    "${PLUGIN_DIR}/llama_plugin.cpp"
+    "${BINDINGS_DIR}/jlexa_llama_bridge.cpp")
+target_include_directories(jlexa_llama PRIVATE "${PLUGIN_DIR}" "${BINDINGS_DIR}")
+target_link_libraries(jlexa_llama PRIVATE llama log)
+target_link_options(jlexa_llama PRIVATE "-Wl,--exclude-libs,ALL" "-Wl,-Bsymbolic" "-Wl,--version-script=${PLUGIN_DIR}/exports.map")
+set_target_properties(jlexa_llama PROPERTIES CXX_VISIBILITY_PRESET hidden)
 if(GGML_VULKAN)
-    target_compile_definitions(jlexa_native PRIVATE JLEXA_HAS_VULKAN=1)
+    target_compile_definitions(jlexa_llama PRIVATE JLEXA_HAS_VULKAN=1)
 endif()
 if(TARGET jlexa_opencl_mali)
-    target_link_libraries(jlexa_native PRIVATE jlexa_opencl_mali)
-    target_include_directories(jlexa_native PRIVATE "${JLEXA_OPENCL_INCLUDE_DIR}")
-    target_compile_definitions(jlexa_native PRIVATE JLEXA_HAS_OPENCL=1)
+    target_link_libraries(jlexa_llama PRIVATE jlexa_opencl_mali)
+    target_include_directories(jlexa_llama PRIVATE "${JLEXA_OPENCL_INCLUDE_DIR}")
+    target_compile_definitions(jlexa_llama PRIVATE JLEXA_HAS_OPENCL=1)
 endif()
+add_library(jlexa_native SHARED jlexa_jni.cpp
+    "${BINDINGS_DIR}/jlexa_whisper_bridge.cpp"
+    "${PLUGIN_DIR}/jlexa_backend_host.cpp")
+target_include_directories(jlexa_native PRIVATE "${BINDINGS_DIR}" "${PLUGIN_DIR}")
+target_link_libraries(jlexa_native PRIVATE whisper log dl)
+target_link_options(jlexa_native PRIVATE "-Wl,--exclude-libs,ALL")
+add_dependencies(jlexa_native jlexa_llama)

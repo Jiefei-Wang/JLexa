@@ -9,6 +9,7 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <uses-native-library android:name="libOpenCL.so" android:required="false" />
+        <service android:name=".PluginProbeService" android:exported="false" android:process=":plugin_probe" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

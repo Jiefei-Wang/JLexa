@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 #include "jlexa_whisper_bridge.h"
-#include "jlexa_llama_bridge.h"
+#include "jlexa_backend_host.h"
 
 static inline bool clearPendingException(JNIEnv* env) {
     if (env && env->ExceptionCheck()) {
@@ -353,6 +353,7 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGetAvailableBackends(
     JNIEnv* env,
     jobject /* this */
 ) {
+    try {
     jclass arrayListClass = env->FindClass("java/util/ArrayList");
     if (!arrayListClass || clearPendingException(env)) return nullptr;
     jmethodID arrayListInit = env->GetMethodID(arrayListClass, "<init>", "()V");
@@ -380,7 +381,7 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGetAvailableBackends(
         return nullptr;
     }
 
-    auto backends = JLexaLlamaBridge::instance().getAvailableBackends();
+    auto backends = JLexaBackendHost::instance().getAvailableBackends();
     for (const auto& b : backends) {
         if (env->PushLocalFrame(16) < 0) {
             clearPendingException(env);
@@ -437,6 +438,11 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGetAvailableBackends(
     env->DeleteLocalRef(hashMapClass);
     env->DeleteLocalRef(booleanClass);
     return resultList;
+
+    } catch(const std::exception &e) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),e.what());
+        return nullptr;
+    }
 }
 
 JNIEXPORT jobject JNICALL
@@ -444,6 +450,7 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGetActiveBackendInfo(
     JNIEnv* env,
     jobject /* this */
 ) {
+    try {
     jclass hashMapClass = env->FindClass("java/util/HashMap");
     if (!hashMapClass || clearPendingException(env)) return nullptr;
     jmethodID hashMapInit = env->GetMethodID(hashMapClass, "<init>", "()V");
@@ -456,7 +463,7 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGetActiveBackendInfo(
     jmethodID integerValueOf = env->GetStaticMethodID(integerClass, "valueOf", "(I)Ljava/lang/Integer;");
     if (!integerValueOf || clearPendingException(env)) { env->DeleteLocalRef(hashMapClass); env->DeleteLocalRef(integerClass); return nullptr; }
 
-    auto info = JLexaLlamaBridge::instance().getActiveBackendInfo();
+    auto info = JLexaBackendHost::instance().getActiveBackendInfo();
     jobject infoMap = env->NewObject(hashMapClass, hashMapInit);
     if (!infoMap || clearPendingException(env)) {
         env->DeleteLocalRef(hashMapClass);
@@ -494,6 +501,11 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGetActiveBackendInfo(
     env->DeleteLocalRef(hashMapClass);
     env->DeleteLocalRef(integerClass);
     return infoMap;
+
+    } catch(const std::exception &e) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),e.what());
+        return nullptr;
+    }
 }
 
 JNIEXPORT jboolean JNICALL
@@ -509,6 +521,7 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeLoadModel(
     jint ubatch_size,
     jint flash_attn
 ) {
+    try {
     if (!model_path) return JNI_FALSE;
     std::string path = getStdUtf8FromJavaString(env, model_path);
 
@@ -523,24 +536,41 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeLoadModel(
     cfg.ubatchSize = ubatch_size;
     cfg.flashAttention = flash_attn;
 
-    bool result = JLexaLlamaBridge::instance().loadModel(path, cfg);
+    bool result = JLexaBackendHost::instance().loadModel(path, cfg);
     return result ? JNI_TRUE : JNI_FALSE;
+
+    } catch(const std::exception &e) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),e.what());
+        return JNI_FALSE;
+    }
 }
 
 JNIEXPORT void JNICALL
 Java_com_example_local_1ai_1app_LlamaBridge_nativeUnloadModel(
-    JNIEnv* /* env */,
+    JNIEnv* env,
     jobject /* this */
 ) {
-    JLexaLlamaBridge::instance().unloadModel();
+    try {
+    JLexaBackendHost::instance().unloadModel();
+
+    } catch(const std::exception &e) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),e.what());
+        return;
+    }
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_example_local_1ai_1app_LlamaBridge_nativeIsModelLoaded(
-    JNIEnv* /* env */,
+    JNIEnv* env,
     jobject /* this */
 ) {
-    return JLexaLlamaBridge::instance().isModelLoaded() ? JNI_TRUE : JNI_FALSE;
+    try {
+    return JLexaBackendHost::instance().isModelLoaded() ? JNI_TRUE : JNI_FALSE;
+
+    } catch(const std::exception &e) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),e.what());
+        return JNI_FALSE;
+    }
 }
 
 JNIEXPORT void JNICALL
@@ -556,6 +586,7 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGenerate(
     jobjectArray chat_contents,
     jobject callback
 ) {
+    try {
     if (!callback) return;
 
     std::string prompt_str = "";
@@ -605,7 +636,7 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGenerate(
         }
     }
 
-    JLexaLlamaBridge::instance().generate(
+    JLexaBackendHost::instance().generate(
         prompt_str,
         max_tokens,
         temperature,
@@ -637,22 +668,53 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeGenerate(
             env->PopLocalFrame(nullptr);
         }
     );
+
+    } catch(const std::exception &e) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),e.what());
+        return;
+    }
 }
 
 JNIEXPORT void JNICALL
 Java_com_example_local_1ai_1app_LlamaBridge_nativeCancel(
-    JNIEnv* /* env */,
+    JNIEnv* env,
     jobject /* this */
 ) {
-    JLexaLlamaBridge::instance().cancel();
+    try {
+    JLexaBackendHost::instance().cancel();
+
+    } catch(const std::exception &e) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),e.what());
+        return;
+    }
 }
 
 JNIEXPORT void JNICALL
 Java_com_example_local_1ai_1app_LlamaBridge_nativeResetCancellation(
-    JNIEnv* /* env */,
+    JNIEnv* env,
     jobject /* this */
 ) {
-    JLexaLlamaBridge::instance().resetCancellation();
+    try {
+    JLexaBackendHost::instance().resetCancellation();
+
+    } catch(const std::exception &e) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),e.what());
+        return;
+    }
+}
+
+
+JNIEXPORT jobjectArray JNICALL
+Java_com_example_local_1ai_1app_BackendPlugins_nativeSelect(JNIEnv *env,jobject,jstring path) {
+    try {
+        JLexaBackendHost::instance().select(getStdUtf8FromJavaString(env,path));
+        auto info=JLexaBackendHost::instance().pluginInfo();
+        jobjectArray result=env->NewObjectArray(4,env->FindClass("java/lang/String"),nullptr);
+        for(int i=0;i<4;i++) env->SetObjectArrayElement(result,i,makeJavaStringFromUtf8(env,info[i]));
+        return result;
+    } catch(const std::exception &e) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),e.what());return nullptr;
+    }
 }
 
 } // extern "C"
