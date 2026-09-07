@@ -274,6 +274,9 @@ void main() {
                 ),
               ),
             );
+            // Settings starts a real filesystem inventory scan on entry.
+            // Finish that work before scrolling in the widget's fake clock.
+            await tester.runAsync(controller.refreshModels);
             await tester.pump();
             final name = find.text(model.displayName);
             await tester.scrollUntilVisible(

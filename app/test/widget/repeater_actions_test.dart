@@ -4,6 +4,60 @@ import 'package:jlexa/features/repeater/widgets/segment_controls.dart';
 import 'package:jlexa/features/repeater/widgets/transcript_view.dart';
 
 void main() {
+  testWidgets('Auto-stop sits right of Repeat and six controls fit a phone', (
+    tester,
+  ) async {
+    var autoToggles = 0;
+    for (final width in [360.0, 260.0]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: width,
+              child: SegmentControls(
+                isPlaying: false,
+                isRepeatOne: false,
+                isAutoStop: true,
+                onTogglePlay: () {},
+                onToggleRepeatOne: () {},
+                onToggleAutoStop: () => autoToggles++,
+                onPrevSentence: () {},
+                onNextSentence: () {},
+                onReplay: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+      final stop = find.byTooltip('Auto-stop at cut end');
+      expect(
+        tester
+            .widget<IconButton>(
+              find.byWidgetPredicate(
+                (widget) =>
+                    widget is IconButton &&
+                    widget.tooltip == 'Auto-stop at cut end',
+              ),
+            )
+            .isSelected,
+        isTrue,
+      );
+      expect(tester.getSize(stop).width, greaterThanOrEqualTo(48));
+      expect(tester.getSize(stop).height, greaterThanOrEqualTo(48));
+      if (width == 360) {
+        final repeat = find.byTooltip('Repeat active cut');
+        expect(
+          tester.getCenter(stop).dx,
+          greaterThan(tester.getCenter(repeat).dx),
+        );
+        expect(tester.getCenter(stop).dy, tester.getCenter(repeat).dy);
+      }
+      await tester.tap(stop);
+      expect(tester.takeException(), isNull);
+    }
+    expect(autoToggles, 2);
+  });
+
   testWidgets(
     'Replay sits between Next and Repeat and does not toggle looping',
     (tester) async {

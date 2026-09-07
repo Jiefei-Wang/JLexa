@@ -747,6 +747,8 @@ class RepeaterController extends ChangeNotifier {
   }
 
   void toggleRepeatOne() => audioService.toggleRepeatOne();
+  bool get isAutoStop => audioService.isAutoStop;
+  void toggleAutoStop() => audioService.toggleAutoStop();
   Future<void> previousSentence() => _navigateCut(-1);
   Future<void> nextSentence() => _navigateCut(1);
 

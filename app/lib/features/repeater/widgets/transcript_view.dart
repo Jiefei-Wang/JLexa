@@ -11,6 +11,8 @@ class TranscriptView extends StatelessWidget {
   final VoidCallback? onTranscribe;
   final ValueChanged<String> onWordTap;
   final VoidCallback? onPlaySentence;
+  final VoidCallback? onAddToCollection;
+  final bool isSavingToCollection;
   final bool isTranscribing;
   final bool isCancelling;
   final double? progress;
@@ -24,6 +26,8 @@ class TranscriptView extends StatelessWidget {
     this.onTranscribe,
     required this.onWordTap,
     this.onPlaySentence,
+    this.onAddToCollection,
+    this.isSavingToCollection = false,
     this.isTranscribing = false,
     this.isCancelling = false,
     this.progress,
@@ -160,12 +164,23 @@ class TranscriptView extends StatelessWidget {
             const SizedBox(height: 12),
             Row(
               children: [
-                const Expanded(
-                  child: Text(
-                    'Tap a word to see its explanation',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textTertiary,
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: busy || isSavingToCollection
+                          ? null
+                          : onAddToCollection,
+                      icon: isSavingToCollection
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.library_add_outlined, size: 20),
+                      label: Text(
+                        isSavingToCollection ? 'Saving…' : 'Add to Collection',
+                      ),
                     ),
                   ),
                 ),

@@ -28,7 +28,7 @@ class AppDatabase {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -60,6 +60,7 @@ class AppDatabase {
           );
           await _createConversations(db);
         }
+        if (oldVersion < 4) await createCollectionTables(db);
       },
       onOpen: (db) async {
         try {
@@ -212,6 +213,7 @@ class AppDatabase {
     ''');
 
     await _createConversations(db);
+    await createCollectionTables(db);
 
     // Chat messages
     await db.execute('''
@@ -238,6 +240,21 @@ class AppDatabase {
     await db.execute('''CREATE TABLE chat_conversations (
       id TEXT PRIMARY KEY, title TEXT NOT NULL, context_json TEXT,
       messages_json TEXT NOT NULL, updated_at INTEGER NOT NULL
+    )''');
+  }
+
+  static Future<void> createCollectionTables(DatabaseExecutor db) async {
+    // Clips are independent snapshots and survive source lesson deletion.
+    await db.execute('''CREATE TABLE collection_clips (
+      id TEXT PRIMARY KEY,
+      source_title TEXT NOT NULL,
+      source_start_ms INTEGER NOT NULL,
+      source_end_ms INTEGER NOT NULL,
+      duration_ms INTEGER NOT NULL,
+      transcript TEXT NOT NULL,
+      audio_file_name TEXT NOT NULL,
+      source_key TEXT NOT NULL UNIQUE,
+      created_at INTEGER NOT NULL
     )''');
   }
 

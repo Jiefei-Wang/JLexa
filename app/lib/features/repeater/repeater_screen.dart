@@ -5,6 +5,7 @@ import '../../core/audio/audio_models.dart';
 import '../../core/audio/audio_service.dart';
 import '../../core/audio/lesson_repository.dart';
 import '../../core/audio/waveform_service.dart';
+import '../../core/collection/collection_repository.dart';
 import '../../core/dictionary/dictionary_repository.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
@@ -24,6 +25,7 @@ class RepeaterScreen extends StatefulWidget {
   final AiService aiService;
   final DictionaryRepository dictionaryRepo;
   final VocabularyRepository vocabularyRepo;
+  final CollectionRepository? collectionRepo;
   final AudioLesson? activeLesson;
   final void Function({
     required String lessonTitle,
@@ -45,6 +47,7 @@ class RepeaterScreen extends StatefulWidget {
     required this.aiService,
     required this.dictionaryRepo,
     required this.vocabularyRepo,
+    this.collectionRepo,
     this.activeLesson,
     required this.onOpenAiChat,
     required this.onImportAudio,
@@ -56,6 +59,8 @@ class RepeaterScreen extends StatefulWidget {
 
 class RepeaterScreenState extends State<RepeaterScreen> {
   late final RepeaterController _controller;
+  late final CollectionRepository _collectionRepo;
+  bool _savingCollection = false;
 
   Future<void> prepareLessonDeletion(String lessonId) =>
       _controller.prepareLessonDeletion(lessonId);
@@ -63,6 +68,7 @@ class RepeaterScreenState extends State<RepeaterScreen> {
   @override
   void initState() {
     super.initState();
+    _collectionRepo = widget.collectionRepo ?? CollectionRepository();
     _controller = RepeaterController(
       lessonRepo: widget.lessonRepo,
       audioService: widget.audioService,
@@ -86,6 +92,7 @@ class RepeaterScreenState extends State<RepeaterScreen> {
   @override
   void dispose() {
     _controller.dispose();
+    if (widget.collectionRepo == null) _collectionRepo.dispose();
     super.dispose();
   }
 
@@ -103,6 +110,32 @@ class RepeaterScreenState extends State<RepeaterScreen> {
         aiService: widget.aiService,
       ),
     );
+  }
+
+  Future<void> _saveToCollection() async {
+    final lesson = _controller.lesson;
+    final segment = _controller.visibleTranscriptSegment;
+    if (_savingCollection || lesson == null || segment == null) return;
+    setState(() => _savingCollection = true);
+    try {
+      await _collectionRepo.saveSegment(
+        lesson: lesson.copyWith(durationMs: _controller.durationMs),
+        segment: segment,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Saved to Collection in Study.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not save this audio clip. Please try again.'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _savingCollection = false);
+    }
   }
 
   void _handleOpenQa() {
@@ -369,8 +402,10 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                     SegmentControls(
                       isPlaying: _controller.isPlaying,
                       isRepeatOne: _controller.isRepeatOne,
+                      isAutoStop: _controller.isAutoStop,
                       onTogglePlay: _controller.togglePlayPause,
                       onToggleRepeatOne: _controller.toggleRepeatOne,
+                      onToggleAutoStop: _controller.toggleAutoStop,
                       onPrevSentence: _controller.previousSentence,
                       onNextSentence: _controller.nextSentence,
                       onReplay: _controller.currentSegment == null
@@ -398,6 +433,8 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                           : _controller.transcribeCurrentCut,
                       onWordTap: _showWordExplanation,
                       onPlaySentence: _controller.repeatCurrentSentence,
+                      onAddToCollection: _saveToCollection,
+                      isSavingToCollection: _savingCollection,
                     ),
                     const SizedBox(height: 16),
 

@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
+import android.util.Log
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -12,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -58,7 +61,7 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
     private var eventSink: EventChannel.EventSink? = null
     private val isTranscribing = AtomicBoolean(false)
     private val isCancelled = AtomicBoolean(false)
-    private var activeRequestId: String? = null
+    @Volatile private var activeRequestId: String? = null
 
     @Keep
     interface NativeProgressCallback {
@@ -73,6 +76,7 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
     ) : NativeProgressCallback {
         override fun onProgress(progress: Int) {
             bridge.mainHandler.post {
+                if (bridge.activeRequestId != requestId || bridge.isCancelled.get()) return@post
                 bridge.eventSink?.success(
                     mapOf(
                         "requestId" to requestId,
@@ -92,8 +96,15 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
         eventSink = null
     }
 
+    private fun releaseRequest(requestId: String) {
+        if (activeRequestId == requestId) {
+            activeRequestId = null
+            isTranscribing.set(false)
+        }
+    }
+
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-        if (!isLibraryAvailable && call.method != "extractAudioInfo" && call.method != "getAudioMetadata") {
+        if (!isLibraryAvailable && call.method !in setOf("extractAudioInfo", "getAudioMetadata", "exportAudioClip")) {
             result.error("NATIVE_LIBRARY_UNAVAILABLE", "Native library libjlexa_native.so failed to load", null)
             return
         }
@@ -228,6 +239,25 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
                 }
             }
 
+            "exportAudioClip" -> {
+                val audioPath = call.argument<String>("audioPath")
+                val outputPath = call.argument<String>("outputPath")
+                val startMs = call.argument<Number>("startMs")?.toLong()
+                val endMs = call.argument<Number>("endMs")?.toLong()
+                if (audioPath == null || outputPath == null || startMs == null || endMs == null || startMs < 0 || endMs <= startMs) {
+                    result.error("INVALID_ARGS", "audioPath, outputPath and 0 <= startMs < endMs are required", null)
+                    return
+                }
+                scope.launch {
+                    try {
+                        val exported = AudioClipExporter.export(audioPath, startMs, endMs, outputPath) { !isActive }
+                        withContext(Dispatchers.Main) { result.success(exported) }
+                    } catch (e: Throwable) {
+                        withContext(Dispatchers.Main) { result.error("EXPORT_ERROR", e.message, null) }
+                    }
+                }
+            }
+
             "transcribeAudio" -> {
                 val audioPath = call.argument<String>("audioPath")
                 val lessonId = call.argument<String>("lessonId") ?: UUID.randomUUID().toString()
@@ -243,6 +273,10 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
                     result.error("INVALID_ARGS", "audioPath is required", null)
                     return
                 }
+                if (cutId != null && (cutStartMs == null || cutEndMs == null || cutStartMs < 0 || cutEndMs <= cutStartMs)) {
+                    result.error("INVALID_RANGE", "A cut requires 0 <= cutStartMs < cutEndMs", null)
+                    return
+                }
 
                 if (!isTranscribing.compareAndSet(false, true)) {
                     result.error("BUSY", "Another transcription is currently in progress", null)
@@ -251,13 +285,27 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
 
                 activeRequestId = requestId
                 isCancelled.set(false)
+                // Reset before launching so a cancel arriving immediately after the request
+                // cannot be erased later by the worker.
+                try {
+                    nativeResetCancellation()
+                } catch (e: Throwable) {
+                    releaseRequest(requestId)
+                    result.error("TRANSCRIBE_ERROR", e.message, null)
+                    return
+                }
 
                 scope.launch {
                     try {
-                        nativeResetCancellation()
-                        val pcm = AudioDecoder.decodeTo16kHzMonoPcm(audioPath, isCancelled = { isCancelled.get() })
+                        val decodeStarted = SystemClock.elapsedRealtime()
+                        val pcm = AudioDecoder.decodeTo16kHzMonoPcm(audioPath,
+                            isCancelled = { isCancelled.get() || !isActive },
+                            startMs = if (cutId != null) cutStartMs?.toLong() else null,
+                            endMs = if (cutId != null) cutEndMs?.toLong() else null)
+                        Log.i("JLexaWhisper", "decode request=$requestId elapsed_ms=${SystemClock.elapsedRealtime() - decodeStarted} samples=${pcm.validSampleCount}")
                         if (isCancelled.get()) {
                             withContext(Dispatchers.Main) {
+                                releaseRequest(requestId)
                                 result.error("CANCELLED", "Transcription was cancelled during decoding", null)
                             }
                             return@launch
@@ -265,35 +313,26 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
 
                         if (pcm.validSampleCount == 0 || pcm.samples.isEmpty()) {
                             withContext(Dispatchers.Main) {
+                                releaseRequest(requestId)
                                 result.error("DECODE_ERROR", "Could not decode audio file: $audioPath", null)
                             }
                             return@launch
                         }
 
-                        val rangeStartSample = ((cutStartMs ?: 0).toLong() * 16L)
-                            .coerceIn(0L, pcm.validSampleCount.toLong()).toInt()
-                        val rangeEndSample = ((cutEndMs ?: (pcm.validSampleCount / 16)).toLong() * 16L)
-                            .coerceIn(rangeStartSample.toLong(), pcm.validSampleCount.toLong()).toInt()
-                        if (rangeEndSample <= rangeStartSample) {
-                            withContext(Dispatchers.Main) {
-                                result.error("INVALID_RANGE", "Cut has no decodable audio", null)
-                            }
-                            return@launch
-                        }
-                        val targetSamples = if (cutId != null) {
-                            pcm.samples.copyOfRange(rangeStartSample, rangeEndSample)
-                        } else pcm.samples
                         val absoluteOffsetMs = if (cutId != null) cutStartMs ?: 0 else 0
+                        val inferenceStarted = SystemClock.elapsedRealtime()
                         val rawSegments = nativeTranscribe(
-                            targetSamples,
-                            targetSamples.size,
+                            pcm.samples,
+                            pcm.validSampleCount,
                             threads,
                             "en",
                             ProgressCallback(this@WhisperBridge, requestId)
                         )
+                        Log.i("JLexaWhisper", "inference request=$requestId backend=cpu elapsed_ms=${SystemClock.elapsedRealtime() - inferenceStarted}")
 
                         if (isCancelled.get()) {
                             withContext(Dispatchers.Main) {
+                                releaseRequest(requestId)
                                 result.error("CANCELLED", "Transcription was cancelled", null)
                             }
                             return@launch
@@ -326,17 +365,16 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
                         }
 
                         withContext(Dispatchers.Main) {
+                            releaseRequest(requestId)
                             result.success(formattedList)
                         }
                     } catch (e: Throwable) {
                         withContext(Dispatchers.Main) {
-                            result.error("TRANSCRIBE_ERROR", e.message ?: "Transcription exception", null)
+                            releaseRequest(requestId)
+                            result.error(if (isCancelled.get()) "CANCELLED" else "TRANSCRIBE_ERROR", e.message ?: "Transcription exception", null)
                         }
                     } finally {
-                        isTranscribing.set(false)
-                        if (activeRequestId == requestId) {
-                            activeRequestId = null
-                        }
+                        releaseRequest(requestId)
                     }
                 }
             }

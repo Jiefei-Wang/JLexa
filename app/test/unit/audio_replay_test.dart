@@ -131,6 +131,7 @@ void main() {
           .arguments['playerId'];
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      await audio.play();
       await messenger.handlePlatformMessage(
         'xyz.luan/audioplayers/events/$playerId',
         const StandardMethodCodec().encodeSuccessEnvelope({

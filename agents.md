@@ -407,3 +407,29 @@ At the end of every agent session after completing work:
   - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
   - `apksigner verify --verbose --print-certs`: Verified, APK Signature Scheme v2 true.
   - Existing upstream flutter_tts future Kotlin compatibility notice remains; current release succeeds. Prior policy-blocked duplicate APK-output cleanup was not retried or bypassed.
+
+---
+
+## Session: 2026-09-07 (Fast Segment Transcription, Collection, and Auto-stop)
+- **Focus**: Investigated slow Whisper transcription, added standalone audio/subtitle collections under Study, and implemented default-on segment-end stopping with Repeat priority. Evidence: `docs/qa-2026-09-07-transcription-collection.md` and `docs/qa-whisper-range-2026-09-07.md`.
+- **Changes**:
+  - Replaced whole-source PCM decoding before every cut transcription with bounded WAV/MP3/AAC decoding, timestamp calibration, preroll, exact sample trimming, and cancellation cleanup. Removed unused waveform calculation and passed only valid PCM samples to full-audio inference.
+  - Clarified that Whisper uses CPU and the Vulkan/OpenCL selector controls AI text generation. The supplied TED cut decode fell from 155,270 ms to 277 ms; native Whisper Tiny inference took 1,276–1,338 ms. A late-file cut decoded in 1,689 ms with compressed-packet scanning instead of whole-file PCM decoding.
+  - Added atomic standalone PCM16 WAV export, Collection database v4 migration, subtitle/source snapshots, duplicate-save reuse, serialized mutations, deletion rollback, and interrupted file-operation recovery. Replaced the word-tapping hint with Add to Collection while retaining word actions.
+  - Added Study Vocabulary/Collection tabs and clip play/replay/seek/delete, with full selectable subtitles and playback cancellation on tab/route/background changes. Fixed late native EOF position callbacks resetting the displayed endpoint.
+  - Added Auto-stop after Repeat, default enabled. Repeat wins; with both off, playback continues normally. Retains finished-cut selection for Replay and uses guarded 40 ms position polling so boundaries still apply while Flutter is backgrounded.
+- **Verification**:
+  - Pixel 6 `25311FDF6004PR`: final signed upgrades preserved existing lessons, models, vocabulary and Collection. In-app uncached 7.023-second TED cut completed in 368 ms decoding plus 1,478 ms inference, producing a complete sentence.
+  - Saved and played a 224,780-byte TED excerpt. A separate `Hello.` clip survived deletion of its QA source lesson and restart, played to EOF, and was then deleted with its audio file. Temporary QA lesson/import source removed; one TED clip retained as the demonstrated collection entry.
+  - Background playback completed six loops at 49.402–56.425 seconds with both toggles enabled; turning Repeat off stopped at the endpoint. Both disabled played onward through cuts/gaps to 1:13 before manual pause. Listening restored near 0:29, Auto-stop on, Repeat/Auto transcript/Edit off.
+  - WAV sample-grid/EOF/export/cancel fixtures, MP3/AAC beginning/middle/late/EOF alignment, native CPU transcription/reset/cancel smoke tests passed. No production C++/vendor changes.
+  - Final release PID `23825` had no crash-buffer entries and played its saved clip to 0:07/0:07. App left in Study → Collection.
+- **Static Analysis**: `flutter analyze` -> `No issues found!` (zero errors/warnings).
+- **Tests**: `flutter test --concurrency=1` -> `293 passed`, zero failed (82 seconds). Includes migration, recovery, independent clips, UI/lifecycle, EOF, boundary precedence and native callback races. Navigation/model-inventory tests explicitly isolate or await real host storage operations.
+- **Signed Release**:
+  - `flutter build apk --release` succeeded using `app/android/key.properties` (70.6 seconds); temporary debug signing removed.
+  - Fixed path: `release/app-release.apk` (95,291,849 bytes).
+  - APK SHA-256: `F4A8CDB6DD2E8F620BD73D5AF6EE5D627859A0A7EA0A85FB210F5A76FE899DCA`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
+  - `apksigner verify --verbose --print-certs`: Verified, APK Signature Scheme v2 true. Final Pixel install: `adb install -r`, Success.
+  - Existing upstream flutter_tts Kotlin compatibility notice remains; current release succeeds. Prior policy-blocked duplicate APK-output cleanup was not retried or bypassed.

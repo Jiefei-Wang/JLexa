@@ -339,7 +339,12 @@ object AudioDecoder {
     /**
      * Decodes an audio file to a 16kHz mono float array with optional cancellation check.
      */
-    fun decodeTo16kHzMonoPcm(filePath: String, isCancelled: (() -> Boolean)? = null): DecodedPcmBuffer {
+    fun decodeTo16kHzMonoPcm(filePath: String, isCancelled: (() -> Boolean)? = null,
+                            startMs: Long? = null, endMs: Long? = null): DecodedPcmBuffer {
+        if (startMs != null || endMs != null) {
+            require(startMs != null && endMs != null) { "Both range endpoints are required" }
+            return AudioRangeDecoder.decode(filePath, startMs, endMs, isCancelled)
+        }
         val result = decodeAudioFull(filePath, numPeaks = 0, isCancelled = isCancelled)
         return result?.pcm ?: DecodedPcmBuffer(FloatArray(0), 0)
     }
@@ -499,7 +504,7 @@ object AudioDecoder {
 
                 val pcm = resampler.finish()
                 val durationMs = (totalFrames.toDouble() * 1000.0 / sampleRate.toDouble()).toLong()
-                val peaks = computeWaveformPeaks(pcm.samples, pcm.validSampleCount, if (numPeaks > 0) numPeaks else 200)
+                val peaks = if (numPeaks > 0) computeWaveformPeaks(pcm.samples, pcm.validSampleCount, numPeaks) else emptyList()
 
                 return DecodedAudioResult(durationMs, pcm, peaks)
             }
@@ -666,7 +671,7 @@ object AudioDecoder {
 
             val pcm = resampler.finish()
             val durationMs = if (durationUs > 0) (durationUs / 1000L) else (totalMonoSamples.toDouble() * 1000.0 / sampleRate.toDouble()).toLong()
-            val peaks = computeWaveformPeaks(pcm.samples, pcm.validSampleCount, if (numPeaks > 0) numPeaks else 200)
+            val peaks = if (numPeaks > 0) computeWaveformPeaks(pcm.samples, pcm.validSampleCount, numPeaks) else emptyList()
 
             return DecodedAudioResult(durationMs, pcm, peaks)
         } catch (e: Throwable) {

@@ -236,7 +236,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'Select an offline speech recognition model for audio lesson transcription.',
+                    'Select an offline speech recognition model. Whisper uses CPU; the hardware backend setting applies to AI text answers.',
                     style: AppTypography.bodySmall,
                   ),
                   const SizedBox(height: 10),

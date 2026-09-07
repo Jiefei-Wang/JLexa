@@ -16,6 +16,7 @@ import '../../core/audio/audio_models.dart';
 import '../../core/audio/audio_service.dart';
 import '../../core/audio/lesson_repository.dart';
 import '../../core/audio/waveform_service.dart';
+import '../../core/collection/collection_repository.dart';
 import '../../core/dictionary/dictionary_repository.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/vocabulary/vocabulary_repository.dart';
@@ -24,7 +25,7 @@ import '../dictionary/dictionary_screen.dart';
 import '../home/home_screen.dart';
 import '../repeater/repeater_screen.dart';
 import '../settings/settings_screen.dart';
-import '../vocabulary/vocabulary_screen.dart';
+import '../vocabulary/study_screen.dart';
 
 class MainScaffold extends StatefulWidget {
   final DictionaryRepository dictionaryRepo;
@@ -34,6 +35,7 @@ class MainScaffold extends StatefulWidget {
   final WaveformService waveformService;
   final AiService aiService;
   final ModelManager? modelManager;
+  final CollectionRepository? collectionRepo;
 
   const MainScaffold({
     super.key,
@@ -44,6 +46,7 @@ class MainScaffold extends StatefulWidget {
     required this.waveformService,
     required this.aiService,
     this.modelManager,
+    this.collectionRepo,
   });
 
   @override
@@ -55,6 +58,7 @@ class MainScaffoldState extends State<MainScaffold> {
   final GlobalKey<RepeaterScreenState> _repeaterKey =
       GlobalKey<RepeaterScreenState>();
   late final ModelManager _modelManager;
+  late final CollectionRepository _collectionRepo;
   bool _ownsModelManager = false;
   int _currentIndex = 0;
   final List<int> _tabHistory = [];
@@ -69,6 +73,7 @@ class MainScaffoldState extends State<MainScaffold> {
   @override
   void initState() {
     super.initState();
+    _collectionRepo = widget.collectionRepo ?? CollectionRepository();
     if (widget.modelManager != null) {
       _modelManager = widget.modelManager!;
     } else {
@@ -83,6 +88,7 @@ class MainScaffoldState extends State<MainScaffold> {
 
   @override
   void dispose() {
+    if (widget.collectionRepo == null) _collectionRepo.dispose();
     if (_ownsModelManager) {
       _modelManager.dispose();
     }
@@ -346,12 +352,16 @@ class MainScaffoldState extends State<MainScaffold> {
               aiService: widget.aiService,
               dictionaryRepo: widget.dictionaryRepo,
               vocabularyRepo: widget.vocabularyRepo,
+              collectionRepo: _collectionRepo,
               activeLesson: _activeLesson,
               onOpenAiChat: openAiChatWithContext,
               onImportAudio: importAudioFile,
             ),
-            VocabularyScreen(
+            StudyScreen(
               vocabularyRepo: widget.vocabularyRepo,
+              collectionRepo: _collectionRepo,
+              isActive: _currentIndex == 3,
+              onBeforeCollectionPlay: widget.audioService.pause,
               onOpenWordInDictionary: openDictionaryForWord,
             ),
             AiChatScreen(

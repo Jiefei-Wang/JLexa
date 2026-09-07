@@ -12,10 +12,12 @@ import 'widgets/vocabulary_card.dart';
 class VocabularyScreen extends StatefulWidget {
   final VocabularyRepository vocabularyRepo;
   final ValueChanged<String> onOpenWordInDictionary;
+  final bool embedded;
   const VocabularyScreen({
     super.key,
     required this.vocabularyRepo,
     required this.onOpenWordInDictionary,
+    this.embedded = false,
   });
   @override
   State<VocabularyScreen> createState() => _VocabularyScreenState();
@@ -137,11 +139,13 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
     listenable: _controller,
     builder: (context, _) => Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: AppColors.surface,
-        elevation: 0,
-        title: const Text('Study', style: AppTypography.titleMedium),
-      ),
+      appBar: widget.embedded
+          ? null
+          : AppBar(
+              backgroundColor: AppColors.surface,
+              elevation: 0,
+              title: const Text('Study', style: AppTypography.titleMedium),
+            ),
       body: SafeArea(
         top: false,
         child: CustomScrollView(
