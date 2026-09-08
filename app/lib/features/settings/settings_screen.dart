@@ -5,12 +5,15 @@ import '../../core/ai/ai_models.dart';
 import '../../core/ai/ai_service.dart';
 import '../../core/ai/backend_benchmark.dart';
 import '../../core/ai/model_catalog.dart';
+import '../../core/ai/speech_benchmark.dart';
 import '../../core/ai/model_manager.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import 'settings_controller.dart';
 import 'backend_benchmark_controller.dart';
 import 'backend_benchmark_screen.dart';
+import 'speech_benchmark_controller.dart';
+import 'speech_benchmark_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final AiService aiService;
@@ -101,29 +104,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             const Text('Whisper Backend', style: AppTypography.titleSmall),
             const SizedBox(height: 8),
-            const Text(
-              'Speech recognition only. LLM backends do not affect Whisper.',
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.file_open_outlined),
-              label: const Text('Import'),
-              onPressed: _backendBusy
-                  ? null
-                  : () => _backendAction(() async {
-                      final before = plugin.installed.length;
-                      await service.importSpeechBackend();
-                      if (mounted &&
-                          service.speechPluginInfo.installed.length > before) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Whisper backend added. Select it below to use it.',
-                            ),
-                          ),
-                        );
-                      }
-                    }),
+            Wrap(
+              spacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _backendBusy ? null : _openSpeechBenchmark,
+                  icon: const Icon(Icons.speed),
+                  label: const Text('Benchmark'),
+                ),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.file_open_outlined),
+                  label: const Text('Import'),
+                  onPressed: _backendBusy
+                      ? null
+                      : () => _backendAction(() async {
+                          final before = plugin.installed.length;
+                          await service.importSpeechBackend();
+                          if (mounted &&
+                              service.speechPluginInfo.installed.length >
+                                  before) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Whisper backend added. Select it below to use it.',
+                                ),
+                              ),
+                            );
+                          }
+                        }),
+                ),
+              ],
             ),
             ListTile(
               contentPadding: EdgeInsets.zero,
@@ -176,6 +186,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _openSpeechBenchmark() {
+    final service = _controller.aiService;
+    final engine = service.speechEngine;
+    final path = engine.loadedModelPath;
+    if (engine is! SpeechBenchmarkEngine || !engine.isLoaded || path == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Load a Whisper model before benchmarking.'),
+        ),
+      );
+      return;
+    }
+    final controller = SpeechBenchmarkController(
+      engine: engine as SpeechBenchmarkEngine,
+      store: DatabaseSpeechBenchmarkStore(),
+      backends: {
+        'cpu': 'Built-in CPU',
+        for (final p in service.speechPluginInfo.installed)
+          'plugin:${p.id}': p.name,
+      },
+      modelPath: path,
+      modelName:
+          _controller.whisperModels
+              .where((m) => m.localPath == path)
+              .firstOrNull
+              ?.displayName ??
+          'Selected Whisper model',
+      onFinished: service.refreshSpeechPluginInfo,
+    );
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SpeechBenchmarkScreen(controller: controller),
       ),
     );
   }

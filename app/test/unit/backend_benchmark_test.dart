@@ -260,7 +260,7 @@ void main() {
   });
 
   testWidgets(
-    'narrow screen shows table, defaults, live content and persistent stop control',
+    'narrow screen with large text shows table and persistent stop control',
     (tester) async {
       tester.view.physicalSize = const Size(360, 760);
       tester.view.devicePixelRatio = 1;
@@ -269,23 +269,32 @@ void main() {
       store.rows['cpu'] = BackendBenchmarkResult.fromMap(row('cpu'));
       final c = controller();
       await tester.pumpWidget(
-        MaterialApp(home: BackendBenchmarkScreen(controller: c)),
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: const TextScaler.linear(2)),
+            child: child!,
+          ),
+          home: BackendBenchmarkScreen(controller: c),
+        ),
       );
       await tester.pumpAndSettle();
       expect(find.text('121.0'), findsOneWidget);
+      expect(find.textContaining('Translate 100 English'), findsNothing);
+      expect(find.textContaining('Speeds are native'), findsNothing);
       expect(
         tester.widgetList<Checkbox>(find.byType(Checkbox)).map((b) => b.value),
         [true, true, false],
       );
-      await tester.tap(find.text('Run again'));
+      await tester.tap(find.text('Test'));
       await tester.pump();
       engine.emit('loading');
       engine.emit('input', extra: {'text': 'An English source passage.'});
       engine.emit('token', extra: {'text': '实时翻译'});
       await tester.pump();
-      expect(find.text('Stop benchmark'), findsOneWidget);
+      expect(find.text('Stop'), findsOneWidget);
       expect(tester.takeException(), isNull);
-      await tester.tap(find.text('Stop benchmark'));
+      await tester.tap(find.text('Stop'));
       await tester.pump();
       expect(engine.stopped, engine.id);
       await tester.runAsync(() async {
@@ -295,7 +304,7 @@ void main() {
       await tester.pump();
       expect(c.running, false);
       await tester.pumpAndSettle();
-      expect(find.text('Run again'), findsOneWidget);
+      expect(find.text('Test'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );

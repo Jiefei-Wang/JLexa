@@ -538,3 +538,29 @@ At the end of every agent session after completing work:
   - Both phones installed successfully and installed base.apk hashes match the release artifact.
   - Plugin: `release/jlexa-whisper-snapdragon-plugin.so`, 1,733,704 bytes, SHA-256 `1A6CB684470C39AA18FE57CCC99641C4C05BC02FE584C7CE348A1BB22B1CE500`.
   - Existing upstream Flutter/Kotlin build notices remain. Prior blocked duplicate APK deletion was not retried/bypassed; pre-existing untracked `artifacts/` remains untouched.
+
+---
+
+## Session: 2026-09-07 (Whisper Benchmark, Home Cleanup and Dictionary Manager)
+- **Focus**: Added short/long Whisper benchmarking, simplified LLM benchmark presentation, removed duplicate Home shortcuts, and added offline dictionary management/import. Evidence: `docs/qa-benchmarks-dictionaries-2026-09-07.md`; format contract: `docs/dictionary-import.md`.
+- **Implementation**:
+  - Whisper Backend now offers Benchmark and Import. Benchmark defaults all backends selected, shows a compact Short/Long seconds table, Test/Stop, progress and recognized text, and persists results by model/backend. Fixed self-authored 3.575 s / 20.205 s English audio; native timing excludes model loading and audio preparation. Restores original model/backend after completion/cancellation.
+  - LLM Benchmark retains table, selected rows, saved speeds, live translation and Test/Stop while removing introductory explanations. Both tables support enlarged text and narrow screens.
+  - Home removed duplicate Dictionary/Listening/Ask AI actions; Quick Tools now contains Dictionary Manager and Settings.
+  - Dictionary Manager enables/disables built-ins and imports/deletes MDX 1.x/2.x (including Encrypted=2 metadata), StarDict ZIP with 32/64-bit offsets, gzip/dictzip and aliases, and UTF-8 TXT/TSV (including Eudic word@definition). Private staging, worker parsing, bounded decompression and transactional indexing protect existing dictionaries. HTML becomes plain text; MDD media, MDX LZO/3/encrypted records and proprietary EUDIC are explicitly unsupported.
+  - Catalog changes refresh offline lookup without restarting/cancelling an existing AI answer.
+  - Physical Pixel testing exposed retained SAF file descriptors at EOF. Speech host now rewinds before every model load, fallback and benchmark restoration; it still uses only the stable speech ABI and POSIX APIs.
+- **Verification**:
+  - `flutter analyze` / `flutter analyze --no-pub`: No issues found, zero errors/warnings.
+  - `flutter test --concurrency=1`: 366 passed, zero failed (83 seconds).
+  - Native shared-FD regression on Pixel: old host deterministically failed; fixed host passed repeated reload, failure/fallback, original backend restoration and invalid/non-seekable descriptor rejection.
+  - Honor: built-in and Snapdragon Whisper table, checkbox, Stop, repeat, restart history and final signed upgrade all passed; original Snapdragon model/backend restored. Final build measured CPU 1.13/0.79 s and Snapdragon 0.44/0.67 s; previous runs varied with warm-up/power. Final PID 19543, filtered crash buffer empty.
+  - Pixel: final SAF Whisper benchmark 1.32/1.71 s, cancellation/retry 1.34/1.73 s, restart retained exact values. Final PID 19416, filtered crash buffer empty. Built-in reselected to clear the persisted pre-fix failure notice. Simplified LLM CPU benchmark completed at 74.3 prefill / 34.9 decode tok/s; GPU historical values preserved.
+  - Pixel actual picker imported encrypted MDX, compressed StarDict and TSV; lookup, invalid rejection, restart, disabled-state persistence, re-enable and confirmed/cancelled deletion passed. QA dictionaries/source files removed, original lessons/models/history preserved; three QA search-history entries remain because only whole-history clearing is exposed.
+- **Signed Release**:
+  - `flutter build apk --release` succeeded with `app/android/key.properties`; final native fix rebuild 24.8 seconds.
+  - Fixed artifact `release/app-release.apk`, 114,228,531 bytes.
+  - APK SHA-256: `4FB2F6509F62F44C1E1D1B83F7BD8A966E4B13B3FB2DEE2D4DD587C7DB2BCAFF`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`; apksigner verified, v2 true.
+  - Final signed APK installed successfully on Honor and Pixel, installed base.apk SHA-256 matches on both.
+  - Existing upstream Flutter/Kotlin notices remain. Previously blocked duplicate APK removal was not retried/bypassed. Pre-existing untracked `artifacts/` remains untouched.

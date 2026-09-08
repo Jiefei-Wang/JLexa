@@ -1,11 +1,14 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:sqflite/sqflite.dart';
 
 import '../database/app_database.dart';
 import 'dictionary_models.dart';
 import 'offline_dictionary_data.dart';
 import 'bundled_dictionary.dart';
+import 'dictionary_store.dart';
 
 abstract class IDictionaryRepository {
   Future<DictionaryEntry?> lookupWord(String word);
@@ -15,12 +18,43 @@ abstract class IDictionaryRepository {
   Future<void> clearRecentSearches();
 }
 
-class DictionaryRepository implements IDictionaryRepository {
+class DictionaryRepository extends ChangeNotifier
+    implements IDictionaryRepository {
   final Map<String, DictionaryEntry> _memoryCache = {};
+  final DictionaryStore dictionaries;
 
-  DictionaryRepository() {
+  DictionaryRepository({DictionaryStore? store})
+    : dictionaries = store ?? DictionaryStore.instance {
     for (final entry in kOfflineDictionaryEntries) {
       _memoryCache[entry.word.toLowerCase()] = entry;
+    }
+  }
+
+  Future<List<ManagedDictionary>> managedDictionaries() => dictionaries.list();
+  Future<void> setDictionaryEnabled(String id, bool enabled) async {
+    await dictionaries.setEnabled(id, enabled);
+    notifyListeners();
+  }
+
+  Future<void> deleteDictionary(String id) async {
+    await dictionaries.delete(id);
+    notifyListeners();
+  }
+
+  Future<ManagedDictionary> importDictionary(String path) async {
+    final result = await dictionaries.importFile(path);
+    notifyListeners();
+    return result;
+  }
+
+  Future<Set<String>> _enabledBuiltins() async {
+    try {
+      return (await dictionaries.list())
+          .where((d) => d.builtIn && d.enabled)
+          .map((d) => d.id)
+          .toSet();
+    } catch (_) {
+      return {'builtin-core', 'builtin-ecdict'};
     }
   }
 
@@ -32,36 +66,62 @@ class DictionaryRepository implements IDictionaryRepository {
     // Save to recent search history
     await addRecentSearch(cleanWord);
 
+    DictionaryEntry? imported;
+    try {
+      imported = await dictionaries.lookup(cleanWord);
+    } catch (_) {}
+    final builtIn = await _lookupBuiltIn(cleanWord, await _enabledBuiltins());
+    if (imported == null) return builtIn;
+    if (builtIn == null) return imported;
+    return DictionaryEntry(
+      word: builtIn.word,
+      phonetic: builtIn.phonetic,
+      partOfSpeech: builtIn.partOfSpeech,
+      definitions: [...imported.definitions, ...builtIn.definitions],
+      chineseDefinitions: builtIn.chineseDefinitions,
+      examples: builtIn.examples,
+      synonyms: builtIn.synonyms,
+      isHighFrequency: builtIn.isHighFrequency,
+    );
+  }
+
+  Future<DictionaryEntry?> _lookupBuiltIn(
+    String cleanWord,
+    Set<String> enabled,
+  ) async {
     // 1. Check in-memory repository
-    if (_memoryCache.containsKey(cleanWord)) {
+    if (enabled.contains('builtin-core') &&
+        _memoryCache.containsKey(cleanWord)) {
       return _memoryCache[cleanWord];
     }
 
     // 2. Query SQLite offline_dictionary table
-    try {
-      final db = await AppDatabase.instance.database;
-      final results = await db.query(
-        'offline_dictionary',
-        where: 'word = ?',
-        whereArgs: [cleanWord],
-        limit: 1,
-      );
+    if (enabled.contains('builtin-core')) {
+      try {
+        final db = await AppDatabase.instance.database;
+        final results = await db.query(
+          'offline_dictionary',
+          where: 'word = ?',
+          whereArgs: [cleanWord],
+          limit: 1,
+        );
 
-      if (results.isNotEmpty) {
-        final row = results.first;
-        final entry = _entryFromDbRow(row);
-        _memoryCache[cleanWord] = entry;
-        return entry;
-      }
-    } catch (_) {}
+        if (results.isNotEmpty) {
+          final row = results.first;
+          final entry = _entryFromDbRow(row);
+          return entry;
+        }
+      } catch (_) {}
+    }
 
-    try {
-      final entry = await BundledDictionary.lookup(cleanWord);
-      if (entry != null) {
-        _memoryCache[cleanWord] = entry;
-        return entry;
-      }
-    } catch (_) {}
+    if (enabled.contains('builtin-ecdict')) {
+      try {
+        final entry = await BundledDictionary.lookup(cleanWord);
+        if (entry != null) {
+          return entry;
+        }
+      } catch (_) {}
+    }
 
     return null;
   }
@@ -93,13 +153,18 @@ class DictionaryRepository implements IDictionaryRepository {
     if (clean.isEmpty) return [];
 
     final suggestions = <String>{};
+    final enabled = await _enabledBuiltins();
+    try {
+      suggestions.addAll(await dictionaries.suggestions(clean));
+    } catch (_) {}
 
-    for (final k in _memoryCache.keys) {
+    for (final k
+        in enabled.contains('builtin-core') ? _memoryCache.keys : <String>[]) {
       if (k.startsWith(clean)) suggestions.add(k);
       if (suggestions.length >= 6) break;
     }
 
-    if (suggestions.length < 6) {
+    if (suggestions.length < 6 && enabled.contains('builtin-core')) {
       try {
         final db = await AppDatabase.instance.database;
         final results = await db.query(
@@ -116,7 +181,7 @@ class DictionaryRepository implements IDictionaryRepository {
       } catch (_) {}
     }
 
-    if (suggestions.length < 6) {
+    if (suggestions.length < 6 && enabled.contains('builtin-ecdict')) {
       try {
         suggestions.addAll(await BundledDictionary.suggestions(clean));
       } catch (_) {}

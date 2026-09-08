@@ -4,17 +4,13 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
 
 class QuickToolsGrid extends StatelessWidget {
-  final VoidCallback onOpenDictionary;
-  final VoidCallback onOpenTranslation;
-  final VoidCallback onOpenAiChat;
-  final VoidCallback onOpenVocabulary;
+  final VoidCallback onOpenDictionaryManager;
+  final VoidCallback onOpenSettings;
 
   const QuickToolsGrid({
     super.key,
-    required this.onOpenDictionary,
-    required this.onOpenTranslation,
-    required this.onOpenAiChat,
-    required this.onOpenVocabulary,
+    required this.onOpenDictionaryManager,
+    required this.onOpenSettings,
   });
 
   Widget _buildToolItem({
@@ -78,39 +74,21 @@ class QuickToolsGrid extends StatelessWidget {
         Column(
           children: [
             _buildToolItem(
-              title: 'Offline Dictionary',
-              subtitle: 'Look up words offline',
+              title: 'Dictionary Manager',
+              subtitle: 'Import and manage dictionaries',
               icon: Icons.menu_book,
               iconColor: AppColors.primary,
               iconBg: AppColors.primaryLight,
-              onTap: onOpenDictionary,
+              onTap: onOpenDictionaryManager,
             ),
             const SizedBox(height: 10),
             _buildToolItem(
-              title: 'AI Translation',
-              subtitle: 'Translate words and sentences',
-              icon: Icons.translate,
+              title: 'Settings',
+              subtitle: 'Models and preferences',
+              icon: Icons.settings_outlined,
               iconColor: AppColors.secondary,
               iconBg: AppColors.secondaryLight,
-              onTap: onOpenTranslation,
-            ),
-            const SizedBox(height: 10),
-            _buildToolItem(
-              title: 'Ask AI',
-              subtitle: 'Ask questions, get answers',
-              icon: Icons.chat_bubble_outline,
-              iconColor: AppColors.accentPurple,
-              iconBg: AppColors.accentPurpleLight,
-              onTap: onOpenAiChat,
-            ),
-            const SizedBox(height: 10),
-            _buildToolItem(
-              title: 'Saved Vocabulary',
-              subtitle: 'Review your saved words and sentences',
-              icon: Icons.style_outlined,
-              iconColor: AppColors.warning,
-              iconBg: AppColors.warningLight,
-              onTap: onOpenVocabulary,
+              onTap: onOpenSettings,
             ),
           ],
         ),

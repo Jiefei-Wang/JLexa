@@ -1,6 +1,10 @@
 #include "jlexa_speech_plugin.h"
 #include <stdlib.h>
 #include <stdio.h>
+#ifdef SHARED_FD_MODEL
+#include <string.h>
+#include <unistd.h>
+#endif
 #ifndef API_VERSION
 #define API_VERSION 1
 #endif
@@ -11,6 +15,21 @@ static void *create(char *error, uint32_t n) {
     (void)error; (void)n; return calloc(1, 1);
 }
 static int32_t load(void *p, const char *path, char *error, uint32_t n) {
+#ifdef SHARED_FD_MODEL
+    /* Match the SAF adapter's dup(): it shares and advances the owner's offset. */
+    const char *prefix = "/proc/self/fd/";
+    if (strncmp(path, prefix, strlen(prefix))) return -1;
+    int fd = dup(atoi(path + strlen(prefix)));
+    char magic[8], buffer[128];
+    if (fd < 0 || read(fd, magic, sizeof(magic)) != sizeof(magic) ||
+        memcmp(magic, "JLEXAFD1", sizeof(magic))) {
+        if (fd >= 0) close(fd);
+        if (error && n) snprintf(error, n, "Shared descriptor was not rewound");
+        return -1;
+    }
+    while (read(fd, buffer, sizeof(buffer)) > 0) {}
+    close(fd);
+#endif
 #ifdef FAIL_MODEL
     if (error && n) snprintf(error, n, "Fixture model load failure");
     return -1;

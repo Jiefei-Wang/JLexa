@@ -22,6 +22,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/vocabulary/vocabulary_repository.dart';
 import '../ai_chat/ai_chat_screen.dart';
 import '../dictionary/dictionary_screen.dart';
+import '../dictionary/dictionary_manager_screen.dart';
 import '../home/home_screen.dart';
 import '../repeater/repeater_screen.dart';
 import '../settings/settings_screen.dart';
@@ -328,11 +329,15 @@ class MainScaffoldState extends State<MainScaffold> {
                   ),
                 );
               },
-              onOpenAiChat: () => switchToTab(4),
-              onOpenTranslation: () =>
-                  openDictionaryForWord('', selectedTab: 1),
-              onOpenListening: () => switchToTab(2),
-              onOpenVocabulary: () => switchToTab(3),
+              onOpenDictionaryManager: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => DictionaryManagerScreen(
+                      dictionaryRepo: widget.dictionaryRepo,
+                    ),
+                  ),
+                );
+              },
               onImportAudio: importAudioFile,
             ),
             DictionaryScreen(

@@ -128,6 +128,21 @@ class DelayedVocabularyRepository extends VocabularyRepository {
   }
 }
 
+class RefreshableDictionaryRepository extends DictionaryRepository {
+  DictionaryEntry? entry = const DictionaryEntry(
+    word: 'sample',
+    phonetic: '',
+    partOfSpeech: '',
+    definitions: ['A sample.'],
+  );
+  @override
+  Future<DictionaryEntry?> lookupWord(String word) async => entry;
+  void disableImportedDictionary() {
+    entry = null;
+    notifyListeners();
+  }
+}
+
 Future<void> waitForSavedState(
   DictionaryController controller,
   bool expected,
@@ -153,6 +168,31 @@ void main() {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
     setupMockPlatformChannels();
+  });
+
+  test('dictionary management refreshes offline result without restarting active AI', () async {
+    final repo = RefreshableDictionaryRepository();
+    final engine = ControllableAiEngine();
+    final service = AiService(llm: engine);
+    final controller = DictionaryController(
+      dictionaryRepo: repo,
+      vocabularyRepo: VocabularyRepository(),
+      aiService: service,
+    );
+    await controller.search('sample');
+    controller.setSelectedTab(1);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(engine.prompts.length, 1);
+    expect(controller.isAiGenerating, true);
+    repo.disableImportedDictionary();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(controller.currentEntry, isNull);
+    expect(controller.isAiGenerating, true);
+    expect(engine.prompts.length, 1);
+    expect(engine.activeControllers.single.isClosed, false);
+    controller.dispose();
+    service.dispose();
+    repo.dispose();
   });
 
   group('DictionaryController AI Tab Cancellation & State Tests', () {

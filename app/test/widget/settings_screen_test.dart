@@ -242,7 +242,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Backend Plugins'), findsNothing);
         expect(find.text('Use built-in'), findsNothing);
-        expect(find.text('Benchmark'), findsOneWidget);
+        expect(find.text('Benchmark'), findsNWidgets(2));
         expect(find.text('Import'), findsNWidgets(2));
         expect(find.text('Whisper Backend'), findsOneWidget);
         expect(find.text('Snapdragon'), findsOneWidget);

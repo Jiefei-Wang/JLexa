@@ -44,7 +44,7 @@ class _BackendBenchmarkScreenState extends State<BackendBenchmarkScreen>
     'input' => 'Prefill',
     'token' => 'Decoding',
     'decode' => 'Decoding',
-    'restoring' => 'Restoring previous backend',
+    'restoring' => 'Restoring',
     'finished' => 'Finished',
     'cancelled' => 'Stopped',
     'failed' => 'Failed',
@@ -98,19 +98,15 @@ class _BackendBenchmarkScreenState extends State<BackendBenchmarkScreen>
                         c.modelName,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Translate 100 English source tokens into Chinese. Output stops at 100 tokens or the model’s end token.',
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Speeds are native model tokens/s. Prefill includes instruction and chat-template tokens; model loading and UI time are excluded.',
-                      ),
                       const SizedBox(height: 12),
                       if (c.loading) const LinearProgressIndicator(),
                       SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
                         child: DataTable(
+                          dataRowMinHeight: MediaQuery.textScalerOf(context)
+                              .scale(64),
+                          dataRowMaxHeight: MediaQuery.textScalerOf(context)
+                              .scale(64),
                           columnSpacing: 16,
                           horizontalMargin: 4,
                           columns: const [
@@ -144,25 +140,26 @@ class _BackendBenchmarkScreenState extends State<BackendBenchmarkScreen>
                                   ),
                                 ),
                                 DataCell(
-                                  Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(c.label(b.backend)),
-                                      Text(
-                                        !b.available
-                                            ? 'Unavailable'
-                                            : state != null
-                                            ? status(state)
-                                            : r == null
-                                            ? 'Not tested'
-                                            : 'Last result',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .labelSmall,
-                                      ),
-                                    ],
+                                  Text.rich(
+                                    TextSpan(
+                                      text: '${c.label(b.backend)}\n',
+                                      children: [
+                                        TextSpan(
+                                          text: !b.available
+                                              ? 'Unavailable'
+                                              : state != null
+                                              ? status(state)
+                                              : r == null
+                                              ? 'Not tested'
+                                              : 'Last result',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .labelSmall,
+                                        ),
+                                      ],
+                                    ),
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                   onTap: r == null || c.running
                                       ? null
@@ -180,9 +177,6 @@ class _BackendBenchmarkScreenState extends State<BackendBenchmarkScreen>
                         ),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
-                        'Tap a backend result for its timestamp, token counts and translation.',
-                      ),
                       if (c.error.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: 12),
@@ -204,7 +198,7 @@ class _BackendBenchmarkScreenState extends State<BackendBenchmarkScreen>
                         const SizedBox(height: 20),
                         Text(
                           c.stopping
-                              ? 'Stopping… The previous backend will be restored.'
+                              ? 'Stopping…'
                               : '${c.label(c.activeBackend)} · ${status(c.stage)}',
                         ),
                         if (c.running)
@@ -244,7 +238,7 @@ class _BackendBenchmarkScreenState extends State<BackendBenchmarkScreen>
                         ? FilledButton.icon(
                             onPressed: c.stopping ? null : c.stop,
                             icon: const Icon(Icons.stop),
-                            label: const Text('Stop benchmark'),
+                            label: const Text('Stop'),
                           )
                         : FilledButton.icon(
                             onPressed:
@@ -252,7 +246,7 @@ class _BackendBenchmarkScreenState extends State<BackendBenchmarkScreen>
                                 ? null
                                 : c.run,
                             icon: const Icon(Icons.speed),
-                            label: const Text('Run again'),
+                            label: const Text('Test'),
                           ),
                   ),
                 ),

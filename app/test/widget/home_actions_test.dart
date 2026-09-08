@@ -25,7 +25,7 @@ void main() {
   setUpAll(setupMockPlatformChannels);
 
   testWidgets(
-    'Home shortcuts and search open the requested task on small phones',
+    'Home keeps search and exposes only dictionary management and settings tools',
     (tester) async {
       tester.view.physicalSize = const Size(320, 680);
       tester.view.devicePixelRatio = 1;
@@ -34,10 +34,8 @@ void main() {
       final ai = AiService();
       addTearDown(ai.dispose);
       final queries = <String>[];
-      var listening = 0;
-      var translation = 0;
-      var vocabulary = 0;
-      var chat = 0;
+      var dictionaryManager = 0;
+      var settings = 0;
       await tester.pumpWidget(
         MaterialApp(
           builder: (context, child) => MediaQuery(
@@ -51,42 +49,40 @@ void main() {
             aiService: ai,
             onOpenDictionary: queries.add,
             onOpenLesson: (_) => fail('There is no lesson to open'),
-            onOpenSettings: () {},
-            onOpenAiChat: () => chat++,
-            onOpenTranslation: () => translation++,
-            onOpenListening: () => listening++,
-            onOpenVocabulary: () => vocabulary++,
+            onOpenSettings: () => settings++,
+            onOpenDictionaryManager: () => dictionaryManager++,
             onImportAudio: () {},
           ),
         ),
       );
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      await tester.tap(find.widgetWithText(OutlinedButton, 'Dictionary'));
-      expect(queries, ['']);
-      await tester.tap(find.widgetWithText(OutlinedButton, 'Listening'));
-      expect(listening, 1);
+      expect(find.text('Dictionary'), findsNothing);
+      expect(find.text('Listening'), findsNothing);
+      expect(find.text('Ask AI'), findsNothing);
       await tester.enterText(find.byType(TextField), 'What does “Alice” mean?');
       await tester.tap(find.byTooltip('Search dictionary'));
       await tester.pumpAndSettle();
       expect(queries.last, 'What does “Alice” mean?');
-      expect(chat, 0);
       await tester.scrollUntilVisible(
-        find.text('AI Translation'),
+        find.text('Dictionary Manager'),
         250,
         scrollable: find.byType(Scrollable).first,
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('AI Translation'));
-      expect(translation, 1);
+      await tester.tap(find.text('Dictionary Manager'));
+      expect(dictionaryManager, 1);
       await tester.scrollUntilVisible(
-        find.text('Saved Vocabulary'),
+        find.text('Settings'),
         180,
         scrollable: find.byType(Scrollable).first,
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Saved Vocabulary'));
-      expect(vocabulary, 1);
+      await tester.tap(find.text('Settings'));
+      expect(settings, 1);
+      expect(find.text('AI Translation'), findsNothing);
+      expect(find.text('Saved Vocabulary'), findsNothing);
+      expect(find.text('Offline Dictionary'), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );

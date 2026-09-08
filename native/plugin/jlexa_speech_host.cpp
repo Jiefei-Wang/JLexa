@@ -1,6 +1,9 @@
 #include "jlexa_speech_host.h"
 #include "jlexa_speech_plugin.h"
 #include <cstring>
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
 #include <dlfcn.h>
 #include <elf.h>
 #include <fcntl.h>
@@ -62,6 +65,21 @@ std::vector<std::string> JLexaSpeechHost::pluginInfo() {
 bool JLexaSpeechHost::loadModel(const std::string &path) {
     std::lock_guard<std::recursive_mutex> op(operations);
     try {
+        // SAF adapters may dup() the descriptor, sharing its current offset.
+        // Every backend attempt (including fallback and benchmark restoration)
+        // must see the beginning of the model, not the end of the last load.
+        constexpr const char *prefix = "/proc/self/fd/";
+        if (path.compare(0, std::strlen(prefix), prefix) == 0) {
+            const char *number = path.c_str() + std::strlen(prefix);
+            char *end = nullptr;
+            errno = 0;
+            const long fd = std::strtol(number, &end, 10);
+            if (errno || end == number || *end || fd < 0 || fd > INT_MAX ||
+                lseek(static_cast<int>(fd), 0, SEEK_SET) < 0) {
+                lastError = "Could not rewind the speech model file descriptor.";
+                return false;
+            }
+        }
         auto b = current(); char error[1024]{};
         int code = b->api->load_model(b->handle, path.c_str(), error, sizeof(error));
         error[1023] = 0; lastError = code ? error : "";

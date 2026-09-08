@@ -24,6 +24,10 @@ dependencies:
   dio: ^5.7.0
   flutter_markdown_plus: ^1.0.12
   markdown: ^7.3.1
+  dict_reader: 1.6.1
+  blockchain_utils: ^6.0.0
+  archive: 4.0.7
+  html: 0.15.6
 
 dev_dependencies:
   flutter_test:
@@ -39,3 +43,4 @@ flutter:
   assets:
     - assets/dictionary/ecdict-v1.db
     - assets/dictionary/ECDICT-LICENSE.txt
+    - assets/dictionary/dict_reader-LICENSE.txt

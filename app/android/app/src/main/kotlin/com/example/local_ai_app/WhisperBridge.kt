@@ -114,7 +114,7 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
             return
         }
 
-        if (call.method in setOf("extractAudioInfo", "getAudioMetadata", "exportAudioClip", "cancelTranscription")) {
+        if (call.method in setOf("extractAudioInfo", "getAudioMetadata", "exportAudioClip", "cancelTranscription", "stopBenchmark")) {
             dispatch(call, result)
             return
         }
@@ -136,6 +136,14 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
             }
         }
         when (call.method) {
+            "runBenchmark" -> runBenchmark(call, result)
+            "stopBenchmark" -> {
+                if (call.argument<String>("requestId") == activeRequestId) {
+                    isCancelled.set(true)
+                    try { nativeCancel() } catch (_: Throwable) {}
+                }
+                result.success(null)
+            }
             "pluginStatus" -> result.success(plugins.snapshot())
             "importPlugin", "selectPlugin", "deletePlugin", "useBuiltinPlugin" -> scope.launch {
                 try {
@@ -441,6 +449,132 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
             }
 
             else -> result.notImplemented()
+        }
+    }
+
+    private fun benchmarkEvent(id: String, values: Map<String, Any>) {
+        mainHandler.post {
+            if (activeRequestId == id) eventSink?.success(
+                mapOf("type" to "benchmark", "requestId" to id) + values)
+        }
+    }
+
+    @Keep
+    class BenchmarkProgressCallback(
+        private val bridge: WhisperBridge,
+        private val id: String,
+        private val backend: String,
+        private val sample: String
+    ) : NativeProgressCallback {
+        override fun onProgress(progress: Int) {
+            bridge.benchmarkEvent(id, mapOf("stage" to "progress", "backend" to backend,
+                "sample" to sample, "progress" to progress))
+        }
+    }
+
+    // These fixed mono 16 kHz PCM fixtures are decoded before starting the timer.
+    private fun benchmarkSamples(name: String): FloatArray {
+        val bytes = requireNotNull(context).assets.open("benchmark/$name.wav").use { it.readBytes() }
+        val buffer = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        var offset = 12
+        while (offset + 8 <= bytes.size) {
+            val size = buffer.getInt(offset + 4)
+            require(size >= 0 && size <= bytes.size - offset - 8) { "Invalid benchmark audio" }
+            if (String(bytes, offset, 4, Charsets.US_ASCII) == "data") {
+                return FloatArray(size / 2) { buffer.getShort(offset + 8 + it * 2) / 32768f }
+            }
+            offset += 8 + size + (size and 1)
+        }
+        error("Benchmark audio is missing PCM data")
+    }
+
+    private fun runBenchmark(call: MethodCall, result: MethodChannel.Result) {
+        val id = call.argument<String>("requestId")
+        val modelPath = call.argument<String>("modelPath")
+        val backends = call.argument<List<String>>("backends")
+        if (id == null || modelPath == null || backends.isNullOrEmpty()) {
+            result.error("INVALID_ARGS", "Select a speech model and backend", null)
+            return
+        }
+        if (isMutating.get() || !isTranscribing.compareAndSet(false, true)) {
+            result.error("BUSY", "Wait for the current speech operation to finish", null)
+            return
+        }
+        activeRequestId = id
+        isCancelled.set(false)
+        val original = plugins.selectedId()
+        val effectivePath = activePfd?.let { "/proc/self/fd/${it.fd}" } ?: modelPath
+        scope.launch {
+            val rows = mutableListOf<Map<String, Any>>()
+            var errorMessage = ""
+            try {
+                check(nativeIsModelLoaded()) { "Load a Whisper model before benchmarking" }
+                val audio = listOf("short", "long").associateWith { benchmarkSamples(it) }
+                for (backend in backends.distinct()) {
+                    if (isCancelled.get()) break
+                    val row = mutableMapOf<String, Any>("backend" to backend, "status" to "completed")
+                    try {
+                        benchmarkEvent(id, mapOf("stage" to "loading", "backend" to backend))
+                        nativeUnloadModel()
+                        plugins.selectPlugin(if (backend == "cpu") "" else backend.removePrefix("plugin:"), persist = false)
+                        plugins.beginModelLoad()
+                        try { check(nativeLoadModel(effectivePath)) { "Could not load model with this backend" } }
+                        finally { plugins.endModelLoad() }
+                        for ((sample, pcm) in audio) {
+                            if (isCancelled.get()) break
+                            nativeResetCancellation()
+                            if (isCancelled.get()) { nativeCancel(); break }
+                            benchmarkEvent(id, mapOf("stage" to "progress", "backend" to backend,
+                                "sample" to sample, "progress" to 0))
+                            val started = SystemClock.elapsedRealtimeNanos()
+                            val segments = nativeTranscribe(pcm, pcm.size, 4, "en",
+                                BenchmarkProgressCallback(this@WhisperBridge, id, backend, sample))
+                            val elapsedUs = (SystemClock.elapsedRealtimeNanos() - started) / 1000
+                            if (isCancelled.get()) break
+                            checkNotNull(segments) { "Speech inference failed" }
+                            val text = segments.joinToString(" ") { it["text"] as? String ?: "" }.trim()
+                            row["${sample}Us"] = elapsedUs
+                            row["${sample}Text"] = text
+                            row["${sample}AudioMs"] = pcm.size * 1000 / 16000
+                            benchmarkEvent(id, mapOf("stage" to "sample", "backend" to backend,
+                                "sample" to sample, "text" to text, "elapsedUs" to elapsedUs))
+                        }
+                        if (isCancelled.get()) row["status"] = "cancelled"
+                    } catch (e: Throwable) {
+                        row["status"] = if (isCancelled.get()) "cancelled" else "failed"
+                        row["error"] = e.message ?: "Speech benchmark failed"
+                    }
+                    rows.add(row)
+                    benchmarkEvent(id, mapOf("stage" to "row", "backend" to backend, "result" to row))
+                }
+            } catch (e: Throwable) {
+                errorMessage = e.message ?: "Speech benchmark failed"
+            } finally {
+                benchmarkEvent(id, mapOf("stage" to "restoring"))
+                try {
+                    nativeUnloadModel()
+                    plugins.selectPlugin(original, persist = false)
+                    nativeResetCancellation()
+                    plugins.beginModelLoad()
+                    try { check(nativeLoadModel(effectivePath)) { "Could not restore speech model" } }
+                    finally { plugins.endModelLoad() }
+                } catch (e: Throwable) {
+                    errorMessage = "Could not restore selected backend: ${e.message}"
+                    try {
+                        plugins.fallback(errorMessage)
+                        nativeResetCancellation()
+                        check(nativeLoadModel(effectivePath)) { "Built-in speech model restoration failed" }
+                    } catch (fallback: Throwable) {
+                        errorMessage += "; ${fallback.message}"
+                    }
+                }
+                withContext(Dispatchers.Main) {
+                    val loaded = try { nativeIsModelLoaded() } catch (_: Throwable) { false }
+                    releaseRequest(id)
+                    result.success(mapOf("rows" to rows, "cancelled" to isCancelled.get(),
+                        "error" to errorMessage, "modelLoaded" to loaded))
+                }
+            }
         }
     }
 

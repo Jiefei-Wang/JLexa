@@ -20,6 +20,9 @@ void main() async {
     yield LicenseEntryWithLineBreaks([
       'ECDICT',
     ], await rootBundle.loadString('assets/dictionary/ECDICT-LICENSE.txt'));
+    yield LicenseEntryWithLineBreaks([
+      'JLexa MDX validation (adapted from dict_reader)',
+    ], await rootBundle.loadString('assets/dictionary/dict_reader-LICENSE.txt'));
   });
 
   final dictionaryRepo = DictionaryRepository();

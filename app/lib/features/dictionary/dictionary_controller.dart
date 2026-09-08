@@ -59,8 +59,25 @@ class DictionaryController extends ChangeNotifier {
     int initialTab = 0,
   }) {
     vocabularyRepo.addListener(_onVocabularyChanged);
+    dictionaryRepo.addListener(_onDictionariesChanged);
     _initTts();
     search(initialWord, selectedTab: initialTab);
+  }
+
+  Future<void> _onDictionariesChanged() async {
+    if (_isDisposed || _currentQuery.isEmpty) return;
+    final generation = ++_searchGeneration;
+    ++_queryGeneration;
+    _suggestions = [];
+    _isLoading = true;
+    notifyListeners();
+    // Refresh offline data without cancelling or regenerating an AI answer.
+    final entry = await dictionaryRepo.lookupWord(_currentQuery);
+    if (_isDisposed || generation != _searchGeneration) return;
+    _currentEntry = entry;
+    _isLoading = false;
+    await _refreshSavedState();
+    if (!_isDisposed && generation == _searchGeneration) notifyListeners();
   }
 
   void _initTts() {
@@ -447,6 +464,7 @@ class DictionaryController extends ChangeNotifier {
 
   @override
   void dispose() {
+    dictionaryRepo.removeListener(_onDictionariesChanged);
     _isDisposed = true;
     ++_speechGeneration;
     vocabularyRepo.removeListener(_onVocabularyChanged);

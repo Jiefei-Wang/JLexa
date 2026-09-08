@@ -12,6 +12,7 @@ import 'backend_benchmark.dart';
 import 'llama_request_coordinator.dart';
 import 'prompt_builder.dart';
 import 'speech_engine.dart';
+import 'speech_benchmark.dart';
 
 class NativeLlamaEngine implements AiEngine, BenchmarkEngine {
   static const MethodChannel _channel = MethodChannel('com.jlexa.app/llama');
@@ -393,7 +394,8 @@ class _WhisperRequest {
   _WhisperRequest(this.id, this.onProgress);
 }
 
-class NativeWhisperEngine implements SpeechRecognitionEngine {
+class NativeWhisperEngine
+    implements SpeechRecognitionEngine, SpeechBenchmarkEngine {
   static const MethodChannel _channel = MethodChannel('com.jlexa.app/whisper');
   static const EventChannel _eventChannel = EventChannel(
     'com.jlexa.app/whisper_stream',
@@ -408,7 +410,47 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
   _WhisperRequest? _activeRequest;
   bool _isChangingModel = false;
   bool _isDisposed = false;
-  bool get isBusy => _activeRequest != null || _isChangingModel;
+  String? _benchmarkId;
+  final _benchmarkEvents = StreamController<Map<String, dynamic>>.broadcast();
+  @override
+  Stream<Map<String, dynamic>> get speechBenchmarkEvents =>
+      _benchmarkEvents.stream;
+  bool get isBusy =>
+      _activeRequest != null || _isChangingModel || _benchmarkId != null;
+
+  @override
+  Future<Map<String, dynamic>> runSpeechBenchmark({
+    required String requestId,
+    required List<String> backends,
+  }) async {
+    if (!_isAndroid) throw const AiUnsupportedPlatformException();
+    if (_isDisposed) throw StateError('The speech engine is disposed.');
+    if (isBusy) throw const AiBusyException('Whisper is busy.');
+    if (!_isLoaded) {
+      throw const AiModelNotLoadedException('Load a Whisper model first.');
+    }
+    _benchmarkId = requestId;
+    try {
+      final result = Map<String, dynamic>.from(
+        await _channel.invokeMethod('runBenchmark', {
+          'requestId': requestId,
+          'backends': backends,
+          'modelPath': _loadedModelPath,
+        }) as Map,
+      );
+      _isLoaded = result['modelLoaded'] == true;
+      if (!_isLoaded) _loadedModelPath = null;
+      return result;
+    } finally {
+      _benchmarkId = null;
+    }
+  }
+
+  @override
+  Future<void> stopSpeechBenchmark(String requestId) async {
+    if (_benchmarkId != requestId) return;
+    await _channel.invokeMethod('stopBenchmark', {'requestId': requestId});
+  }
 
   NativeWhisperEngine() : _isAndroid = Platform.isAndroid {
     _initStream();
@@ -427,6 +469,12 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
       if (event is Map) {
         final requestId = event['requestId'] as String?;
         final type = event['type'] as String?;
+        if (type == 'benchmark') {
+          if (!_isDisposed && requestId == _benchmarkId) {
+            _benchmarkEvents.add(Map<String, dynamic>.from(event));
+          }
+          return;
+        }
         final active = _activeRequest;
         if (type == 'progress' &&
             active != null &&
@@ -452,7 +500,7 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
       throw const AiUnsupportedPlatformException();
     }
     if (_isDisposed) throw StateError('The speech engine is disposed.');
-    if (_isChangingModel) {
+    if (_isChangingModel || _benchmarkId != null) {
       throw const AiBusyException('Whisper is changing its speech model.');
     }
     _isChangingModel = true;
@@ -503,7 +551,7 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
     if (_isDisposed) throw StateError('The speech engine is disposed.');
     // Claim one slot before invoking callbacks or awaiting platform work.
     // Cancellation acknowledgement does not mean native work has finished.
-    if (_activeRequest != null || _isChangingModel) {
+    if (isBusy) {
       throw const AiBusyException(
         'Whisper is busy finishing another transcription or model change. Try again when it finishes.',
       );
@@ -646,7 +694,7 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
   @override
   Future<void> unload() async {
     if (!_isAndroid || _isDisposed) return;
-    if (_isChangingModel) {
+    if (_isChangingModel || _benchmarkId != null) {
       throw const AiBusyException('Whisper is changing its speech model.');
     }
     _isChangingModel = true;
@@ -662,7 +710,9 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
 
   void dispose() {
     _isDisposed = true;
+    if (_benchmarkId != null) unawaited(stopSpeechBenchmark(_benchmarkId!));
     unawaited(cancel());
+    unawaited(_benchmarkEvents.close());
     _streamSubscription?.cancel();
   }
 }

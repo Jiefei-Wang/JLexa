@@ -19,10 +19,7 @@ class HomeScreen extends StatefulWidget {
   final ValueChanged<AudioLesson> onOpenLesson;
   final Future<void> Function(String lessonId)? onDeleteLesson;
   final VoidCallback onOpenSettings;
-  final VoidCallback onOpenAiChat;
-  final VoidCallback onOpenTranslation;
-  final VoidCallback onOpenListening;
-  final VoidCallback onOpenVocabulary;
+  final VoidCallback onOpenDictionaryManager;
   final VoidCallback onImportAudio;
 
   const HomeScreen({
@@ -34,10 +31,7 @@ class HomeScreen extends StatefulWidget {
     required this.onOpenLesson,
     this.onDeleteLesson,
     required this.onOpenSettings,
-    required this.onOpenAiChat,
-    required this.onOpenTranslation,
-    required this.onOpenListening,
-    required this.onOpenVocabulary,
+    required this.onOpenDictionaryManager,
     required this.onImportAudio,
   });
 
@@ -105,26 +99,6 @@ class HomeScreenState extends State<HomeScreen> {
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _buildShortcut(
-                      'Dictionary',
-                      () => widget.onOpenDictionary(''),
-                    ),
-                    _buildShortcut('Listening', () {
-                      if (_controller.lessons.isEmpty) {
-                        widget.onOpenListening();
-                      } else {
-                        widget.onOpenLesson(_controller.lessons.first);
-                      }
-                    }),
-                    _buildShortcut('Ask AI', widget.onOpenAiChat),
-                  ],
-                ),
-                const SizedBox(height: 14),
-
                 // Search Bar
                 Container(
                   decoration: BoxDecoration(
@@ -263,10 +237,8 @@ class HomeScreenState extends State<HomeScreen> {
 
                 // Quick Tools Grid
                 QuickToolsGrid(
-                  onOpenDictionary: () => widget.onOpenDictionary(''),
-                  onOpenTranslation: widget.onOpenTranslation,
-                  onOpenAiChat: widget.onOpenAiChat,
-                  onOpenVocabulary: widget.onOpenVocabulary,
+                  onOpenDictionaryManager: widget.onOpenDictionaryManager,
+                  onOpenSettings: widget.onOpenSettings,
                 ),
                 const SizedBox(height: 30),
               ],
@@ -274,14 +246,6 @@ class HomeScreenState extends State<HomeScreen> {
           ),
         );
       },
-    );
-  }
-
-  Widget _buildShortcut(String label, VoidCallback onPressed) {
-    return OutlinedButton(
-      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
-      onPressed: onPressed,
-      child: Text(label),
     );
   }
 }
