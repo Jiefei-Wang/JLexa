@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "../plugin/jlexa_inference_types.h"
+#include "../plugin/jlexa_benchmark.h"
 
 class JLexaLlamaBridge {
 public:
@@ -28,7 +29,9 @@ public:
         uint32_t seed,
         const std::vector<JLexaChatMessage>& chatMessages,
         std::function<void(const std::string& token)> tokenCallback,
-        std::function<void(bool cancelled, const std::string& errorMsg)> completionCallback
+        std::function<void(bool cancelled, const std::string& errorMsg)> completionCallback,
+        jlexa_benchmark_result* benchmark = nullptr,
+        std::function<void(uint32_t, const std::string&)> benchmarkProgress = nullptr
     );
 
     void cancel();

@@ -13,7 +13,7 @@ symbol collisions between independently built engines.
 
 ## Implementing a plugin
 
-Export one unmangled symbol with default visibility:
+Export this required unmangled symbol with default visibility:
 
 ```c
 const jlexa_plugin_api *jlexa_plugin_get_api(void);
@@ -58,7 +58,7 @@ Build for `aarch64-linux-android28` or a compatible lower minimum API. Prefer
 static engine/C++ dependencies in the single `.so`; retain only Android system
 dependencies or libraries supplied by the app. No adjacent dependency files
 are imported. Missing dependencies produce a normal loader error. Keep all
-symbols except `jlexa_plugin_get_api` hidden; `exports.map` is an example linker
+symbols except `jlexa_plugin_get_api` and optional `jlexa_plugin_get_benchmark_api` hidden; `exports.map` is an example linker
 version script. Use 16 KB ELF segment alignment for modern Android devices.
 
 `llama_plugin.cpp` is the real implementation used by the built-in backend.
@@ -67,6 +67,34 @@ After `flutter build apk --release` in `app/`, the APK member
 external plugin. `native/tests/plugin_fixture.c` is a minimal executable ABI
 example, with deterministic test text rather than language-model inference.
 Build all fixtures with `native/tests/build_plugin_fixtures.ps1`.
+
+## Optional benchmark timing
+
+An ABI-v1 plugin can additionally export `jlexa_plugin_get_benchmark_api`,
+defined in [jlexa_benchmark.h](jlexa_benchmark.h). This leaves the base inference
+ABI unchanged. Plugins without the extension remain valid for inference; the
+Benchmark window explains that timing is unsupported.
+
+The extension runs a deterministic English-to-Chinese translation with exactly
+100 source tokens according to the loaded model's tokenizer and at most 100
+output tokens (EOS may finish earlier). It reports source text, prefill completion,
+and live output through synchronous callbacks, then returns actual token counts
+and synchronized native evaluation times in microseconds. Prefill counts include
+instructions and the model's chat template. Decode counts include actual
+single-token evaluations; loading, tokenization, sampling, and callbacks are
+excluded from the rates. Cancellation uses the base ABI's stop/reset functions.
+Do not substitute elapsed UI streaming time for native timing.
+
+Settings → Backend Plugins → **Benchmark** compares the available CPU, Vulkan,
+and OpenCL devices of the current plugin using the selected model and runtime
+settings. Available rows are initially checked. Each run reloads the model on
+the requested device without silently falling back, and restores the original
+effective backend afterward. Results are saved per model/plugin in app settings.
+The UI runs a single measurement per selected device, without a warm-up; clocks,
+temperature and first-run kernel preparation can affect the numbers. Stop/Back
+and backgrounding request cancellation; an in-progress model load or GPU kernel
+may need to finish before restoration. A failed restoration leaves the model
+unloaded and displays an error.
 
 ## Import, recovery and scope
 

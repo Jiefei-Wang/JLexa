@@ -75,6 +75,32 @@ JLexaBackendHost &JLexaBackendHost::instance() {
   static JLexaBackendHost h;
   return h;
 }
+bool JLexaBackendHost::supportsBenchmark() {
+  std::lock_guard<std::recursive_mutex> op(operations);
+  auto b = current();
+  auto get = reinterpret_cast<const jlexa_benchmark_api *(*)()>(
+      dlsym(b->library, "jlexa_plugin_get_benchmark_api"));
+  if (!get) return false;
+  const auto *api = get();
+  return api && api->abi_version == JLEXA_BENCHMARK_ABI &&
+         api->struct_size >= sizeof(jlexa_benchmark_api) && api->run;
+}
+int JLexaBackendHost::benchmark(jlexa_benchmark_result &stats,
+    std::function<void(uint32_t, const std::string &, const jlexa_benchmark_result &)> progress) {
+  std::lock_guard<std::recursive_mutex> op(operations);
+  auto b = current();
+  if (!supportsBenchmark()) throw std::runtime_error("This plugin does not support native benchmark timing. Update the plugin to benchmark it.");
+  auto get = reinterpret_cast<const jlexa_benchmark_api *(*)()>(
+      dlsym(b->library, "jlexa_plugin_get_benchmark_api"));
+  char error[1024]{};
+  int result = get()->run(b->handle,
+      [](void *u, uint32_t phase, const char *text, const jlexa_benchmark_result *s) {
+        if (s) (*static_cast<decltype(progress)*>(u))(phase, text ? text : "", *s);
+      }, &progress, &stats, error, sizeof(error));
+  error[1023] = 0;
+  if (result < 0) throw std::runtime_error(error[0] ? error : "Native benchmark failed");
+  return result;
+}
 std::shared_ptr<JLexaBackendHost::Backend> JLexaBackendHost::current() {
   std::lock_guard<std::mutex> l(state);
   if (!active)

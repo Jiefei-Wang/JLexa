@@ -8,16 +8,22 @@ import 'package:uuid/uuid.dart';
 import '../audio/audio_models.dart';
 import 'ai_engine.dart';
 import 'ai_models.dart';
+import 'backend_benchmark.dart';
 import 'llama_request_coordinator.dart';
 import 'prompt_builder.dart';
 import 'speech_engine.dart';
 
-class NativeLlamaEngine implements AiEngine {
+class NativeLlamaEngine implements AiEngine, BenchmarkEngine {
   static const MethodChannel _channel = MethodChannel('com.jlexa.app/llama');
   static const EventChannel _eventChannel = EventChannel(
     'com.jlexa.app/llama_stream',
   );
   static const _uuid = Uuid();
+
+  String? _benchmarkId;
+  final _benchmarkEvents = StreamController<Map<String, dynamic>>.broadcast();
+  @override
+  Stream<Map<String, dynamic>> get benchmarkEvents => _benchmarkEvents.stream;
 
   bool _isLoaded = false;
   String? _loadedModelPath;
@@ -39,6 +45,12 @@ class NativeLlamaEngine implements AiEngine {
     _streamSubscription = _eventChannel.receiveBroadcastStream().listen(
       (dynamic event) {
         if (event is Map) {
+          if (event['type'] == 'benchmark') {
+            if (!_benchmarkEvents.isClosed) {
+              _benchmarkEvents.add(Map<String, dynamic>.from(event));
+            }
+            return;
+          }
           final requestId = event['requestId'] as String?;
           final type = event['type'] as String?;
           if (requestId != null) {
@@ -96,6 +108,9 @@ class NativeLlamaEngine implements AiEngine {
       throw const AiUnsupportedPlatformException();
     }
 
+    if (_benchmarkId != null) {
+      throw const AiBusyException('Benchmark is running.');
+    }
     _state = AiModelState.loading;
     try {
       final runtime = runtimeSettings ?? LlamaRuntimeSettings.defaultSettings;
@@ -212,6 +227,14 @@ class NativeLlamaEngine implements AiEngine {
       );
     }
 
+    if (_benchmarkId != null) {
+      return AiGenerationHandle(
+        requestId: '',
+        stream: Stream.error(const AiBusyException('Benchmark is running.')),
+        onCancel: () async {},
+        done: Future.value(),
+      );
+    }
     if (!_isLoaded) {
       return AiGenerationHandle(
         requestId: '',
@@ -233,6 +256,67 @@ class NativeLlamaEngine implements AiEngine {
 
     _updateState();
     return handle;
+  }
+
+  @override
+  Future<bool> supportsBenchmark() async =>
+      Platform.isAndroid &&
+      (await _channel.invokeMethod<bool>('benchmarkSupported') ?? false);
+
+  @override
+  Future<Map<String, dynamic>> runBenchmark({
+    required String requestId,
+    required List<String> backends,
+    required LlamaRuntimeSettings runtime,
+  }) async {
+    if (_benchmarkId != null ||
+        _state == AiModelState.generating ||
+        _state == AiModelState.loading) {
+      throw const AiBusyException(
+        'Wait for the current AI operation to finish.',
+      );
+    }
+    if (!_isLoaded || _loadedModelPath == null) {
+      throw const AiModelNotLoadedException();
+    }
+    _benchmarkId = requestId;
+    _state = AiModelState.generating;
+    try {
+      final value = await _channel.invokeMapMethod<String, dynamic>(
+        'runBenchmark',
+        {
+          'requestId': requestId,
+          'modelPath': _loadedModelPath,
+          'backends': backends,
+          'contextLength': runtime.contextLength ?? 2048,
+          'threads': runtime.threads ?? 4,
+          'gpuLayers': runtime.gpuLayers ?? -1,
+          'batchSize': runtime.batchSize ?? 512,
+          'ubatchSize': runtime.microBatchSize ?? 512,
+          'flashAttention': runtime.flashAttention.nativeValue,
+        },
+      );
+      if (value == null) {
+        throw const AiGenerationException('No benchmark result returned.');
+      }
+      if (value['restored'] != true) {
+        _isLoaded = false;
+        _loadedModelPath = null;
+      }
+      return value;
+    } finally {
+      _benchmarkId = null;
+      _state = _isLoaded ? AiModelState.ready : AiModelState.noModel;
+    }
+  }
+
+  @override
+  Future<void> stopBenchmark(String requestId) async {
+    if (requestId == _benchmarkId) {
+      await _channel.invokeMethod<void>('cancelBenchmark', {
+        'requestId': requestId,
+      });
+    }
   }
 
   Future<void> _startNativeGeneration(LlamaQueuedRequest req) async {
@@ -267,12 +351,19 @@ class NativeLlamaEngine implements AiEngine {
   @override
   Future<void> cancel() async {
     if (!Platform.isAndroid) return;
+    if (_benchmarkId != null) {
+      await stopBenchmark(_benchmarkId!);
+      return;
+    }
     await _coordinator.cancelAll();
     _updateState();
   }
 
   @override
   Future<void> unload() async {
+    if (_benchmarkId != null) {
+      throw const AiBusyException('Stop the benchmark before changing models.');
+    }
     if (!Platform.isAndroid) return;
     try {
       await cancel();
@@ -284,6 +375,8 @@ class NativeLlamaEngine implements AiEngine {
   }
 
   void dispose() {
+    if (_benchmarkId != null) unawaited(stopBenchmark(_benchmarkId!));
+    _benchmarkEvents.close();
     _streamSubscription?.cancel();
     _coordinator.dispose();
   }

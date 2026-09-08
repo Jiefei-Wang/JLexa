@@ -465,7 +465,9 @@ void JLexaLlamaBridge::generate(
     uint32_t seed,
     const std::vector<JLexaChatMessage>& chatMessages,
     std::function<void(const std::string& token)> tokenCallback,
-    std::function<void(bool cancelled, const std::string& errorMsg)> completionCallback
+    std::function<void(bool cancelled, const std::string& errorMsg)> completionCallback,
+    jlexa_benchmark_result* benchmark,
+    std::function<void(uint32_t, const std::string&)> benchmarkProgress
 ) {
     std::lock_guard<std::mutex> lock(pImpl->mtx);
     try {
@@ -480,19 +482,61 @@ void JLexaLlamaBridge::generate(
     }
 
     std::string prompt_to_use = prompt;
+    std::vector<JLexaChatMessage> effectiveMessages = chatMessages;
+    if (benchmark) {
+        *benchmark = {};
+        // ASCII keeps a token-boundary truncation valid UTF-8 across vocabularies.
+        const std::string passage =
+            "Every morning a young student walks through a quiet park on the way to the library, "
+            "where she reads about science and history, writes down unfamiliar words in a small notebook, "
+            "and practises explaining new ideas to a friend who is learning the same language, "
+            "because they believe that steady practice and patient conversation can turn difficult lessons "
+            "into useful knowledge, help people understand different cultures, and make everyday life "
+            "more interesting, so they plan to keep meeting after class throughout the coming year "
+            "even when the weather is cold or their schedules become busy, and they hope to share "
+            "what they have learned with their families, teachers, neighbours, and future colleagues.";
+        std::vector<llama_token> source(passage.size() + 32);
+        int count = llama_tokenize(pImpl->vocab, passage.c_str(), passage.size(), source.data(), source.size(), false, false);
+        if (count < 100) {
+            if (completionCallback) completionCallback(false, "Benchmark source could not produce 100 tokens");
+            return;
+        }
+        std::string text;
+        for (int i = 0; i < 100; ++i) {
+            char piece[256];
+            int n = llama_token_to_piece(pImpl->vocab, source[i], piece, sizeof(piece), 0, false);
+            if (n < 0) {
+                std::vector<char> large(-n);
+                n = llama_token_to_piece(pImpl->vocab, source[i], large.data(), large.size(), 0, false);
+                if (n > 0) text.append(large.data(), n);
+            } else if (n > 0) text.append(piece, n);
+        }
+        // Re-tokenize the exact displayed text; never report a character count as tokens.
+        const int actual = llama_tokenize(pImpl->vocab, text.c_str(), text.size(), source.data(), source.size(), false, false);
+        if (actual != 100) {
+            if (completionCallback) completionCallback(false, "Tokenizer cannot round-trip the 100-token benchmark source");
+            return;
+        }
+        benchmark->source_tokens = actual;
+        prompt_to_use = "Translate the following English text into Chinese. Output only the translation.\n\n" + text;
+        effectiveMessages = {{"user", prompt_to_use}};
+        maxTokens = 100; temperature = 0.0f; topP = 0.9f; seed = 1234;
+        if (benchmarkProgress) benchmarkProgress(0, text);
+    }
 
-    // Apply chat template if chatMessages are provided and model supports template
-    if (!chatMessages.empty()) {
+
+    // Apply chat template if effectiveMessages are provided and model supports template
+    if (!effectiveMessages.empty()) {
         const char* tmpl = llama_model_chat_template(pImpl->model, nullptr);
         if (tmpl != nullptr) {
             std::vector<llama_chat_message> msgs;
-            msgs.reserve(chatMessages.size());
-            for (const auto& msg : chatMessages) {
+            msgs.reserve(effectiveMessages.size());
+            for (const auto& msg : effectiveMessages) {
                 msgs.push_back({msg.role.c_str(), msg.content.c_str()});
             }
 
             int32_t alloc_size = 2048;
-            for (const auto& m : chatMessages) {
+            for (const auto& m : effectiveMessages) {
                 alloc_size += static_cast<int32_t>(m.content.length() + 64);
             }
             std::vector<char> buf(alloc_size);
@@ -593,6 +637,7 @@ void JLexaLlamaBridge::generate(
     llama_sampler_chain_add(sampler_guard.smpl, llama_sampler_init_top_p(topP > 0.0f ? topP : 0.9f, 1));
     llama_sampler_chain_add(sampler_guard.smpl, llama_sampler_init_dist(actual_seed));
 
+    if (benchmark) benchmark->prompt_tokens = n_prompt;
     // 3. Process prompt with RAII batch and chunking by n_batch
     const uint32_t n_batch = llama_n_batch(pImpl->ctx);
     struct BatchGuard {
@@ -605,6 +650,8 @@ void JLexaLlamaBridge::generate(
     batch_guard.batch = llama_batch_init(alloc_batch_size, 0, 1);
     batch_guard.active = true;
 
+    if (benchmark) llama_synchronize(pImpl->ctx);
+    const auto prefillStart = std::chrono::steady_clock::now();
     for (int i = 0; i < n_prompt; i += static_cast<int>(n_batch)) {
         if (pImpl->isCancelled.load()) {
             if (completionCallback) completionCallback(true, "");
@@ -630,6 +677,12 @@ void JLexaLlamaBridge::generate(
         }
     }
 
+    if (benchmark) {
+        llama_synchronize(pImpl->ctx);
+        benchmark->prefill_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - prefillStart).count();
+        if (benchmarkProgress) benchmarkProgress(1, "");
+    }
     // 4. Generation Loop with UTF-8 piece boundary safety
     std::string utf8_accum;
     int n_cur = n_prompt;
@@ -688,10 +741,18 @@ void JLexaLlamaBridge::generate(
         n_cur++;
         n_generated++;
 
+        const auto decodeStart = std::chrono::steady_clock::now();
         if (llama_decode(pImpl->ctx, batch_guard.batch) != 0) {
             LOGE("Failed to decode sampled token at pos %d", n_cur - 1);
             decode_failed = true;
             break;
+        }
+        if (benchmark) {
+            llama_synchronize(pImpl->ctx);
+            benchmark->decode_us += std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - decodeStart).count();
+            benchmark->decoded_tokens++;
+            benchmark->generated_tokens = n_generated;
         }
     }
 

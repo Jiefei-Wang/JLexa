@@ -317,6 +317,14 @@ class AiService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> refreshAfterBenchmark() async {
+    _activeBackendInfo = llmEngine.isLoaded
+        ? await llmEngine.getActiveBackendInfo()
+        : const LlamaActiveBackendInfo();
+    if (!llmEngine.isLoaded) _loadedLlamaRuntimeSettings = null;
+    await refreshPluginInfo();
+  }
+
   Future<void> changeBackendPlugin({required bool import}) async {
     if (_initState == AiServiceInitState.initializing ||
         _isUpdatingLlamaRuntime ||
@@ -334,6 +342,24 @@ class AiService extends ChangeNotifier {
         pluginInfo = import
             ? await backendPlugins.importPlugin()
             : await backendPlugins.useBuiltin();
+        _availableBackends = await llmEngine.getAvailableBackends();
+        // A CPU-only plugin can replace a GPU plugin. Keep other settings,
+        // but do not reject a valid plugin for the previous device choice.
+        if (pluginInfo.external &&
+            _llamaRuntimeSettings.backend != LlamaBackendPreference.auto &&
+            !_availableBackends.any(
+              (b) =>
+                  b.backend == _llamaRuntimeSettings.backend.name &&
+                  b.available,
+            )) {
+          _llamaRuntimeSettings = _llamaRuntimeSettings.copyWith(
+            backend: LlamaBackendPreference.auto,
+          );
+          await saveSetting(
+            'llama_runtime_settings',
+            jsonEncode(_llamaRuntimeSettings.toMap()),
+          );
+        }
       } finally {
         // A cancelled picker or rejected plugin still restores the current model.
         if (path != null) await loadLlmModel(path);

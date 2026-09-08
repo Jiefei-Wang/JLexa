@@ -214,6 +214,13 @@ void main() {
         aiService: aiService,
       );
       await appLevelManager.initialize();
+      // The manager also starts initialization in its constructor. Await the
+      // inventory publication before testing ownership/disposal.
+      final inventoryDeadline = DateTime.now().add(const Duration(seconds: 5));
+      while (appLevelManager.llmModels.isEmpty &&
+          DateTime.now().isBefore(inventoryDeadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
 
       final controller = SettingsController(
         aiService: aiService,

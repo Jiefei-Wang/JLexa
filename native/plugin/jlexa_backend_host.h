@@ -1,6 +1,7 @@
 #pragma once
 #include "jlexa_inference_types.h"
 #include "jlexa_plugin.h"
+#include "jlexa_benchmark.h"
 #include <memory>
 #include <mutex>
 class JLexaBackendHost {
@@ -19,6 +20,8 @@ public:
                 std::function<void(bool, const std::string &)>);
   void cancel();
   void resetCancellation();
+  bool supportsBenchmark();
+  int benchmark(jlexa_benchmark_result &, std::function<void(uint32_t, const std::string &, const jlexa_benchmark_result &)>);
 
 private:
   struct Backend;

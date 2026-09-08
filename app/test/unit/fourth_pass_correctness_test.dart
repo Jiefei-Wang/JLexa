@@ -24,6 +24,7 @@ import 'package:path_provider_platform_interface/path_provider_platform_interfac
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../test_helper.dart';
+import 'chat_voice_lifecycle_test.dart' show MemoryChats;
 
 class FakePathProviderPlatform extends PathProviderPlatform {
   final String path;
@@ -447,6 +448,9 @@ void main() {
       final chatController = AiChatController(
         aiService: aiService,
         speechEngine: mockSpeechEngine,
+        // This tests generation/disposal ownership. Keep real SQLite write
+        // queues out of it; chat_persistence_test covers the database contract.
+        repository: MemoryChats(),
       );
 
       // Send message

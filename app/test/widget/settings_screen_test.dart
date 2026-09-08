@@ -217,6 +217,11 @@ void main() {
         );
         await tester.pump();
 
+        // Settings refreshes the filesystem inventory on entry. Await it rather
+        // than depending on disk I/O finishing within a single frame.
+        await tester.runAsync(controller.refreshModels);
+        await tester.pump();
+
         // Verify Headers
         expect(find.text('Settings & Local Models'), findsOneWidget);
         expect(find.text('Local Language Model (LLM)'), findsOneWidget);

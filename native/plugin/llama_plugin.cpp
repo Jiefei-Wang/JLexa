@@ -1,5 +1,6 @@
 #include "jlexa_llama_bridge.h"
 #include "jlexa_plugin.h"
+#include "jlexa_benchmark.h"
 #include <algorithm>
 #include <cstdio>
 #include <exception>
@@ -99,5 +100,24 @@ extern "C" JLEXA_PLUGIN_EXPORT const jlexa_plugin_api *jlexa_plugin_get_api() {
       [](void *p) -> int32_t { return bridge(p).isModelLoaded(); },
       devices,
       active};
+  return &api;
+}
+
+static int32_t benchmark(void *p, jlexa_benchmark_progress_fn progress, void *user,
+                         jlexa_benchmark_result *stats, char *error, uint32_t n) {
+  int32_t result = -1;
+  *stats = {};
+  bridge(p).generate("", 100, 0.0f, 0.9f, 1234, {},
+      [&](const std::string &text) { if (progress) progress(user, 2, text.c_str(), stats); },
+      [&](bool cancelled, const std::string &e) {
+        result = cancelled ? 1 : e.empty() ? 0 : -1; copy(error, n, e);
+      }, stats,
+      [&](uint32_t phase, const std::string &text) {
+        if (progress) progress(user, phase, text.c_str(), stats);
+      });
+  return result;
+}
+extern "C" JLEXA_PLUGIN_EXPORT const jlexa_benchmark_api *jlexa_plugin_get_benchmark_api() {
+  static const jlexa_benchmark_api api = {JLEXA_BENCHMARK_ABI, sizeof(jlexa_benchmark_api), benchmark};
   return &api;
 }

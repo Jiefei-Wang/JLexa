@@ -452,7 +452,13 @@ void main() {
             text: 'stale result',
           ),
         ]);
-        await Future<void>.delayed(const Duration(milliseconds: 450));
+        final restartDeadline = DateTime.now().add(const Duration(seconds: 5));
+        while ((scenario == 'left off'
+                ? controller.transcriptionState != TranscriptionState.idle
+                : speech.requests.length < 2) &&
+            DateTime.now().isBefore(restartDeadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
         if (scenario == 'left off') {
           expect(speech.requests, hasLength(1));
           expect(controller.transcriptionState, TranscriptionState.idle);
@@ -472,7 +478,13 @@ void main() {
               text: 'latest result',
             ),
           ]);
-          await Future<void>.delayed(const Duration(milliseconds: 30));
+          // Completion includes an asynchronous SQLite save. Wait for its
+          // observable result, not an assumed 30 ms disk-I/O budget.
+          final saveDeadline = DateTime.now().add(const Duration(seconds: 5));
+          while (controller.visibleTranscriptSegment?.text != 'latest result' &&
+              DateTime.now().isBefore(saveDeadline)) {
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+          }
           expect(
             controller.visibleTranscriptSegment?.id,
             scenario == 'new cut' ? 'b' : 'a',

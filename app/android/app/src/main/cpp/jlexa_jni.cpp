@@ -717,4 +717,37 @@ Java_com_example_local_1ai_1app_BackendPlugins_nativeSelect(JNIEnv *env,jobject,
     }
 }
 
+
+JNIEXPORT jboolean JNICALL
+Java_com_example_local_1ai_1app_LlamaBridge_nativeSupportsBenchmark(JNIEnv *env, jobject) {
+    try { return JLexaBackendHost::instance().supportsBenchmark(); }
+    catch (const std::exception &e) { env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what()); return false; }
+}
+JNIEXPORT jlongArray JNICALL
+Java_com_example_local_1ai_1app_LlamaBridge_nativeBenchmark(JNIEnv *env, jobject, jobject callback) {
+    try {
+        jclass cls = env->GetObjectClass(callback);
+        jmethodID progress = env->GetMethodID(cls, "onProgress", "(ILjava/lang/String;JJJJ)V");
+        if (clearPendingException(env) || !progress) {
+            env->ThrowNew(env->FindClass("java/lang/RuntimeException"), "Benchmark callback unavailable"); return nullptr;
+        }
+        jlexa_benchmark_result stats{};
+        int result = JLexaBackendHost::instance().benchmark(stats,
+            [env, callback, progress](uint32_t phase, const std::string &text, const jlexa_benchmark_result &s) {
+                if (env->PushLocalFrame(8) < 0) return;
+                jstring value = makeJavaStringFromUtf8(env, text);
+                env->CallVoidMethod(callback, progress, (jint)phase, value,
+                    (jlong)s.prompt_tokens, (jlong)s.generated_tokens, (jlong)s.prefill_us, (jlong)s.decode_us);
+                clearPendingException(env); env->PopLocalFrame(nullptr);
+            });
+        jlong values[] = {(jlong)stats.source_tokens,(jlong)stats.prompt_tokens,(jlong)stats.generated_tokens,
+            (jlong)stats.decoded_tokens,(jlong)stats.prefill_us,(jlong)stats.decode_us,(jlong)result};
+        jlongArray output = env->NewLongArray(7);
+        env->SetLongArrayRegion(output, 0, 7, values);
+        return output;
+    } catch (const std::exception &e) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what()); return nullptr;
+    }
+}
+
 } // extern "C"

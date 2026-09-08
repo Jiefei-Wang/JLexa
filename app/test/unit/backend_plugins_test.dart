@@ -28,8 +28,43 @@ class TestPlugins extends BackendPlugins {
       info = const BackendPluginInfo();
 }
 
+class CpuOnlyPluginEngine extends MockTestAiEngine {
+  @override
+  Future<List<LlamaBackendInfo>> getAvailableBackends() async => const [
+    LlamaBackendInfo(backend: 'cpu', compiled: true, available: true),
+    LlamaBackendInfo(backend: 'vulkan', compiled: false, available: false),
+  ];
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'importing CPU-only plugin replaces obsolete GPU preference with Auto',
+    () async {
+      final engine = CpuOnlyPluginEngine();
+      final plugins = TestPlugins()
+        ..info = const BackendPluginInfo(name: 'Snapdragon', external: true);
+      final service = AiService(
+        llm: engine,
+        speech: MockTestSpeechEngine(),
+        plugins: plugins,
+      );
+      await service.updateLlamaRuntimeSettings(
+        const LlamaRuntimeSettings(
+          backend: LlamaBackendPreference.vulkan,
+          threads: 6,
+        ),
+        autoReload: false,
+      );
+      await engine.loadModel('content://saved-model');
+      await service.changeBackendPlugin(import: true);
+      expect(engine.lastRuntimeSettings!.backend, LlamaBackendPreference.auto);
+      expect(service.llamaRuntimeSettings.backend, LlamaBackendPreference.auto);
+      expect(service.llamaRuntimeSettings.threads, 6);
+      expect(service.pluginInfo.external, true);
+      service.dispose();
+    },
+  );
   test(
     'channel reports import incompatibility and built-in fallback accurately',
     () async {

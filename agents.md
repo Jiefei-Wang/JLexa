@@ -462,3 +462,32 @@ At the end of every agent session after completing work:
   - Automatic approval review rejected duplicate APK removal under `app/build` (`blocked by policy`); these generated copies remain and deletion was not bypassed. Existing upstream flutter_tts future Kotlin compatibility notice remains.
 - **Limits**: Probe containment covers library/create/destroy initialization, not arbitrary later inference crashes. In-process activation/model-load crashes recover on next launch; generation crashes still require restart. Trusted native code runs with app permissions. No claim of universal third-party binary compatibility or model-answer accuracy.
 - **Final cleanup**: Removed temporary device fixtures and QA conversations; left Pixel on Home with built-in/Auto restored, original three audio lessons and models preserved, PID `29677`. Pre-existing untracked host `artifacts/` was left untouched.
+
+
+---
+
+## Session: 2026-09-07 (Backend Benchmark and Snapdragon CPU Plugin)
+- **Focus**: Added the requested Settings backend benchmark window and independently developed/tested an importable Snapdragon 8 Elite CPU plugin. Evidence: `docs/qa-backend-benchmark-2026-09-07.md` and `docs/qa-snapdragon-backend-2026-09-07.md`.
+- **Implementation**:
+  - Added an optional stable native benchmark extension without changing inference ABI v1. Exactly 100 model-token English source, Chinese translation request, deterministic sampling, <=100 output tokens/EOS, synchronized prefill/decode timing and actual counters.
+  - Added default-checked available devices, previous-result table, per-model/plugin history, selected-device reruns, live source/output, details, anytime Stop/Back cancellation, and restoration of the original effective backend. No silent per-row device fallback or UI-time speed estimates.
+  - Reopen SAF model descriptors for every benchmark device/restoration to avoid shared file offsets. CPU-only plugin import automatically replaces an unavailable previous GPU preference with persisted Auto while retaining other settings.
+  - Added guarded dotprod/i8mm/FP16 Snapdragon CPU build, static C++ dependencies, 16 KB ELF alignment, and reproducible build/comparison sources under `native/snapdragon/`.
+  - Stabilized existing test fixtures by awaiting actual model inventory/transcript completion and isolating controller ownership from SQLite persistence. No related application behavior was rewritten.
+- **Physical Device Results**:
+  - Pixel 6 `25311FDF6004PR`: final signed APK Qwen2.5 0.5B CPU 77.8/35.5, Vulkan 10.8/17.3, OpenCL 68.1/16.4 prefill/decode tok/s; all completed and restored original Auto/Vulkan. Loading/decode cancellation, selected-only rerun, and history after force-stop/relaunch verified. Final PID 8334.
+  - Honor PTP-AN00/SM8750 over wireless ADB: installed final APK (device base.apk SHA matches release), imported `JLexa Snapdragon CPU`, automatically moved obsolete Vulkan preference to Auto, loaded existing 3B SAF model. App benchmark 61.4/17.1 tok/s, source=100, prompt=121, output/decode=96, four threads. Plugin/model and result table restored after force-stop/relaunch. Final PID 22618.
+  - Controlled native four-thread warm comparisons: 1.5B generic CPU 25.104/18.575 -> optimized 96.779/32.402 (3.86x/1.74x); 3B 11.926/9.661 -> 48.654/17.128 (4.08x/1.77x). Cancellation/recovery, arithmetic and short translation passed; comparison settings and thermal variability are documented.
+  - Existing models, lessons and conversations preserved; both phones left on the saved Benchmark table. No crashes recorded for final app PIDs.
+- **Static Analysis**: `flutter analyze` -> `No issues found!` (zero errors/warnings).
+- **Tests**: `flutter test --concurrency=1` -> **308 passed**, zero failed (67 seconds). Earlier fixed-time/disk-dependent test failures were resolved in fixtures; final complete run passed.
+- **Signed Release**:
+  - `flutter build apk --release` succeeded using `app/android/key.properties`; final application-source build 56.3 seconds.
+  - Fixed path: `release/app-release.apk` (108,268,408 bytes).
+  - APK SHA-256: `DF79A8910C38D0560D49A9572BACBEEDF8C18DD5F36A3A7CFA6ECA37B4C6D1DC`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
+  - `apksigner verify --verbose --print-certs`: verified, APK Signature Scheme v2 true. Both phones received signed in-place upgrades.
+  - `release/jlexa-snapdragon-plugin.so` (4,136,496 bytes), SHA-256 `264C75E5CBD1EECEBFF20E2FC928A826C0052FAB189A7268400DB88AAEF08E35`. Import source remains in Honor Download/JLexa-snapdragon.
+  - Updated `release/jlexa-llama-plugin.so` (29,098,768 bytes), SHA-256 `2095C584C1A9162C92A5DA9C09F98DBE0CC038EF99713459637CF1960FF2B57F`.
+  - Prior automatic approval review blocked duplicate APK-output cleanup; deletion was not retried or bypassed. Existing upstream Flutter/Kotlin compatibility notices remain; build succeeds. Pre-existing untracked `artifacts/` remains untouched.
+- **Limits**: Native stop can wait for an in-progress model load/GPU kernel before restoration. Benchmark speeds depend on model/settings/temperature and are not cross-model quality claims. Snapdragon optimization is CPU only; no NPU/Adreno acceleration claim.

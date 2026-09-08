@@ -44,6 +44,15 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
         }
     }
 
+    private external fun nativeSupportsBenchmark(): Boolean
+    private external fun nativeBenchmark(callback: BenchmarkCallback): LongArray
+    @Keep
+    interface BenchmarkCallback {
+        fun onProgress(phase: Int, text: String, promptTokens: Long, generatedTokens: Long, prefillUs: Long, decodeUs: Long)
+    }
+    private val benchmarkCancelled = AtomicBoolean(false)
+    private var benchmarkRequestId: String? = null
+
     private external fun nativeGetAvailableBackends(): List<Map<String, Any>>
     private external fun nativeGetActiveBackendInfo(): Map<String, Any>?
     private external fun nativeLoadModel(
@@ -181,6 +190,22 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
 
     private fun dispatch(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
+            "benchmarkSupported" -> scope.launch {
+                try {
+                    val value = nativeSupportsBenchmark()
+                    withContext(Dispatchers.Main) { result.success(value) }
+                } catch (e: Throwable) {
+                    withContext(Dispatchers.Main) { result.error("BENCHMARK_ERROR", e.message, null) }
+                }
+            }
+            "runBenchmark" -> runBenchmark(call, result)
+            "cancelBenchmark" -> {
+                if (call.argument<String>("requestId") == benchmarkRequestId) {
+                    benchmarkCancelled.set(true)
+                    nativeCancel()
+                }
+                result.success(null)
+            }
             "pluginStatus" -> result.success(plugins.snapshot())
             "importPlugin", "useBuiltinPlugin" -> {
                 if (isGenerating.get() || !isMutating.compareAndSet(false, true)) {
@@ -400,7 +425,121 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
         }
     }
 
+    private fun runBenchmark(call: MethodCall, result: MethodChannel.Result) {
+        val modelPath = call.argument<String>("modelPath")
+        val id = call.argument<String>("requestId")
+        val backends = call.argument<List<String>>("backends")?.distinct().orEmpty()
+        if (modelPath.isNullOrEmpty() || id == null || backends.isEmpty() ||
+            backends.any { it !in listOf("cpu", "vulkan", "opencl") }) {
+            result.error("INVALID_ARGS", "Select a loaded model and at least one backend", null)
+            return
+        }
+        if (isGenerating.get() || !isMutating.compareAndSet(false, true)) {
+            result.error("BUSY", "Wait for the current AI operation to finish", null)
+            return
+        }
+        benchmarkRequestId = id
+        benchmarkCancelled.set(false)
+        nativeResetCancellation()
+        scope.launch {
+            val rows = mutableListOf<Map<String, Any>>()
+            var newPfd: ParcelFileDescriptor? = null
+            var changedModel = false
+            var restored = true
+            var failure = ""
+            var original: Map<String, Any>? = null
+            fun event(stage: String, backend: String = "", extra: Map<String, Any> = emptyMap()) {
+                sendEvent(mapOf("type" to "benchmark", "requestId" to id, "stage" to stage, "backend" to backend) + extra)
+            }
+            fun load(backend: String, config: Map<String, Any>? = null): Boolean {
+                fun number(key: String, fallback: Int) = (config?.get(key) as? Number)?.toInt()
+                    ?: call.argument<Int>(key) ?: fallback
+                // Each plugin load gets a fresh SAF open-file description. A plugin
+                // may advance the borrowed descriptor's offset while reading GGUF.
+                val descriptor = if (modelPath.startsWith("content://")) {
+                    requireNotNull(context).contentResolver.openFileDescriptor(Uri.parse(modelPath), "r")
+                        ?: error("Could not open the selected model")
+                } else null
+                val effectivePath = descriptor?.let { "/proc/self/fd/${it.fd}" } ?: modelPath
+                plugins.beginModelLoad()
+                try {
+                    return nativeLoadModel(effectivePath, backend, number("contextLength", 2048), number("threads", 4),
+                        number("gpuLayers", -1), number("batchSize", 512), number("ubatchSize", 512), number("flashAttention", -1))
+                } finally {
+                    plugins.endModelLoad()
+                    newPfd?.close()
+                    newPfd = descriptor
+                }
+            }
+            try {
+                check(nativeSupportsBenchmark()) { "This plugin does not support native benchmark timing. Import an updated plugin." }
+                check(nativeIsModelLoaded()) { "Load a language model before benchmarking" }
+                original = nativeGetActiveBackendInfo()
+                val available = nativeGetAvailableBackends().associateBy { it["backend"] as String }
+                for (backend in backends) {
+                    if (benchmarkCancelled.get()) break
+                    event("loading", backend)
+                    val row = mutableMapOf<String, Any>("backend" to backend, "status" to "failed")
+                    try {
+                        check(available[backend]?.get("available") == true) {
+                            available[backend]?.get("reasonUnavailable")?.toString() ?: "Backend unavailable"
+                        }
+                        changedModel = true
+                        check(load(backend)) { "Model could not load on $backend" }
+                        if (benchmarkCancelled.get()) break
+                        val active = nativeGetActiveBackendInfo().orEmpty()
+                        check(active["backend"] == backend) { "Requested $backend but engine activated ${active["backend"]}" }
+                        row["device"] = active["deviceName"] ?: backend
+                        row["runtime"] = active
+                        event("prefill", backend)
+                        val stats = nativeBenchmark(object : BenchmarkCallback {
+                            override fun onProgress(phase: Int, text: String, promptTokens: Long, generatedTokens: Long, prefillUs: Long, decodeUs: Long) {
+                                event(when(phase) { 0 -> "input"; 1 -> "decode"; else -> "token" }, backend,
+                                    mapOf("text" to text, "promptTokens" to promptTokens, "generatedTokens" to generatedTokens,
+                                        "prefillUs" to prefillUs, "decodeUs" to decodeUs))
+                            }
+                        })
+                        row.putAll(mapOf("sourceTokens" to stats[0], "promptTokens" to stats[1], "generatedTokens" to stats[2],
+                            "decodedTokens" to stats[3], "prefillUs" to stats[4], "decodeUs" to stats[5],
+                            "status" to if (stats[6] == 1L || benchmarkCancelled.get()) "cancelled" else "completed"))
+                    } catch (e: Throwable) {
+                        row["status"] = if (benchmarkCancelled.get()) "cancelled" else "failed"
+                        row["error"] = e.message ?: "Benchmark failed"
+                    }
+                    rows.add(row)
+                    event("row", backend, mapOf("result" to row))
+                }
+            } catch (e: Throwable) { failure = e.message ?: "Benchmark failed" }
+            finally {
+                if (changedModel && original != null) {
+                    event("restoring")
+                    // Stop remains latched for the test; restoration needs a fresh cancellation flag.
+                    nativeResetCancellation()
+                    try {
+                        check(load(original["backend"] as? String ?: "auto", original)) { "Could not restore the previous backend" }
+                        activePfd?.close()
+                        activePfd = newPfd
+                        newPfd = null
+                    } catch (e: Throwable) {
+                        restored = false
+                        failure = "Could not restore the previous model/backend: ${e.message}"
+                        try { nativeUnloadModel() } catch (_: Throwable) {}
+                        activePfd?.close(); activePfd = null
+                    }
+                }
+                newPfd?.close()
+                withContext(Dispatchers.Main) {
+                    benchmarkRequestId = null
+                    isMutating.set(false)
+                    result.success(mapOf("rows" to rows, "cancelled" to benchmarkCancelled.get(),
+                        "restored" to restored, "error" to failure))
+                }
+            }
+        }
+    }
+
     fun cleanUp() {
+        benchmarkCancelled.set(true)
         try {
             nativeCancel()
             nativeUnloadModel()

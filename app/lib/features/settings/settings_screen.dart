@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../../core/ai/ai_models.dart';
 import '../../core/ai/ai_service.dart';
+import '../../core/ai/backend_benchmark.dart';
 import '../../core/ai/model_catalog.dart';
 import '../../core/ai/model_manager.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import 'settings_controller.dart';
+import 'backend_benchmark_controller.dart';
+import 'backend_benchmark_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final AiService aiService;
@@ -90,6 +93,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               runSpacing: 8,
               children: [
                 OutlinedButton.icon(
+                  onPressed: busy ? null : _openBenchmark,
+                  icon: const Icon(Icons.speed),
+                  label: const Text('Benchmark'),
+                ),
+                OutlinedButton.icon(
                   onPressed: busy || !service.backendPlugins.supported
                       ? null
                       : () => _controller.changeBackendPlugin(import: true),
@@ -107,6 +115,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
             if (busy) const LinearProgressIndicator(),
           ],
         ),
+      ),
+    );
+  }
+
+  void _openBenchmark() {
+    final service = _controller.aiService;
+    final engine = service.llmEngine;
+    final path = engine.loadedModelPath;
+    if (engine is! BenchmarkEngine || !engine.isLoaded || path == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Load a language model before benchmarking.'),
+        ),
+      );
+      return;
+    }
+    final plugin = service.pluginInfo;
+    final benchmarkController = BackendBenchmarkController(
+      engine: engine as BenchmarkEngine,
+      store: DatabaseBenchmarkStore(),
+      backends: List.of(service.availableBackends),
+      runtime: service.llamaRuntimeSettings,
+      modelName:
+          _controller.llmModels
+              .where((m) => m.localPath == path)
+              .firstOrNull
+              ?.displayName ??
+          _controller.llmInfo?.name ??
+          'Selected model',
+      modelPath: path,
+      pluginKey:
+          '${plugin.external}/${plugin.name}/${plugin.version}/${plugin.fileName}',
+      onFinished: service.refreshAfterBenchmark,
+    );
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BackendBenchmarkScreen(controller: benchmarkController),
       ),
     );
   }
