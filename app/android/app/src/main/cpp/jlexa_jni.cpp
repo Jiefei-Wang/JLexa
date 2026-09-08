@@ -704,6 +704,11 @@ Java_com_example_local_1ai_1app_LlamaBridge_nativeResetCancellation(
 }
 
 
+JNIEXPORT jobject JNICALL
+Java_com_example_local_1ai_1app_BackendPlugins_nativeDevices(JNIEnv *env, jobject self) {
+    return Java_com_example_local_1ai_1app_LlamaBridge_nativeGetAvailableBackends(env, self);
+}
+
 JNIEXPORT jobjectArray JNICALL
 Java_com_example_local_1ai_1app_BackendPlugins_nativeSelect(JNIEnv *env,jobject,jstring path) {
     try {

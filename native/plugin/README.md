@@ -1,6 +1,6 @@
 # JLexa LLM plugin ABI v1
 
-Settings → **Backend Plugins** → **Import .so** accepts an Android ARM64 shared
+Settings → **Hardware Backend Preference** → **Import** accepts an Android ARM64 shared
 library built against [jlexa_plugin.h](jlexa_plugin.h). An ordinary upstream
 `libllama.so` does **not** implement this interface and is rejected.
 
@@ -85,11 +85,13 @@ single-token evaluations; loading, tokenization, sampling, and callbacks are
 excluded from the rates. Cancellation uses the base ABI's stop/reset functions.
 Do not substitute elapsed UI streaming time for native timing.
 
-Settings → Backend Plugins → **Benchmark** compares the available CPU, Vulkan,
-and OpenCL devices of the current plugin using the selected model and runtime
-settings. Available rows are initially checked. Each run reloads the model on
-the requested device without silently falling back, and restores the original
-effective backend afterward. Results are saved per model/plugin in app settings.
+Settings → Hardware Backend Preference → **Benchmark** compares the built-in
+CPU, Vulkan and OpenCL devices plus each imported backend using the selected
+model and runtime settings. Imported plugins resolve their own device through
+Auto. Available rows are initially checked. Each run reloads the model on the
+requested backend without silently falling back, and restores the original
+plugin and effective device afterward. Results are saved per model in app
+settings; earlier per-plugin results migrate into this combined table.
 The UI runs a single measurement per selected device, without a warm-up; clocks,
 temperature and first-run kernel preparation can affect the numbers. Stop/Back
 and backgrounding request cancellation; an in-progress model load or GPU kernel
@@ -111,8 +113,9 @@ not a security sandbox: imported native code must be trusted by the user.
 
 The selected private path and failure details are stored in the app's
 `backend_plugins` SharedPreferences and restored before model startup. Import
-or ordinary model-load failures select the bundled backend and reload the
-previous model. Cancelling the picker restores the same model/backend.
+success adds an option without selecting it; import failure or cancellation
+leaves the current backend/model untouched. Selecting an option reloads the
+current model and attempts to restore the previous selection on failure.
 
 A synchronous on-disk initialization marker covers the subsequent in-process
 activation and model load. If these terminate the main process, the **next
@@ -121,6 +124,7 @@ Arbitrary native crashes during later generation cannot be recovered in the
 same process. Full out-of-process inference is intentionally outside this
 small loader. Probe success cannot guarantee every future plugin operation.
 
-Only one imported backend is retained. Selecting built-in removes unused
-private plugin copies; user source files and model files are preserved. There
-is no catalog, downloader, updater, dependency resolver or network operation.
+Imported backends remain in a small local list until their trash icon is used.
+Deleting the active backend first selects built-in Auto and reloads the model.
+User source files and model files are preserved. There is no online catalog,
+downloader, updater, dependency resolver or network operation.

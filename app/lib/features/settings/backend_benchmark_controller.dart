@@ -42,6 +42,11 @@ class BackendBenchmarkController extends ChangeNotifier {
            'backend_benchmark_v1:${jsonEncode([modelPath, pluginKey])}' {
     selected.addAll(backends.where((b) => b.available).map((b) => b.backend));
   }
+  String label(String backend) => backend.startsWith('plugin:')
+      ? backends.where((b) => b.backend == backend).firstOrNull?.deviceName ??
+            'Imported backend'
+      : backend.toUpperCase();
+
   void _notify() {
     if (!_disposed) notifyListeners();
   }

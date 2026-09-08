@@ -21,7 +21,10 @@ class SettingsController extends ChangeNotifier {
   String? _errorMessage;
   bool _isDisposed = false;
 
-  bool get isLoading => _isProcessing || !modelManager.isInitialized;
+  bool get isLoading =>
+      _isProcessing ||
+      aiService.isUpdatingBackend ||
+      !modelManager.isInitialized;
   String? get errorMessage => _errorMessage ?? modelManager.inventoryError;
   bool get hasInventoryError => modelManager.inventoryError != null;
   bool get hasActiveDownloads => modelManager.hasActiveDownloads;

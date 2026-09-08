@@ -252,6 +252,13 @@ void main() {
         aiService: aiService,
       );
       await manager.initialize();
+      // Constructor initialization may publish a newer inventory scan after
+      // this explicit call. Wait for that publication before asserting rows.
+      final inventoryDeadline = DateTime.now().add(const Duration(seconds: 5));
+      while (manager.llmModels.isEmpty &&
+          DateTime.now().isBefore(inventoryDeadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
     });
 
     tearDown(() async {

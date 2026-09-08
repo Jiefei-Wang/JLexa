@@ -35,6 +35,7 @@ class AiService extends ChangeNotifier {
   LlamaRuntimeSettings get llamaRuntimeSettings => _llamaRuntimeSettings;
   LlamaRuntimeSettings? _loadedLlamaRuntimeSettings;
   bool _isUpdatingLlamaRuntime = false;
+  bool get isUpdatingBackend => _isUpdatingLlamaRuntime;
 
   List<LlamaBackendInfo> _availableBackends = const [];
   List<LlamaBackendInfo> get availableBackends => _availableBackends;
@@ -325,7 +326,7 @@ class AiService extends ChangeNotifier {
     await refreshPluginInfo();
   }
 
-  Future<void> changeBackendPlugin({required bool import}) async {
+  void _checkBackendMutation() {
     if (_initState == AiServiceInitState.initializing ||
         _isUpdatingLlamaRuntime ||
         isGenerating ||
@@ -334,35 +335,71 @@ class AiService extends ChangeNotifier {
         'Wait for the current AI operation to finish.',
       );
     }
+  }
+
+  Future<void> changeBackendPlugin({required bool import}) async {
+    if (!import) {
+      await selectBackend('');
+      return;
+    }
+    _checkBackendMutation();
     _isUpdatingLlamaRuntime = true;
+    notifyListeners();
+    try {
+      // Probe in the separate process; the current model remains loaded.
+      pluginInfo = await backendPlugins.importPlugin();
+    } finally {
+      _isUpdatingLlamaRuntime = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> selectBackend(
+    String id, {
+    LlamaBackendPreference? preference,
+  }) async {
+    _checkBackendMutation();
+    final previousId = pluginInfo.id;
+    final previousRuntime = _llamaRuntimeSettings;
     final path = llmEngine.isLoaded ? llmEngine.loadedModelPath : null;
+    final next = previousRuntime.copyWith(
+      backend: id.isEmpty
+          ? preference ?? previousRuntime.backend
+          : LlamaBackendPreference.auto,
+    );
+    _isUpdatingLlamaRuntime = true;
+    notifyListeners();
     try {
       await unloadLlmModel();
       try {
-        pluginInfo = import
-            ? await backendPlugins.importPlugin()
-            : await backendPlugins.useBuiltin();
+        pluginInfo = id.isEmpty
+            ? await backendPlugins.useBuiltin()
+            : await backendPlugins.select(id);
         _availableBackends = await llmEngine.getAvailableBackends();
-        // A CPU-only plugin can replace a GPU plugin. Keep other settings,
-        // but do not reject a valid plugin for the previous device choice.
-        if (pluginInfo.external &&
-            _llamaRuntimeSettings.backend != LlamaBackendPreference.auto &&
-            !_availableBackends.any(
-              (b) =>
-                  b.backend == _llamaRuntimeSettings.backend.name &&
-                  b.available,
-            )) {
-          _llamaRuntimeSettings = _llamaRuntimeSettings.copyWith(
-            backend: LlamaBackendPreference.auto,
-          );
-          await saveSetting(
-            'llama_runtime_settings',
-            jsonEncode(_llamaRuntimeSettings.toMap()),
+        if (path != null) await loadLlmModel(path, runtimeSettings: next);
+        if (id.isNotEmpty && pluginInfo.id != id) {
+          throw AiGenerationException(
+            pluginInfo.error.isEmpty
+                ? 'Backend could not load the selected model.'
+                : pluginInfo.error,
           );
         }
-      } finally {
-        // A cancelled picker or rejected plugin still restores the current model.
-        if (path != null) await loadLlmModel(path);
+        _llamaRuntimeSettings = next;
+        await saveSetting('llama_runtime_settings', jsonEncode(next.toMap()));
+      } catch (e) {
+        try {
+          pluginInfo = previousId.isEmpty
+              ? await backendPlugins.useBuiltin()
+              : await backendPlugins.select(previousId);
+          if (path != null) {
+            await loadLlmModel(path, runtimeSettings: previousRuntime);
+          }
+        } catch (restoreError) {
+          throw AiGenerationException(
+            '$e. Could not restore the previous backend: $restoreError',
+          );
+        }
+        rethrow;
       }
     } finally {
       try {
@@ -372,6 +409,21 @@ class AiService extends ChangeNotifier {
         _isUpdatingLlamaRuntime = false;
         notifyListeners();
       }
+    }
+  }
+
+  Future<void> deleteBackend(String id) async {
+    _checkBackendMutation();
+    if (pluginInfo.id == id) {
+      await selectBackend('', preference: LlamaBackendPreference.auto);
+    }
+    _isUpdatingLlamaRuntime = true;
+    notifyListeners();
+    try {
+      pluginInfo = await backendPlugins.delete(id);
+    } finally {
+      _isUpdatingLlamaRuntime = false;
+      notifyListeners();
     }
   }
 

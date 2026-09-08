@@ -491,3 +491,26 @@ At the end of every agent session after completing work:
   - Updated `release/jlexa-llama-plugin.so` (29,098,768 bytes), SHA-256 `2095C584C1A9162C92A5DA9C09F98DBE0CC038EF99713459637CF1960FF2B57F`.
   - Prior automatic approval review blocked duplicate APK-output cleanup; deletion was not retried or bypassed. Existing upstream Flutter/Kotlin compatibility notices remain; build succeeds. Pre-existing untracked `artifacts/` remains untouched.
 - **Limits**: Native stop can wait for an in-progress model load/GPU kernel before restoration. Benchmark speeds depend on model/settings/temperature and are not cross-model quality claims. Snapdragon optimization is CPU only; no NPU/Adreno acceleration claim.
+
+---
+
+## Session: 2026-09-07 (Unified Backend Selector and Imported Backend Catalog)
+- **Focus**: Integrated Benchmark and Import into Hardware Backend Preference, removed the separate plugin card, and added persistent selectable/removable imported backend rows. Evidence: `docs/qa-backend-catalog-2026-09-07.md`.
+- **Changes**:
+  - Import probes and adds a private read-only library without changing the current backend/model; errors appear in a readable Snackbar. Multiple imports coexist, and the previous single-plugin setting migrates automatically.
+  - Backend selection reloads the current model with rollback; deleting an active import first selects built-in Auto. Inactive deletion retains the current model.
+  - Benchmark compares built-in devices and imported plugins in one table, restores the original plugin/model, and migrates existing per-plugin speed history.
+  - Added channel/service ownership, failed-import, catalog persistence parsing, selection rollback, active/inactive deletion, history migration and widget coverage. Fixed imported-row Material decoration; stabilized the existing model-manager initialization test fixture without changing its application logic.
+- **Physical Verification**:
+  - Pixel 6: valid import, multiple rows, selection, restart, inactive/active deletion, built-in reload, malformed ELF, wrong ABI/API, missing symbol, unresolved dependency and initialization abort containment passed. Unsupported benchmark extension yields a per-row error while built-in CPU completes (77.1/35.6 tok/s on 0.5B).
+  - Honor PTP-AN00: existing Snapdragon/3B selection and 61.4/17.1 history migrated. Combined run completed built-in CPU 15.1/10.0 and Snapdragon 50.9/17.1 tok/s; cancellation and original-backend restoration passed. Saved history survived final signed upgrade.
+  - Final APK installed successfully on both phones, each installed base.apk SHA-256 matching release. Final PIDs Pixel 11488, Honor 5537, no main-process crash entries. Temporary Pixel rows/source fixtures removed; Pixel Auto and Honor Snapdragon retained; original models/lessons/conversations preserved.
+- **Static Analysis**: `flutter analyze` -> No issues found (zero errors/warnings).
+- **Tests**: `flutter test --concurrency=1` -> 313 passed, zero failed (74 seconds).
+- **Signed Release**:
+  - `flutter build apk --release` succeeded (62.2 seconds), using `app/android/key.properties`.
+  - Fixed artifact: `release/app-release.apk` (108,268,408 bytes).
+  - APK SHA-256: `66CA8C468D814A723EA6E2E154C0FDCFAE3BB1C039FA764505F7728FCA953DA6`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
+  - `apksigner verify --verbose --print-certs`: verified, APK Signature Scheme v2 true.
+  - Existing upstream Flutter/Kotlin build notices remain. Prior blocked duplicate APK-output deletion was not retried/bypassed; pre-existing untracked `artifacts/` remains untouched.

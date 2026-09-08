@@ -13,12 +13,15 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
 import java.util.UUID
+import org.json.JSONArray
+import org.json.JSONObject
 
-/** One imported plugin and the bundled fallback. Preferences live beside other native app settings. */
+/** Small private-file catalog; importing never switches the active backend. */
 @Keep
 class BackendPlugins(private val context: Context) {
     companion object { const val PICK_PLUGIN = 7412 }
     external fun nativeSelect(path: String): Array<String>
+    external fun nativeDevices(): List<Map<String, Any>>
     private val prefs = context.getSharedPreferences("backend_plugins", Context.MODE_PRIVATE)
     private val directory = File(context.noBackupFilesDir, "backend_plugins").apply { mkdirs() }
     private val lock = Mutex()
@@ -29,10 +32,23 @@ class BackendPlugins(private val context: Context) {
     private var status = prefs.getString("status", "Loaded") ?: "Loaded"
     private var error = prefs.getString("error", "") ?: ""
 
+    private val installed = mutableListOf<Map<String, String>>()
+    private var builtinDevices: List<Map<String, Any>> = emptyList()
+    fun selectedId(): String = if (selected.isEmpty()) "" else File(selected).nameWithoutExtension
     fun snapshot(): Map<String, Any> = mapOf("name" to info[0], "engine" to info[1],
         "version" to info[2], "backendType" to info[3], "status" to status,
-        "error" to error, "external" to selected.isNotEmpty(),
-        "fileName" to (prefs.getString("file_name", "") ?: ""))
+        "error" to error, "external" to selected.isNotEmpty(), "id" to selectedId(),
+        "fileName" to (installed.find { it["id"] == selectedId() }?.get("fileName") ?: ""),
+        "installed" to installed.toList(), "builtinBackends" to builtinDevices)
+
+    private fun saveCatalog() {
+        check(prefs.edit().putString("installed", JSONArray(installed.map { JSONObject(it) }).toString()).commit()) {
+            "Could not save imported backends"
+        }
+    }
+    private fun record(path: String, metadata: Array<String>, name: String): Map<String, String> = mapOf(
+        "id" to File(path).nameWithoutExtension, "name" to metadata[0], "engine" to metadata[1],
+        "version" to metadata[2], "backendType" to metadata[3], "fileName" to name)
 
     private fun save() {
         check(prefs.edit().putString("selected", selected).putString("status", status)
@@ -41,11 +57,27 @@ class BackendPlugins(private val context: Context) {
 
     suspend fun initialize() = lock.withLock {
         if (initialized) return@withLock
+        val saved = runCatching { JSONArray(prefs.getString("installed", "[]")) }.getOrDefault(JSONArray())
+        for (i in 0 until saved.length()) {
+            val entry = saved.getJSONObject(i)
+            installed.add(entry.keys().asSequence().associateWith { entry.getString(it) })
+        }
+        info = nativeSelect("")
+        builtinDevices = nativeDevices()
         val path = prefs.getString("selected", "") ?: ""
         if (prefs.getBoolean("initializing", false)) {
             fallback("Previous plugin initialization did not finish. Built-in backend restored.")
         } else if (path.isNotEmpty()) {
-            try { validate(File(path)); probe(path); activate(path) }
+            try {
+                validate(File(path))
+                val metadata = probe(path)
+                // Migrate the previously supported single imported backend.
+                if (installed.none { it["id"] == File(path).nameWithoutExtension }) {
+                    installed.add(record(path, metadata, prefs.getString("file_name", File(path).name) ?: File(path).name))
+                    saveCatalog()
+                }
+                activate(path)
+            }
             catch (e: Exception) { fallback(e.message ?: "Plugin initialization failed") }
         } else {
             info = nativeSelect("")
@@ -69,18 +101,36 @@ class BackendPlugins(private val context: Context) {
         info = nativeSelect("")
     }
 
-    private fun activate(path: String) {
+    private fun activate(path: String, persist: Boolean = true) {
         check(prefs.edit().putBoolean("initializing", true).commit())
         info = nativeSelect(path)
         selected = path; status = "Loaded"; error = ""
         android.util.Log.i("JLexaPlugin", "Loaded ${info[0]} from ${if (path.isEmpty()) "bundled library" else path}")
-        save()
+        if (persist) save()
         endModelLoad()
     }
 
     suspend fun useBuiltin() = lock.withLock {
         activate("")
-        removeUnused()
+    }
+
+    suspend fun selectPlugin(id: String, persist: Boolean = true) = lock.withLock {
+        if (id.isEmpty()) { activate("", persist); return@withLock }
+        val entry = installed.find { it["id"] == id } ?: error("Backend is no longer installed")
+        val file = File(directory, "${entry.getValue("id")}.so")
+        validate(file)
+        if (persist) probe(file.absolutePath)
+        activate(file.absolutePath, persist)
+    }
+
+    suspend fun deletePlugin(id: String) = lock.withLock {
+        check(id != selectedId()) { "Switch to a built-in backend before deleting the active backend" }
+        val entry = installed.find { it["id"] == id } ?: error("Backend is no longer installed")
+        val file = File(directory, "${entry.getValue("id")}.so")
+        check(file.canonicalFile.parentFile == directory.canonicalFile) { "Invalid private plugin path" }
+        check(!file.exists() || file.delete()) { "Could not delete imported backend" }
+        installed.remove(entry)
+        saveCatalog()
     }
 
     private fun validate(file: File) {
@@ -121,18 +171,19 @@ class BackendPlugins(private val context: Context) {
             pending.await()
         } finally { picker = null }
         if (uri == null) return@withLock snapshot()
+        var candidate: File? = null
         try {
             val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
                 if (it.moveToFirst()) it.getString(0) else null
             } ?: "plugin.so"
             require(name.endsWith(".so", ignoreCase = true)) { "Incompatible: select a .so file." }
-            prefs.edit().putString("file_name", name).commit()
-            val candidate = File(directory, "${UUID.randomUUID()}.so")
+            val file = File(directory, "${UUID.randomUUID()}.so")
+            candidate = file
             context.contentResolver.openInputStream(uri).use { input ->
                 checkNotNull(input) { "Could not open selected file" }
-                FileOutputStream(candidate).use { output ->
+                FileOutputStream(file).use { output ->
                     // Mark read-only while retaining our already-open write descriptor.
-                    check(candidate.setReadOnly()) { "Could not make plugin read-only" }
+                    check(file.setReadOnly()) { "Could not make plugin read-only" }
                     val buffer = ByteArray(65536); var total = 0L
                     while (true) {
                         val count = input.read(buffer); if (count < 0) break
@@ -143,18 +194,16 @@ class BackendPlugins(private val context: Context) {
                     output.fd.sync()
                 }
             }
-            validate(candidate)
-            probe(candidate.absolutePath)
-            activate(candidate.absolutePath)
+            validate(file)
+            val metadata = probe(file.absolutePath)
+            val entry = record(file.absolutePath, metadata, name)
+            installed.add(entry)
+            try { saveCatalog() } catch (e: Exception) { installed.remove(entry); throw e }
         } catch (e: Exception) {
-            fallback(e.message ?: "Plugin import failed")
+            candidate?.delete()
+            throw IllegalStateException(e.message ?: "Plugin import failed", e)
         }
-        removeUnused()
         snapshot()
-    }
-
-    private fun removeUnused() {
-        directory.listFiles()?.filter { it.name.endsWith(".so") && it.absolutePath != selected }?.forEach { it.delete() }
     }
 
     fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
@@ -163,9 +212,11 @@ class BackendPlugins(private val context: Context) {
         return true
     }
 
-    private suspend fun probe(path: String) = withContext(Dispatchers.Main) {
+    private suspend fun probe(path: String): Array<String> = withContext(Dispatchers.Main) {
+        var metadata: Array<String>? = null
         val completed = CompletableDeferred<String>()
         val reply = Messenger(Handler(Looper.getMainLooper()) { msg ->
+            metadata = msg.data.getStringArray("info")
             completed.complete(msg.data.getString("error", "")); true
         })
         val connection = object : ServiceConnection {
@@ -187,5 +238,6 @@ class BackendPlugins(private val context: Context) {
             catch (_: TimeoutCancellationException) { "Failed: plugin initialization timed out." }
             finally { context.unbindService(connection) }
         if (failure.isNotEmpty()) throw IllegalStateException(failure)
+        requireNotNull(metadata?.takeIf { it.size == 4 }) { "Incompatible: plugin metadata missing" }
     }
 }

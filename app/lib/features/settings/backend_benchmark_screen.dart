@@ -56,7 +56,7 @@ class _BackendBenchmarkScreenState extends State<BackendBenchmarkScreen>
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('${r.backend.toUpperCase()} result'),
+        title: Text('${c.label(r.backend)} result'),
         content: SingleChildScrollView(
           child: SelectableText(
             '${r.time}\n${status(r.status)}\n'
@@ -149,7 +149,7 @@ class _BackendBenchmarkScreenState extends State<BackendBenchmarkScreen>
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      Text(b.backend.toUpperCase()),
+                                      Text(c.label(b.backend)),
                                       Text(
                                         !b.available
                                             ? 'Unavailable'
@@ -197,7 +197,7 @@ class _BackendBenchmarkScreenState extends State<BackendBenchmarkScreen>
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(
-                            '${b.backend.toUpperCase()}: ${b.reasonUnavailable ?? 'Not supported by this plugin/device'}',
+                            '${c.label(b.backend)}: ${b.reasonUnavailable ?? 'Not supported by this plugin/device'}',
                           ),
                         ),
                       if (c.stage.isNotEmpty) ...[
@@ -205,7 +205,7 @@ class _BackendBenchmarkScreenState extends State<BackendBenchmarkScreen>
                         Text(
                           c.stopping
                               ? 'Stopping… The previous backend will be restored.'
-                              : '${c.activeBackend.toUpperCase()} · ${status(c.stage)}',
+                              : '${c.label(c.activeBackend)} · ${status(c.stage)}',
                         ),
                         if (c.running)
                           const Padding(

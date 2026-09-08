@@ -192,7 +192,7 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
         when (call.method) {
             "benchmarkSupported" -> scope.launch {
                 try {
-                    val value = nativeSupportsBenchmark()
+                    val value = true // The bundled backend supplies benchmark timing; each selected row is checked.
                     withContext(Dispatchers.Main) { result.success(value) }
                 } catch (e: Throwable) {
                     withContext(Dispatchers.Main) { result.error("BENCHMARK_ERROR", e.message, null) }
@@ -207,14 +207,19 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
                 result.success(null)
             }
             "pluginStatus" -> result.success(plugins.snapshot())
-            "importPlugin", "useBuiltinPlugin" -> {
+            "importPlugin", "useBuiltinPlugin", "selectPlugin", "deletePlugin" -> {
                 if (isGenerating.get() || !isMutating.compareAndSet(false, true)) {
                     result.error("BUSY", "Wait for the current inference operation to finish", null)
                     return
                 }
                 scope.launch {
                     try {
-                        if (call.method == "importPlugin") plugins.importPlugin() else plugins.useBuiltin()
+                        when (call.method) {
+                            "importPlugin" -> plugins.importPlugin()
+                            "selectPlugin" -> plugins.selectPlugin(requireNotNull(call.argument<String>("id")))
+                            "deletePlugin" -> plugins.deletePlugin(requireNotNull(call.argument<String>("id")))
+                            else -> plugins.useBuiltin()
+                        }
                         withContext(Dispatchers.Main) { isMutating.set(false); result.success(plugins.snapshot()) }
                     } catch (e: Throwable) {
                         withContext(Dispatchers.Main) { isMutating.set(false); result.error("PLUGIN_ERROR", e.message, null) }
@@ -430,7 +435,7 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
         val id = call.argument<String>("requestId")
         val backends = call.argument<List<String>>("backends")?.distinct().orEmpty()
         if (modelPath.isNullOrEmpty() || id == null || backends.isEmpty() ||
-            backends.any { it !in listOf("cpu", "vulkan", "opencl") }) {
+            backends.any { it !in listOf("cpu", "vulkan", "opencl") && !it.startsWith("plugin:") }) {
             result.error("INVALID_ARGS", "Select a loaded model and at least one backend", null)
             return
         }
@@ -448,6 +453,7 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
             var restored = true
             var failure = ""
             var original: Map<String, Any>? = null
+            val originalPlugin = plugins.selectedId()
             fun event(stage: String, backend: String = "", extra: Map<String, Any> = emptyMap()) {
                 sendEvent(mapOf("type" to "benchmark", "requestId" to id, "stage" to stage, "backend" to backend) + extra)
             }
@@ -472,23 +478,26 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
                 }
             }
             try {
-                check(nativeSupportsBenchmark()) { "This plugin does not support native benchmark timing. Import an updated plugin." }
                 check(nativeIsModelLoaded()) { "Load a language model before benchmarking" }
                 original = nativeGetActiveBackendInfo()
-                val available = nativeGetAvailableBackends().associateBy { it["backend"] as String }
                 for (backend in backends) {
                     if (benchmarkCancelled.get()) break
                     event("loading", backend)
                     val row = mutableMapOf<String, Any>("backend" to backend, "status" to "failed")
                     try {
-                        check(available[backend]?.get("available") == true) {
-                            available[backend]?.get("reasonUnavailable")?.toString() ?: "Backend unavailable"
-                        }
                         changedModel = true
-                        check(load(backend)) { "Model could not load on $backend" }
+                        val pluginId = if (backend.startsWith("plugin:")) backend.removePrefix("plugin:") else ""
+                        if (plugins.selectedId() != pluginId) plugins.selectPlugin(pluginId, persist = false)
+                        check(nativeSupportsBenchmark()) { "This backend does not support benchmark timing. Import an updated plugin." }
+                        val device = if (pluginId.isEmpty()) backend else "auto"
+                        val available = nativeGetAvailableBackends().associateBy { it["backend"] as String }
+                        check(device == "auto" || available[device]?.get("available") == true) {
+                            available[device]?.get("reasonUnavailable")?.toString() ?: "Backend unavailable"
+                        }
+                        check(load(device)) { "Model could not load on $backend" }
                         if (benchmarkCancelled.get()) break
                         val active = nativeGetActiveBackendInfo().orEmpty()
-                        check(active["backend"] == backend) { "Requested $backend but engine activated ${active["backend"]}" }
+                        check(device == "auto" || active["backend"] == device) { "Requested $backend but engine activated ${active["backend"]}" }
                         row["device"] = active["deviceName"] ?: backend
                         row["runtime"] = active
                         event("prefill", backend)
@@ -514,8 +523,9 @@ class LlamaBridge(private val context: Context? = null) : MethodChannel.MethodCa
                 if (changedModel && original != null) {
                     event("restoring")
                     // Stop remains latched for the test; restoration needs a fresh cancellation flag.
-                    nativeResetCancellation()
                     try {
+                        plugins.selectPlugin(originalPlugin, persist = false)
+                        nativeResetCancellation()
                         check(load(original["backend"] as? String ?: "auto", original)) { "Could not restore the previous backend" }
                         activePfd?.close()
                         activePfd = newPfd

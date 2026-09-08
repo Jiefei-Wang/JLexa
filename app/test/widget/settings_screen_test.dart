@@ -20,6 +20,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../test_helper.dart';
+import '../unit/backend_plugins_test.dart' show TestPlugins;
 
 class MockAiEngine implements AiEngine {
   bool _isLoaded = false;
@@ -203,6 +204,61 @@ void main() {
         await tempDir.delete(recursive: true);
       }
     });
+
+    testWidgets(
+      'backend choices contain only Benchmark/Import actions and removable imported rows',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(800, 5000));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        controller.dispose();
+        modelManager.dispose();
+        aiService.dispose();
+        final plugins = TestPlugins()..selected = 'a';
+        aiService = AiService(
+          llm: mockLlm,
+          speech: mockSpeech,
+          plugins: plugins,
+        );
+        modelManager = ModelManager(
+          storage: storage,
+          downloader: downloader,
+          aiService: aiService,
+        );
+        controller = SettingsController(
+          aiService: aiService,
+          manager: modelManager,
+          picker: filePicker,
+        );
+        await tester.runAsync(() async {
+          await modelManager.initialize();
+          await aiService.refreshPluginInfo();
+        });
+        await tester.pumpWidget(
+          MaterialApp(
+            home: SettingsScreen(aiService: aiService, controller: controller),
+          ),
+        );
+        await tester.runAsync(controller.refreshModels);
+        await tester.pumpAndSettle();
+        expect(find.text('Backend Plugins'), findsNothing);
+        expect(find.text('Use built-in'), findsNothing);
+        expect(find.text('Benchmark'), findsOneWidget);
+        expect(find.text('Import'), findsOneWidget);
+        expect(find.text('Snapdragon'), findsOneWidget);
+        expect(find.byTooltip('Delete Other engine'), findsOneWidget);
+        await tester.tap(find.byTooltip('Delete Other engine'));
+        await tester.pumpAndSettle();
+        expect(find.text('Other engine'), findsNothing);
+        expect(plugins.selected, 'a');
+        plugins.fail = true;
+        await tester.tap(find.text('Import'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('expected arm64-v8a'), findsOneWidget);
+        expect(plugins.selected, 'a');
+        expect(find.text('Snapdragon'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
 
     testWidgets(
       'Renders curated models, recommended badges, and import options',

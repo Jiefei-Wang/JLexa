@@ -83,6 +83,8 @@ abstract interface class BenchmarkStore {
 }
 
 class DatabaseBenchmarkStore implements BenchmarkStore {
+  final Map<String, String> legacyPluginRows;
+  DatabaseBenchmarkStore({this.legacyPluginRows = const {}});
   @override
   Future<Map<String, BackendBenchmarkResult>> read(String key) async {
     final db = await AppDatabase.instance.database;
@@ -91,6 +93,44 @@ class DatabaseBenchmarkStore implements BenchmarkStore {
       where: 'key = ?',
       whereArgs: [key],
     );
+    if (rows.isEmpty && key.endsWith(',"backend_catalog_v1"]')) {
+      final current =
+          jsonDecode(key.substring('backend_benchmark_v1:'.length)) as List;
+      final migrated = <String, BackendBenchmarkResult>{};
+      final oldRows = await db.query(
+        'app_settings',
+        where: 'key LIKE ?',
+        whereArgs: ['backend_benchmark_v1:%'],
+      );
+      for (final old in oldRows) {
+        try {
+          final parts = jsonDecode(
+            (old['key'] as String).substring('backend_benchmark_v1:'.length),
+          ) as List;
+          if (parts[0] != current[0]) continue;
+          final identity = parts[1] as String;
+          final pluginRow = legacyPluginRows[identity];
+          if (!identity.startsWith('false/') && pluginRow == null) continue;
+          final values = jsonDecode(old['value'] as String) as Map;
+          for (final value in values.values) {
+            final raw = value as Map;
+            if (pluginRow != null && raw['backend'] != 'cpu') continue;
+            final result = BackendBenchmarkResult.fromMap({
+              ...raw,
+              'backend': pluginRow ?? raw['backend'],
+            });
+            final previous = migrated[result.backend];
+            if (previous == null || result.time.compareTo(previous.time) > 0) {
+              migrated[result.backend] = result;
+            }
+          }
+        } catch (_) {
+          /* Ignore malformed legacy results, not the current table. */
+        }
+      }
+      if (migrated.isNotEmpty) await write(key, migrated);
+      return migrated;
+    }
     if (rows.isEmpty) return {};
     final value =
         jsonDecode(rows.single['value'] as String) as Map<String, dynamic>;

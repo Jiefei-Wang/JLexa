@@ -30,9 +30,9 @@ OpenMP (GGML retains its own worker pool), exports the inference and optional
 benchmark APIs, and aligns ELF segments to 16 KB. Only Android system libraries
 are needed; no dependency files need importing.
 
-Copy that `.so` to the phone and use Settings → Backend Plugins → Import .so.
+Copy that `.so` to the phone and use Settings → Hardware Backend Preference → Import.
 JLexa copies it to private read-only storage through the existing importer.
-Choose CPU (or Auto, which resolves to CPU in this plugin). The model and
+Select the newly added **JLexa Snapdragon CPU** option. The model and
 thread count continue to come from the existing app settings. The built-in
 backend remains available to return to GPU operation.
 

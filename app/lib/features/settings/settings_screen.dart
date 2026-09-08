@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/ai/ai_models.dart';
 import '../../core/ai/ai_service.dart';
@@ -56,67 +57,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
-  Widget _buildBackendPluginsCard() {
+  bool get _backendBusy =>
+      _controller.isLoading ||
+      _controller.aiService.isGenerating ||
+      _controller.aiService.initState == AiServiceInitState.initializing;
+
+  Future<void> _backendAction(Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (e) {
+      if (mounted) {
+        final message = e is PlatformException ? (e.message ?? e.code) : '$e';
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+      }
+    }
+  }
+
+  Future<void> _importBackend() async {
     final service = _controller.aiService;
-    final plugin = service.pluginInfo;
-    final busy =
-        _controller.isLoading ||
-        service.isGenerating ||
-        service.initState == AiServiceInitState.initializing;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Backend Plugins', style: AppTypography.titleSmall),
-            const SizedBox(height: 8),
-            Text(plugin.external ? plugin.name : 'Built-in: ${plugin.name}'),
-            Text('${plugin.engine} / ${plugin.version}'),
-            Text(plugin.backendType),
-            Text('Status: ${plugin.status}'),
-            if (plugin.error.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              if (plugin.fileName.isNotEmpty) Text(plugin.fileName),
-              Text(
-                plugin.error,
-                style: const TextStyle(color: AppColors.error),
-              ),
-            ],
-            const SizedBox(height: 8),
-            const Text(
-              'Import a trusted ARM64 JLexa backend .so. It is copied to private app storage. Your loaded model will reload.',
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: busy ? null : _openBenchmark,
-                  icon: const Icon(Icons.speed),
-                  label: const Text('Benchmark'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: busy || !service.backendPlugins.supported
-                      ? null
-                      : () => _controller.changeBackendPlugin(import: true),
-                  icon: const Icon(Icons.file_open_outlined),
-                  label: const Text('Import .so'),
-                ),
-                TextButton(
-                  onPressed: busy || (!plugin.external && plugin.error.isEmpty)
-                      ? null
-                      : () => _controller.changeBackendPlugin(import: false),
-                  child: const Text('Use built-in'),
-                ),
-              ],
-            ),
-            if (busy) const LinearProgressIndicator(),
-          ],
-        ),
-      ),
-    );
+    final before = service.pluginInfo.installed.length;
+    await _backendAction(() async {
+      await service.changeBackendPlugin(import: true);
+      if (mounted && service.pluginInfo.installed.length > before) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Backend added. Select it below to use it.'),
+          ),
+        );
+      }
+    });
   }
 
   void _openBenchmark() {
@@ -134,8 +104,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final plugin = service.pluginInfo;
     final benchmarkController = BackendBenchmarkController(
       engine: engine as BenchmarkEngine,
-      store: DatabaseBenchmarkStore(),
-      backends: List.of(service.availableBackends),
+      store: DatabaseBenchmarkStore(
+        legacyPluginRows: {
+          for (final p in plugin.installed.where((p) => p.backendType == 'CPU'))
+            'true/${p.name}/${p.version}/${p.fileName}': 'plugin:${p.id}',
+        },
+      ),
+      backends: [
+        ...(plugin.builtinBackends.isEmpty
+            ? service.availableBackends
+            : plugin.builtinBackends),
+        ...plugin.installed.map(
+          (p) => LlamaBackendInfo(
+            backend: 'plugin:${p.id}',
+            deviceName: p.name,
+            compiled: true,
+            available: true,
+          ),
+        ),
+      ],
       runtime: service.llamaRuntimeSettings,
       modelName:
           _controller.llmModels
@@ -145,8 +132,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _controller.llmInfo?.name ??
           'Selected model',
       modelPath: path,
-      pluginKey:
-          '${plugin.external}/${plugin.name}/${plugin.version}/${plugin.fileName}',
+      pluginKey: 'backend_catalog_v1',
       onFinished: service.refreshAfterBenchmark,
     );
     Navigator.of(context).push(
@@ -305,8 +291,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 // ==========================================
                 // Storage Folder Configuration
                 // ==========================================
-                _buildBackendPluginsCard(),
-                const SizedBox(height: 24),
                 _buildStorageFolderCard(),
                 const SizedBox(height: 24),
 
@@ -903,7 +887,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildLlamaRuntimeCard() {
     final settings = _controller.llamaSettings;
     final activeInfo = _controller.activeBackendInfo;
-    final backends = _controller.availableBackends;
+    final plugin = _controller.aiService.pluginInfo;
+    final backends = plugin.builtinBackends.isEmpty
+        ? _controller.availableBackends
+        : plugin.builtinBackends;
     final hasLoadedModel = _controller.aiService.llmEngine.isLoaded;
     final usesSmallerBatches =
         hasLoadedModel &&
@@ -1035,6 +1022,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
             style: AppTypography.labelLarge,
           ),
           const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _backendBusy ? null : _openBenchmark,
+                icon: const Icon(Icons.speed),
+                label: const Text('Benchmark'),
+              ),
+              OutlinedButton.icon(
+                onPressed:
+                    _backendBusy ||
+                        !_controller.aiService.backendPlugins.supported
+                    ? null
+                    : _importBackend,
+                icon: const Icon(Icons.file_open_outlined),
+                label: const Text('Import'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           ...LlamaBackendPreference.values.map((pref) {
             final bInfo = backends.firstWhere(
               (b) => b.backend.toLowerCase() == pref.name.toLowerCase(),
@@ -1055,8 +1063,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 (bInfo.compiled && bInfo.available);
 
             return InkWell(
-              onTap: isUsable && !_controller.isLoading
-                  ? () => _controller.updateBackendPreference(pref)
+              onTap: isUsable && !_backendBusy
+                  ? () => _backendAction(
+                      () => _controller.aiService.selectBackend(
+                        '',
+                        preference: pref,
+                      ),
+                    )
                   : null,
               borderRadius: BorderRadius.circular(10),
               child: Padding(
@@ -1064,11 +1077,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Row(
                   children: [
                     Icon(
-                      settings.backend == pref
+                      !plugin.external && settings.backend == pref
                           ? Icons.radio_button_checked
                           : Icons.radio_button_unchecked,
                       color: isUsable
-                          ? (settings.backend == pref
+                          ? (!plugin.external && settings.backend == pref
                                 ? AppColors.primary
                                 : AppColors.textSecondary)
                           : AppColors.textTertiary,
@@ -1154,6 +1167,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             );
           }),
+
+          ...plugin.installed.map(
+            (backend) => Material(
+              color: Colors.transparent,
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                leading: Icon(
+                  plugin.id == backend.id
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: plugin.id == backend.id
+                      ? AppColors.primary
+                      : AppColors.textSecondary,
+                ),
+                title: Text(backend.name),
+                subtitle: Text(
+                  '${backend.engine} · ${backend.version} · ${backend.backendType}',
+                ),
+                onTap: _backendBusy
+                    ? null
+                    : () => _backendAction(
+                        () => _controller.aiService.selectBackend(backend.id),
+                      ),
+                trailing: IconButton(
+                  tooltip: 'Delete ${backend.name}',
+                  onPressed: _backendBusy
+                      ? null
+                      : () => _backendAction(
+                          () => _controller.aiService.deleteBackend(backend.id),
+                        ),
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              ),
+            ),
+          ),
 
           const Divider(height: 24),
 

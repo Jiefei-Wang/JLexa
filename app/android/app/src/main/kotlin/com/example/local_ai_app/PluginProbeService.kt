@@ -15,13 +15,14 @@ class PluginProbeService : Service() {
             val kill = Runnable { Process.killProcess(Process.myPid()) }
             watchdog.postDelayed(kill, 18000)
             var failure = ""
+            var metadata: Array<String>? = null
             try {
                 System.loadLibrary("jlexa_native")
                 val plugins = BackendPlugins(this)
-                plugins.nativeSelect(path)
+                metadata = plugins.nativeSelect(path)
                 plugins.nativeSelect("") // Exercise destruction before reporting success.
             } catch (e: Throwable) { failure = e.message ?: "Plugin initialization failed" }
-            try { reply.send(Message.obtain(null, 1).apply { data = Bundle().apply { putString("error", failure) } }) }
+            try { reply.send(Message.obtain(null, 1).apply { data = Bundle().apply { putString("error", failure); putStringArray("info", metadata) } }) }
             finally { watchdog.postDelayed(kill, 200) }
         }.start()
         true
