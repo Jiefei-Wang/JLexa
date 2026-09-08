@@ -102,6 +102,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Whisper-assisted segmentation'),
+              value: service.whisperSegmentationEnabled,
+              onChanged: (enabled) => _backendAction(
+                () => service.setWhisperSegmentationEnabled(enabled),
+              ),
+            ),
+            const SizedBox(height: 8),
             const Text('Whisper Backend', style: AppTypography.titleSmall),
             const SizedBox(height: 8),
             Wrap(

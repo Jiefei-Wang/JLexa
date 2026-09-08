@@ -206,6 +206,39 @@ void main() {
     });
 
     testWidgets(
+      'Whisper-assisted segmentation setting is opt-in and interactive',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(800, 5000));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await tester.pumpWidget(
+          MaterialApp(
+            home: SettingsScreen(aiService: aiService, controller: controller),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final toggle = find.widgetWithText(
+          SwitchListTile,
+          'Whisper-assisted segmentation',
+        );
+        await tester.ensureVisible(toggle);
+        expect(tester.widget<SwitchListTile>(toggle).value, false);
+        await tester.runAsync(() async {
+          await tester.tap(toggle);
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        });
+        await tester.pumpAndSettle();
+        expect(aiService.whisperSegmentationEnabled, true);
+        expect(tester.widget<SwitchListTile>(toggle).value, true);
+        await tester.runAsync(
+          () => aiService.setWhisperSegmentationEnabled(false),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.widget<SwitchListTile>(toggle).value, false);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
       'backend choices contain only Benchmark/Import actions and removable imported rows',
       (tester) async {
         await tester.binding.setSurfaceSize(const Size(800, 5000));

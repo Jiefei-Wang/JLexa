@@ -564,3 +564,28 @@ At the end of every agent session after completing work:
   - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`; apksigner verified, v2 true.
   - Final signed APK installed successfully on Honor and Pixel, installed base.apk SHA-256 matches on both.
   - Existing upstream Flutter/Kotlin notices remain. Previously blocked duplicate APK removal was not retried/bypassed. Pre-existing untracked `artifacts/` remains untouched.
+
+
+---
+
+## Session: 2026-09-08 (Whisper-assisted Window Segmentation)
+- **Focus**: Added the optional Settings switch for Whisper-assisted segmentation, prioritized approximately one-minute windows, durable background results, and Auto as transcript visibility only. Evidence: `docs/qa-whisper-windows-pixel-2026-09-08.md`.
+- **Implementation**:
+  - Prepared acoustic regions first; planned disjoint windows near one minute with 15-second recognition context on either side. Whole crossing sentences are reconciled across windows, with expanded context for edge fragments and acoustic fallback when unresolved.
+  - Hid pending-window cuts, showed a Local Window spinner, disabled edit/add/delete (including initial waveform preparation), and restored normal controls on completion. Failures and missing models expose acoustic fallback with Retry.
+  - Saved completion metadata and revised cuts/transcript tokens in one revision-checked SQLite transaction; persisted restart recovery and protected finalized/manual cuts and deleted holes.
+  - Serialized native ownership across seek preemption, manual edits, lesson changes, and rapid OFF/ON. Background updates preserve explicitly revealed Auto-OFF text and selected cuts; context/merge operations resolve stable cut IDs after filtering.
+  - Auto now changes cached-text visibility without starting/cancelling recognition. Manual Transcribe remains available. Default Whisper segmentation preference is OFF; Pixel was left with it enabled and Auto OFF after validation.
+- **Verification**:
+  - `flutter analyze` from `app/`: No issues found, zero errors/warnings.
+  - `flutter test --concurrency=1`: **396 passed**, zero failed.
+  - Pixel 6 (`25311FDF6004PR`, Android 16) only, per user direction. Existing Tiny English SAF model/built-in CPU backend; no Honor operations.
+  - Final release 00:00–01:00 scheduling window became ready in **9.55 seconds** (2.28 s audio decoding, 7.07 s inference); first selected later window took 11.54 s including save. Playback, seek preemption, pending controls, Auto cache display, restart restoration, and post-completion editing mode verified.
+  - Actual 57–61 s question retained as one cut across the minute boundary after both windows completed in reverse order; no duplicate on Previous/Next. All 18 windows eventually completed, preserving 229 cuts. Final PID 28673; no new crash-buffer entries during release validation.
+- **Signed Release**:
+  - `flutter build apk --release` succeeded with `app/android/key.properties`; temporary debug signing was removed.
+  - Fixed artifact: `release/app-release.apk`, **114,556,211 bytes**.
+  - APK SHA-256: `562B5EF9200F774D1A77F0E014CFA3084A06FC2F9E9BEEA84FE1BA3DF3588CF1`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`; APK signature v2 verified.
+  - Final signed APK installed successfully on Pixel with data preserved. Duplicate generated APKs in build outputs were removed after verification/copy under the current user-provided release instructions.
+  - Existing upstream flutter_tts future Kotlin-plugin compatibility warning remains; release builds succeed.

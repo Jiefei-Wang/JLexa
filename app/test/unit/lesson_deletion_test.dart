@@ -42,6 +42,7 @@ void main() {
       dbPath,
       version: 1,
       onCreate: (d, v) async {
+        await d.execute('CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT)');
         await d.execute('''
           CREATE TABLE audio_lessons (
             id TEXT PRIMARY KEY,
@@ -104,6 +105,7 @@ void main() {
     );
 
     await lessonRepo.saveLesson(lesson);
+    await lessonRepo.setSetting('whisper_windows_$lessonId', '{"completed":[0]}');
     await lessonRepo.saveSegments(lessonId, [
       AudioSegment(
         id: 'seg_1',
@@ -139,6 +141,7 @@ void main() {
 
     final segments = await lessonRepo.getSegmentsForLesson(lessonId);
     expect(segments, isEmpty);
+    expect(await lessonRepo.getSetting('whisper_windows_$lessonId'), isNull);
 
     // Verify local audio and waveform cache files removed
     expect(await audioFile.exists(), isFalse);

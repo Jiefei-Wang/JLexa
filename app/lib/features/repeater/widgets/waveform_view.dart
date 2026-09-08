@@ -28,6 +28,7 @@ class WaveformView extends StatefulWidget {
   final CutBoundsCallback? onSegmentBoundsChanged;
   final VoidCallback? onAddCut;
   final VoidCallback? onDeleteCut;
+  final bool isWindowProcessing;
   const WaveformView({
     super.key,
     required this.fullPeaks,
@@ -42,6 +43,7 @@ class WaveformView extends StatefulWidget {
     this.onSegmentBoundsChanged,
     this.onAddCut,
     this.onDeleteCut,
+    this.isWindowProcessing = false,
   });
   @override
   State<WaveformView> createState() => _WaveformViewState();
@@ -58,6 +60,24 @@ class _WaveformViewState extends State<WaveformView> {
   String _time(int ms) {
     final s = (ms / 1000).floor().clamp(0, 86400);
     return '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
+  }
+
+  @override
+  void didUpdateWidget(covariant WaveformView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isWindowProcessing || widget.onSegmentBoundsChanged == null) {
+      final wasDragging = _gestureCut != null;
+      _editEnabled = false;
+      _gestureCut = null;
+      _gestureWindowStart = null;
+      _previewStart = null;
+      _previewEnd = null;
+      if (wasDragging) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) oldWidget.onSeekEnd?.call();
+        });
+      }
+    }
   }
 
   @override
@@ -95,6 +115,19 @@ class _WaveformViewState extends State<WaveformView> {
             const Expanded(
               child: Text('Local Window', style: AppTypography.labelLarge),
             ),
+            if (widget.isWindowProcessing)
+              const Padding(
+                padding: EdgeInsets.only(right: 8),
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    key: ValueKey('window-segmentation-progress'),
+                    strokeWidth: 2,
+                    semanticsLabel: 'Processing local window',
+                  ),
+                ),
+              ),
             IconButton(
               tooltip: 'Edit segment boundaries',
               isSelected: _editEnabled,
@@ -105,7 +138,9 @@ class _WaveformViewState extends State<WaveformView> {
                     ? AppColors.primary.withValues(alpha: 0.14)
                     : null,
               ),
-              onPressed: widget.onSegmentBoundsChanged == null
+              onPressed:
+                  widget.isWindowProcessing ||
+                      widget.onSegmentBoundsChanged == null
                   ? null
                   : () {
                       _clearEdit();
@@ -117,13 +152,14 @@ class _WaveformViewState extends State<WaveformView> {
             IconButton(
               tooltip: 'Add cut at playhead',
               visualDensity: VisualDensity.compact,
-              onPressed: widget.onAddCut,
+              onPressed: widget.isWindowProcessing ? null : widget.onAddCut,
               icon: const Icon(Icons.add_circle_outline),
             ),
             IconButton(
               tooltip: 'Delete active cut',
               visualDensity: VisualDensity.compact,
-              onPressed: widget.currentSegment != null
+              onPressed:
+                  !widget.isWindowProcessing && widget.currentSegment != null
                   ? widget.onDeleteCut
                   : null,
               icon: const Icon(Icons.delete_outline),

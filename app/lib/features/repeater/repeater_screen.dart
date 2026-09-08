@@ -178,6 +178,10 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                     widget.onImportAudio();
                     return;
                   }
+                  if (_controller.isWindowProcessing ||
+                      _controller.isEditingCuts) {
+                    return;
+                  }
                   final redo = value == 'segments';
                   final confirmed = await showDialog<bool>(
                     context: context,
@@ -202,7 +206,12 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                       ],
                     ),
                   );
-                  if (confirmed != true || !mounted) return;
+                  if (confirmed != true ||
+                      !mounted ||
+                      _controller.isWindowProcessing ||
+                      _controller.isEditingCuts) {
+                    return;
+                  }
                   if (redo) {
                     await _controller.redoSegments();
                   } else {
@@ -219,12 +228,16 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                     enabled:
                         lesson != null &&
                         !_controller.isEditingCuts &&
+                        !_controller.isWindowProcessing &&
                         !_controller.isWaveformLoading,
                     child: const Text('Redo segments'),
                   ),
                   PopupMenuItem(
                     value: 'transcripts',
-                    enabled: lesson != null && !_controller.isEditingCuts,
+                    enabled:
+                        lesson != null &&
+                        !_controller.isEditingCuts &&
+                        !_controller.isWindowProcessing,
                     child: const Text('Reset transcripts'),
                   ),
                 ],
@@ -317,7 +330,9 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                           ],
                         ),
                       )
-                    else if (_controller.segments.isEmpty)
+                    else if (_controller.segments.isEmpty &&
+                        !_controller.isWindowProcessing &&
+                        _controller.segmentationError == null)
                       Container(
                         margin: const EdgeInsets.only(bottom: 16),
                         padding: const EdgeInsets.all(16),
@@ -361,6 +376,27 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                         ),
                       ),
 
+                    if (_controller.segmentationError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _controller.segmentationError!,
+                                style: const TextStyle(color: AppColors.error),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: _controller.isWindowProcessing
+                                  ? null
+                                  : _controller.retryWhisperSegmentation,
+                              child: const Text('Retry'),
+                            ),
+                          ],
+                        ),
+                      ),
+
                     // Total Progress Scrubber
                     ProgressScrubber(
                       positionMs: _controller.positionMs,
@@ -378,6 +414,7 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                       segments: _controller.segments,
                       currentSegment: _controller.currentSegment,
                       waveformService: widget.waveformService,
+                      isWindowProcessing: _controller.isWindowProcessing,
                       onSeek: _controller.seekTo,
                       onSeekStart: _controller.beginWaveformSeek,
                       onSeekEnd: _controller.endWaveformSeek,
@@ -387,14 +424,16 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                       onDeleteCut: _controller.canDeleteCut
                           ? _controller.deleteCurrentCut
                           : null,
-                      onSegmentBoundsChanged: (id, revision, newStart, newEnd) {
-                        _controller.updateSegmentBounds(
-                          segmentId: id,
-                          expectedRevision: revision,
-                          newStartMs: newStart,
-                          newEndMs: newEnd,
-                        );
-                      },
+                      onSegmentBoundsChanged: !_controller.canEditCuts
+                          ? null
+                          : (id, revision, newStart, newEnd) {
+                              _controller.updateSegmentBounds(
+                                segmentId: id,
+                                expectedRevision: revision,
+                                newStartMs: newStart,
+                                newEndMs: newEnd,
+                              );
+                            },
                     ),
                     const SizedBox(height: 14),
 

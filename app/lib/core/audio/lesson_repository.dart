@@ -159,6 +159,11 @@ class LessonRepository extends ChangeNotifier implements ILessonRepository {
 
     await db.delete('audio_lessons', where: 'id = ?', whereArgs: [id]);
     await db.delete('audio_segments', where: 'lesson_id = ?', whereArgs: [id]);
+    await db.delete(
+      'app_settings',
+      where: 'key = ?',
+      whereArgs: ['whisper_windows_$id'],
+    );
 
     // Clean up local audio file if it is an app-owned file
     if (lesson != null && !lesson.localPath.startsWith('asset:')) {
@@ -256,7 +261,22 @@ class LessonRepository extends ChangeNotifier implements ILessonRepository {
     String lessonId,
     Map<String, int> expectedRevisions,
     List<AudioSegment> cuts,
-  ) async {
+  ) => _commitCuts(lessonId, expectedRevisions, cuts);
+
+  /// Window completion and its cuts must survive (or roll back) together.
+  Future<void> commitWhisperWindow(
+    String lessonId,
+    Map<String, int> expectedRevisions,
+    List<AudioSegment> cuts,
+    String windowState,
+  ) => _commitCuts(lessonId, expectedRevisions, cuts, windowState: windowState);
+
+  Future<void> _commitCuts(
+    String lessonId,
+    Map<String, int> expectedRevisions,
+    List<AudioSegment> cuts, {
+    String? windowState,
+  }) async {
     final db = await AppDatabase.instance.database;
     await db.transaction((txn) async {
       final current = await txn.query(
@@ -287,6 +307,12 @@ class LessonRepository extends ChangeNotifier implements ILessonRepository {
         where: 'id = ?',
         whereArgs: [lessonId],
       );
+      if (windowState != null) {
+        await txn.insert('app_settings', {
+          'key': 'whisper_windows_$lessonId',
+          'value': windowState,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
     });
     notifyListeners();
   }

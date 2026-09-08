@@ -33,6 +33,16 @@ class AiService extends ChangeNotifier {
   AiServiceInitState _initState = AiServiceInitState.uninitialized;
   AiServiceInitState get initState => _initState;
 
+  bool _whisperSegmentationEnabled = false;
+  bool get whisperSegmentationEnabled => _whisperSegmentationEnabled;
+
+  Future<void> setWhisperSegmentationEnabled(bool enabled) async {
+    if (_whisperSegmentationEnabled == enabled) return;
+    await saveSetting('whisper_segmentation_enabled', enabled.toString());
+    _whisperSegmentationEnabled = enabled;
+    notifyListeners();
+  }
+
   AiGenerationSettings _settings = const AiGenerationSettings();
   AiGenerationSettings get settings => _settings;
 
@@ -90,6 +100,9 @@ class AiService extends ChangeNotifier {
       final Map<String, String> map = {
         for (var r in results) r['key'] as String: r['value'] as String,
       };
+
+      _whisperSegmentationEnabled =
+          map['whisper_segmentation_enabled'] == 'true';
 
       if (map.containsKey('llm_model_path') &&
           map['llm_model_path']!.isNotEmpty) {
