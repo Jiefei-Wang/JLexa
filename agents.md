@@ -589,3 +589,26 @@ At the end of every agent session after completing work:
   - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`; APK signature v2 verified.
   - Final signed APK installed successfully on Pixel with data preserved. Duplicate generated APKs in build outputs were removed after verification/copy under the current user-provided release instructions.
   - Existing upstream flutter_tts future Kotlin-plugin compatibility warning remains; release builds succeed.
+
+---
+
+## Session: 2026-09-08 (Pixel MP3 Playback and Transcript Alignment)
+- **Focus**: Fixed the reported audible overlap and transcript mismatch for adjacent `ted-career-safety` cuts. Evidence: `docs/qa-mp3-playback-alignment-pixel-2026-09-08.md`.
+- **Diagnosis and Fix**:
+  - Recorded real Pixel audio output and correlated it with independently decoded PCM. A saved 42-49 s cut actually played about 44.6-51.6 s; the following 49.31-57 s cut played about 50.3-58.1 s, producing roughly 1.34 s of audible overlap while UI timestamps appeared correct.
+  - Verified AudioRangeDecoder alignment at 0 ms error and matched transcripts. Identified Android MediaPlayer's coarse Info TOC seeking for this 320 kbps CBR MP3; applying its source-code formula independently reproduced the +2.591 s error.
+  - Selected official audioplayers_android_exo 0.1.4, which uses Media3's CBR mapping for Info headers. Kept existing AudioService APIs, controls, segmentation and other platform implementations.
+  - Bound Whisper window cache identity to the persisted lesson duration, avoiding invalidation from the 47 ms decoder-padding duration difference. Added regressions for cache reuse and initially missing duration.
+  - Removed the settings widget test's unreliable fixed 100 ms wait, using an isolated SQLite database and actual persistence verification.
+- **Verification**:
+  - `flutter analyze`: No issues found, zero errors/warnings.
+  - `flutter test --concurrency=1`: 398 passed, zero failed (83 seconds). The first run exposed the settings test timing failure; final complete rerun passed after correction.
+  - Pixel 6 `25311FDF6004PR` only. Real output after fix: 42.051-49.166 s, 49.330-57.071 s, 57.040-61.053 s and late replay 943.710-946.265 s. Multi-second misalignment eliminated; existing output/stop tail is approximately 50-170 ms, not sample-accurate clipping.
+  - Verified repeat without accumulated drift, WAV/short-MP3 playback, Auto-stop, continuous EOF and replay, and final-release restart/cache restoration. Original lessons/models retained. Final phone paused at 42 s, cached profession transcript shown; Whisper segmentation ON, Auto OFF, Repeat OFF, Auto-stop ON. Final PID 32432; no new crash-buffer entries.
+- **Signed Release**:
+  - `flutter build apk --release` succeeded in 60.5 seconds with `app/android/key.properties`.
+  - Fixed path `release/app-release.apk`, 115,686,715 bytes.
+  - APK SHA-256: `7A2198C648C14164EF3C159D03086CF4799E225C34BD5DD1419B554FB31E777D`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`; apksigner verified, v2 true. Installed base.apk hash matches release.
+  - Existing upstream flutter_tts future Kotlin-plugin compatibility warning remains; release succeeds.
+  - Automatic approval review rejected duplicate-APK cleanup with `blocked by policy`, including explicit verified paths; two build-output copies remain. Fixed release is current. Pre-existing untracked `artifacts/` left untouched.

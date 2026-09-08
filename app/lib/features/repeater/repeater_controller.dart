@@ -143,7 +143,9 @@ class RepeaterController extends ChangeNotifier {
       return;
     }
     final session = WhisperWindowSession(
-      lesson: _lesson!.copyWith(durationMs: durationMs),
+      // Decoder padding can change the reported length by a few milliseconds.
+      // Use the persisted timeline so toggling/reopening retains completed work.
+      lesson: _lesson!,
       repository: lessonRepo,
       ai: aiService,
       cuts: List.of(_segments),

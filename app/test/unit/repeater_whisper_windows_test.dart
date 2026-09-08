@@ -33,12 +33,19 @@ class DelayedWindowWaveform extends FixedSpeechWaveform {
   ) => result.future;
 }
 
+class DurationReportingAudio extends ControllableAudioService {
+  int? reportedDurationMs;
+
+  @override
+  int get durationMs => reportedDurationMs ?? super.durationMs;
+}
+
 void main() {
   late Database db;
   late LessonRepository repo;
   late ControlledWindowSpeech speech;
   late AiService ai;
-  late ControllableAudioService audio;
+  late DurationReportingAudio audio;
   late RepeaterController controller;
   late AudioLesson lesson;
   setUpAll(() {
@@ -63,7 +70,7 @@ void main() {
     repo = LessonRepository();
     speech = ControlledWindowSpeech();
     ai = AiService(llm: TestMockAiEngine(), speech: speech);
-    audio = ControllableAudioService();
+    audio = DurationReportingAudio();
     lesson = AudioLesson(
       id: 'lesson',
       title: 'Window test',
@@ -264,6 +271,46 @@ void main() {
     expect(controller.visibleTranscriptSegment, null);
     expect(controller.canEditCuts, true);
   });
+
+  test('decoder padding duration difference preserves completed cache after toggling', () async {
+    await ai.setWhisperSegmentationEnabled(true);
+    await _until(() => speech.calls.length == 1);
+    finish(0, 1);
+    await _until(() => speech.calls.length == 2);
+    finish(1, 0);
+    await _until(() => speech.calls.length == 3);
+    finish(2, 2);
+    await _until(() => controller.segments.every((s) => s.hasValidTranscript));
+    final originalCache = await repo.getSetting('whisper_windows_lesson');
+    expect((jsonDecode(originalCache!) as Map)['duration'], lesson.durationMs);
+
+    await ai.setWhisperSegmentationEnabled(false);
+    audio.reportedDurationMs = lesson.durationMs - 47;
+    await audio.seekTo(65000);
+    expect(controller.durationMs, lesson.durationMs - 47);
+    expect((await repo.getLesson(lesson.id))!.durationMs, lesson.durationMs);
+    await ai.setWhisperSegmentationEnabled(true);
+    await _until(() => !controller.isWindowProcessing);
+
+    expect(controller.currentSegment?.text, 'Sentence 1.');
+    expect(controller.canEditCuts, true);
+    expect(speech.calls, hasLength(3));
+    expect(await repo.getSetting('whisper_windows_lesson'), originalCache);
+  });
+
+  test(
+    'zero stored duration is corrected before starting a window session',
+    () async {
+      lesson = lesson.copyWith(durationMs: 0);
+      await repo.saveLesson(lesson);
+      audio.reportedDurationMs = 180000;
+      await controller.loadLesson(lesson);
+      expect((await repo.getLesson(lesson.id))!.durationMs, 180000);
+      await ai.setWhisperSegmentationEnabled(true);
+      await _until(() => speech.calls.length == 1);
+      expect((speech.calls[0].start, speech.calls[0].end), (45000, 135000));
+    },
+  );
 
   test('missing model releases pending state with error and Retry starts native window', () async {
     speech.loaded = false;

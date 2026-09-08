@@ -14,6 +14,7 @@ import 'package:jlexa/core/ai/model_storage.dart';
 import 'package:jlexa/core/ai/prompt_builder.dart';
 import 'package:jlexa/core/ai/speech_engine.dart';
 import 'package:jlexa/core/audio/audio_models.dart';
+import 'package:jlexa/core/database/app_database.dart';
 import 'package:jlexa/features/settings/settings_controller.dart';
 import 'package:jlexa/features/settings/settings_screen.dart';
 import 'package:path/path.dart' as p;
@@ -208,6 +209,20 @@ void main() {
     testWidgets(
       'Whisper-assisted segmentation setting is opt-in and interactive',
       (tester) async {
+        late Database settingsDb;
+        await tester.runAsync(() async {
+          settingsDb = await databaseFactoryFfi.openDatabase(
+            inMemoryDatabasePath,
+          );
+          await settingsDb.execute(
+            'CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT)',
+          );
+          AppDatabase.setDatabaseForTesting(settingsDb);
+        });
+        addTearDown(() async {
+          AppDatabase.setDatabaseForTesting(null);
+          await settingsDb.close();
+        });
         await tester.binding.setSurfaceSize(const Size(800, 5000));
         addTearDown(() => tester.binding.setSurfaceSize(null));
         await tester.pumpWidget(
@@ -222,9 +237,18 @@ void main() {
         );
         await tester.ensureVisible(toggle);
         expect(tester.widget<SwitchListTile>(toggle).value, false);
+        await tester.tap(toggle);
+        await tester.pump();
         await tester.runAsync(() async {
-          await tester.tap(toggle);
-          await Future<void>.delayed(const Duration(milliseconds: 100));
+          // This query runs after the queued setting write, providing a real
+          // SQLite completion barrier without a fixed wall-clock delay.
+          final saved = await settingsDb.query(
+            'app_settings',
+            columns: ['value'],
+            where: 'key = ?',
+            whereArgs: ['whisper_segmentation_enabled'],
+          );
+          expect(saved.single['value'], 'true');
         });
         await tester.pumpAndSettle();
         expect(aiService.whisperSegmentationEnabled, true);
