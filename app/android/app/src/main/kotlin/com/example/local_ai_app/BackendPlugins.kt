@@ -18,12 +18,14 @@ import org.json.JSONObject
 
 /** Small private-file catalog; importing never switches the active backend. */
 @Keep
-class BackendPlugins(private val context: Context) {
+class BackendPlugins(private val context: Context, val speech: Boolean = false) {
     companion object { const val PICK_PLUGIN = 7412 }
     external fun nativeSelect(path: String): Array<String>
+    external fun nativeSelectSpeech(path: String): Array<String>
+    fun selectNative(path: String): Array<String> = if (speech) nativeSelectSpeech(path) else nativeSelect(path)
     external fun nativeDevices(): List<Map<String, Any>>
-    private val prefs = context.getSharedPreferences("backend_plugins", Context.MODE_PRIVATE)
-    private val directory = File(context.noBackupFilesDir, "backend_plugins").apply { mkdirs() }
+    private val prefs = context.getSharedPreferences(if (speech) "speech_backend_plugins" else "backend_plugins", Context.MODE_PRIVATE)
+    private val directory = File(context.noBackupFilesDir, if (speech) "speech_backend_plugins" else "backend_plugins").apply { mkdirs() }
     private val lock = Mutex()
     private var initialized = false
     private var picker: CompletableDeferred<Uri?>? = null
@@ -62,8 +64,8 @@ class BackendPlugins(private val context: Context) {
             val entry = saved.getJSONObject(i)
             installed.add(entry.keys().asSequence().associateWith { entry.getString(it) })
         }
-        info = nativeSelect("")
-        builtinDevices = nativeDevices()
+        info = selectNative("")
+        builtinDevices = if (speech) emptyList() else nativeDevices()
         val path = prefs.getString("selected", "") ?: ""
         if (prefs.getBoolean("initializing", false)) {
             fallback("Previous plugin initialization did not finish. Built-in backend restored.")
@@ -80,7 +82,7 @@ class BackendPlugins(private val context: Context) {
             }
             catch (e: Exception) { fallback(e.message ?: "Plugin initialization failed") }
         } else {
-            info = nativeSelect("")
+            info = selectNative("")
         }
         initialized = true
     }
@@ -98,12 +100,12 @@ class BackendPlugins(private val context: Context) {
         // Persist fallback before calling any native code, preventing restart loops.
         save()
         endModelLoad()
-        info = nativeSelect("")
+        info = selectNative("")
     }
 
     private fun activate(path: String, persist: Boolean = true) {
         check(prefs.edit().putBoolean("initializing", true).commit())
-        info = nativeSelect(path)
+        info = selectNative(path)
         selected = path; status = "Loaded"; error = ""
         android.util.Log.i("JLexaPlugin", "Loaded ${info[0]} from ${if (path.isEmpty()) "bundled library" else path}")
         if (persist) save()
@@ -166,7 +168,7 @@ class BackendPlugins(private val context: Context) {
             withContext(Dispatchers.Main) {
                 activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
-                }, PICK_PLUGIN)
+                }, if (speech) PICK_PLUGIN + 1 else PICK_PLUGIN)
             }
             pending.await()
         } finally { picker = null }
@@ -207,7 +209,7 @@ class BackendPlugins(private val context: Context) {
     }
 
     fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
-        if (requestCode != PICK_PLUGIN) return false
+        if (requestCode != (if (speech) PICK_PLUGIN + 1 else PICK_PLUGIN)) return false
         picker?.complete(if (resultCode == Activity.RESULT_OK) data?.data else null)
         return true
     }
@@ -223,7 +225,7 @@ class BackendPlugins(private val context: Context) {
             override fun onServiceConnected(name: ComponentName, binder: IBinder) {
                 try {
                     Messenger(binder).send(Message.obtain(null, 1).apply {
-                        data = Bundle().apply { putString("path", path) }; replyTo = reply
+                        data = Bundle().apply { putString("path", path); putBoolean("speech", speech) }; replyTo = reply
                     })
                 } catch (e: Exception) { completed.complete("Failed: ${e.message}") }
             }
@@ -231,7 +233,8 @@ class BackendPlugins(private val context: Context) {
             override fun onBindingDied(name: ComponentName) { completed.complete("Failed: plugin probe process died.") }
             override fun onNullBinding(name: ComponentName) { completed.complete("Failed: plugin probe could not start.") }
         }
-        check(context.bindService(Intent(context, PluginProbeService::class.java), connection, Context.BIND_AUTO_CREATE)) {
+        val service = if (speech) SpeechPluginProbeService::class.java else PluginProbeService::class.java
+        check(context.bindService(Intent(context, service), connection, Context.BIND_AUTO_CREATE)) {
             "Failed: could not start plugin probe."
         }
         val failure = try { withTimeout(20000) { completed.await() } }

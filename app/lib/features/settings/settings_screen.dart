@@ -47,6 +47,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     _controller.refreshModels();
     _controller.aiService.refreshPluginInfo();
+    _controller.aiService.refreshSpeechPluginInfo();
   }
 
   @override
@@ -87,6 +88,96 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     });
+  }
+
+  Widget _buildSpeechBackendCard() {
+    final service = _controller.aiService;
+    final plugin = service.speechPluginInfo;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Whisper Backend', style: AppTypography.titleSmall),
+            const SizedBox(height: 8),
+            const Text(
+              'Speech recognition only. LLM backends do not affect Whisper.',
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.file_open_outlined),
+              label: const Text('Import'),
+              onPressed: _backendBusy
+                  ? null
+                  : () => _backendAction(() async {
+                      final before = plugin.installed.length;
+                      await service.importSpeechBackend();
+                      if (mounted &&
+                          service.speechPluginInfo.installed.length > before) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Whisper backend added. Select it below to use it.',
+                            ),
+                          ),
+                        );
+                      }
+                    }),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                plugin.external
+                    ? Icons.radio_button_unchecked
+                    : Icons.radio_button_checked,
+              ),
+              title: const Text('Built-in Whisper CPU'),
+              subtitle: Text(
+                plugin.external
+                    ? 'whisper.cpp'
+                    : 'whisper.cpp · ${plugin.status}',
+              ),
+              onTap: _backendBusy
+                  ? null
+                  : () => _backendAction(() => service.selectSpeechBackend('')),
+            ),
+            for (final backend in plugin.installed)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  plugin.id == backend.id
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                ),
+                title: Text(backend.name),
+                subtitle: Text(
+                  '${backend.engine} · ${backend.version} · ${backend.backendType}${plugin.id == backend.id ? ' · Loaded' : ''}',
+                ),
+                onTap: _backendBusy
+                    ? null
+                    : () => _backendAction(
+                        () => service.selectSpeechBackend(backend.id),
+                      ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: 'Delete ${backend.name}',
+                  onPressed: _backendBusy
+                      ? null
+                      : () => _backendAction(
+                          () => service.deleteSpeechBackend(backend.id),
+                        ),
+                ),
+              ),
+            if (plugin.error.isNotEmpty)
+              Text(
+                plugin.error,
+                style: const TextStyle(color: AppColors.error),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _openBenchmark() {
@@ -326,7 +417,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'Select an offline speech recognition model. Whisper uses CPU; the hardware backend setting applies to AI text answers.',
+                    'Select an offline speech recognition model. Choose its speech backend separately below.',
                     style: AppTypography.bodySmall,
                   ),
                   const SizedBox(height: 10),
@@ -356,6 +447,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 10),
 
                 _buildLlamaRuntimeCard(),
+                const SizedBox(height: 24),
+                _buildSpeechBackendCard(),
 
                 const SizedBox(height: 24),
 

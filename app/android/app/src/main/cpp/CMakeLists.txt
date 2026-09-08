@@ -74,10 +74,17 @@ if(TARGET jlexa_opencl_mali)
     target_include_directories(jlexa_llama PRIVATE "${JLEXA_OPENCL_INCLUDE_DIR}")
     target_compile_definitions(jlexa_llama PRIVATE JLEXA_HAS_OPENCL=1)
 endif()
+add_library(jlexa_whisper SHARED
+    "${PLUGIN_DIR}/whisper_plugin.cpp" "${BINDINGS_DIR}/jlexa_whisper_bridge.cpp")
+target_include_directories(jlexa_whisper PRIVATE "${PLUGIN_DIR}" "${BINDINGS_DIR}")
+target_link_libraries(jlexa_whisper PRIVATE whisper log)
+target_link_options(jlexa_whisper PRIVATE "-Wl,--exclude-libs,ALL" "-Wl,-Bsymbolic"
+    "-Wl,--version-script=${PLUGIN_DIR}/speech_exports.map")
+set_target_properties(jlexa_whisper PROPERTIES CXX_VISIBILITY_PRESET hidden)
 add_library(jlexa_native SHARED jlexa_jni.cpp
-    "${BINDINGS_DIR}/jlexa_whisper_bridge.cpp"
+    "${PLUGIN_DIR}/jlexa_speech_host.cpp"
     "${PLUGIN_DIR}/jlexa_backend_host.cpp")
 target_include_directories(jlexa_native PRIVATE "${BINDINGS_DIR}" "${PLUGIN_DIR}")
-target_link_libraries(jlexa_native PRIVATE whisper log dl)
+target_link_libraries(jlexa_native PRIVATE log dl)
 target_link_options(jlexa_native PRIVATE "-Wl,--exclude-libs,ALL")
-add_dependencies(jlexa_native jlexa_llama)
+add_dependencies(jlexa_native jlexa_llama jlexa_whisper)

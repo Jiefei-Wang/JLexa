@@ -514,3 +514,27 @@ At the end of every agent session after completing work:
   - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
   - `apksigner verify --verbose --print-certs`: verified, APK Signature Scheme v2 true.
   - Existing upstream Flutter/Kotlin build notices remain. Prior blocked duplicate APK-output deletion was not retried/bypassed; pre-existing untracked `artifacts/` remains untouched.
+
+---
+
+## Session: 2026-09-07 (Whisper Speech Plugins and Snapdragon CPU Optimization)
+- **Focus**: Extended dynamic backend loading to Whisper with a separate small C ABI, independent Settings selection/import/deletion, built-in CPU fallback and measured Snapdragon CPU optimization. Contract: `native/plugin/SPEECH.md`; evidence: `docs/qa-whisper-plugins-2026-09-07.md`.
+- **Implementation**:
+  - Bundled Whisper now lives in `libjlexa_whisper.so`; JNI uses app-owned speech structures and the stable speech API via dlopen/dlsym, with no direct inference-engine dependency.
+  - Reused the private read-only ARM64 importer with independent speech catalog/preferences and a separate disposable probe process. Preserved model descriptors, transcription behavior, word timestamps/confidence and stop/reset semantics.
+  - Added selection rollback, model-load fallback, startup crash markers, active deletion fallback, and speech operation guards. Existing LLM selection and features remain independent.
+  - Added guarded FP16/dotprod/i8mm CPU plugin, generic comparison build, reproducible native timing/lifecycle harness and C fixtures; no model weights or audio decoding changes.
+- **Physical Verification**:
+  - Honor PTP-AN00: optimized speech plugin imported/selected through Settings, existing Whisper Tiny restored, fresh question audio transcribed with word timestamps and 93% confidence; restart retained both Whisper and LLM Snapdragon selections.
+  - Same-model/four-thread warm median native timings: 3.251-second audio generic 1004.745 ms -> optimized 585.079 ms (1.72x); 20-second audio 1436.210 -> 908.381 ms (1.58x). Text matched for both builds on both samples. Actual bundled short-sample median 1013.214 ms. These are sample/device-specific inference timings, not end-to-end or accuracy guarantees.
+  - Pixel: generic speech plugin import/transcription/restart passed; wrong speech API, LLM-only symbol, unsupported CPU features and initialization abort rejected. Valid-ABI model-load failure restored built-in/model; active deletion and built-in cancellation/retry passed on fresh audio.
+  - Native real transcription, pre-cancel, in-progress stop, reset/reuse, unload/destroy passed. Main crash buffers empty for final Pixel PID 13891 and Honor PID 25939. Temporary QA lessons/public audio and Pixel plugin fixtures removed; Honor optimized speech source/selection retained.
+- **Static Analysis**: `flutter analyze` -> No issues found (zero errors/warnings).
+- **Tests**: `flutter test --concurrency=1` -> 320 passed, zero failed (73 seconds).
+- **Signed Release**:
+  - `flutter build apk --release` succeeded; full native build 85.3 seconds, final build 19.0 seconds, using `app/android/key.properties`.
+  - Fixed APK: `release/app-release.apk`, 108,874,819 bytes, SHA-256 `586196D1BDD5F47DBDE0D7FA90331184830156277F177F6309A363406FF8BAFC`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`. apksigner verified, v2 true.
+  - Both phones installed successfully and installed base.apk hashes match the release artifact.
+  - Plugin: `release/jlexa-whisper-snapdragon-plugin.so`, 1,733,704 bytes, SHA-256 `1A6CB684470C39AA18FE57CCC99641C4C05BC02FE584C7CE348A1BB22B1CE500`.
+  - Existing upstream Flutter/Kotlin build notices remain. Prior blocked duplicate APK deletion was not retried/bypassed; pre-existing untracked `artifacts/` remains untouched.

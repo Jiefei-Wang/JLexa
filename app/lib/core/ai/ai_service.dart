@@ -21,6 +21,11 @@ enum AiServiceInitState {
 
 class AiService extends ChangeNotifier {
   final BackendPlugins backendPlugins;
+  final BackendPlugins speechPlugins;
+  BackendPluginInfo speechPluginInfo = const BackendPluginInfo(
+    engine: 'whisper.cpp',
+    backendType: 'CPU',
+  );
   BackendPluginInfo pluginInfo = const BackendPluginInfo();
   final AiEngine llmEngine;
   final SpeechRecognitionEngine speechEngine;
@@ -61,7 +66,9 @@ class AiService extends ChangeNotifier {
     AiEngine? llm,
     SpeechRecognitionEngine? speech,
     BackendPlugins? plugins,
+    BackendPlugins? speechPlugins,
   }) : backendPlugins = plugins ?? BackendPlugins(),
+       speechPlugins = speechPlugins ?? BackendPlugins(speech: true),
        llmEngine = llm ?? NativeLlamaEngine(),
        speechEngine = speech ?? NativeWhisperEngine();
 
@@ -159,6 +166,8 @@ class AiService extends ChangeNotifier {
 
       await refreshPluginInfo();
 
+      await refreshSpeechPluginInfo();
+
       // 2. Independent Whisper restoration
       if (_configuredSpeechPath != null && _configuredSpeechPath!.isNotEmpty) {
         if (await _modelPathExists(_configuredSpeechPath!)) {
@@ -174,6 +183,7 @@ class AiService extends ChangeNotifier {
         }
       }
 
+      await refreshSpeechPluginInfo();
       _initState =
           (_llmRestorationError != null || _speechRestorationError != null)
           ? AiServiceInitState.readyWithWarnings
@@ -270,6 +280,7 @@ class AiService extends ChangeNotifier {
     final prevPath = _configuredSpeechPath;
     try {
       await speechEngine.loadModel(path);
+      await refreshSpeechPluginInfo();
       _configuredSpeechPath = path;
       _speechRestorationError = null;
       await saveSetting('whisper_model_path', path);
@@ -421,6 +432,88 @@ class AiService extends ChangeNotifier {
     notifyListeners();
     try {
       pluginInfo = await backendPlugins.delete(id);
+    } finally {
+      _isUpdatingLlamaRuntime = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> refreshSpeechPluginInfo() async {
+    try {
+      speechPluginInfo = await speechPlugins.status();
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  void _checkSpeechBackendMutation() {
+    _checkBackendMutation();
+    final engine = speechEngine;
+    if (engine is NativeWhisperEngine && engine.isBusy) {
+      throw const AiBusyException(
+        'Wait for the current transcription to finish.',
+      );
+    }
+  }
+
+  Future<void> importSpeechBackend() async {
+    _checkSpeechBackendMutation();
+    _isUpdatingLlamaRuntime = true;
+    notifyListeners();
+    try {
+      speechPluginInfo = await speechPlugins.importPlugin();
+    } finally {
+      _isUpdatingLlamaRuntime = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> selectSpeechBackend(String id) async {
+    _checkSpeechBackendMutation();
+    final previous = speechPluginInfo.id;
+    final path = speechEngine.isLoaded ? speechEngine.loadedModelPath : null;
+    _isUpdatingLlamaRuntime = true;
+    notifyListeners();
+    try {
+      await speechEngine.unload();
+      try {
+        speechPluginInfo = id.isEmpty
+            ? await speechPlugins.useBuiltin()
+            : await speechPlugins.select(id);
+        if (path != null) await loadSpeechModel(path);
+        if (id.isNotEmpty && speechPluginInfo.id != id) {
+          throw AiGenerationException(
+            speechPluginInfo.error.isEmpty
+                ? 'Whisper backend could not load the model.'
+                : speechPluginInfo.error,
+          );
+        }
+      } catch (e) {
+        try {
+          speechPluginInfo = previous.isEmpty
+              ? await speechPlugins.useBuiltin()
+              : await speechPlugins.select(previous);
+          if (path != null) await loadSpeechModel(path);
+        } catch (restoreError) {
+          throw AiGenerationException(
+            '$e. Could not restore the previous Whisper backend: $restoreError',
+          );
+        }
+        rethrow;
+      }
+    } finally {
+      await refreshSpeechPluginInfo();
+      _isUpdatingLlamaRuntime = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteSpeechBackend(String id) async {
+    _checkSpeechBackendMutation();
+    if (speechPluginInfo.id == id) await selectSpeechBackend('');
+    _isUpdatingLlamaRuntime = true;
+    notifyListeners();
+    try {
+      speechPluginInfo = await speechPlugins.delete(id);
     } finally {
       _isUpdatingLlamaRuntime = false;
       notifyListeners();

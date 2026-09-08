@@ -8,7 +8,7 @@ The APK always contains `libjlexa_llama.so` as the default. The UI/JNI host
 loads both that library and imported libraries through the same C interface.
 Only `llama_plugin.cpp` and the existing engine adapter depend on llama.cpp;
 the host is not linked to llama.cpp and does not include its headers. Whisper
-continues using its existing bridge. Engine symbols are hidden to avoid ggml
+has an independent [speech plugin ABI](SPEECH.md) and selection. Engine symbols are hidden to avoid ggml
 symbol collisions between independently built engines.
 
 ## Implementing a plugin

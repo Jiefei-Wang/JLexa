@@ -51,6 +51,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (!llamaBridge.handleActivityResult(requestCode, resultCode, data) &&
+            !whisperBridge.handleActivityResult(requestCode, resultCode, data) &&
             !safStorageBridge.handleActivityResult(requestCode, resultCode, data)) {
             super.onActivityResult(requestCode, resultCode, data)
         }

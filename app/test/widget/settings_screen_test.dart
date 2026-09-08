@@ -243,7 +243,8 @@ void main() {
         expect(find.text('Backend Plugins'), findsNothing);
         expect(find.text('Use built-in'), findsNothing);
         expect(find.text('Benchmark'), findsOneWidget);
-        expect(find.text('Import'), findsOneWidget);
+        expect(find.text('Import'), findsNWidgets(2));
+        expect(find.text('Whisper Backend'), findsOneWidget);
         expect(find.text('Snapdragon'), findsOneWidget);
         expect(find.byTooltip('Delete Other engine'), findsOneWidget);
         await tester.tap(find.byTooltip('Delete Other engine'));
@@ -251,7 +252,7 @@ void main() {
         expect(find.text('Other engine'), findsNothing);
         expect(plugins.selected, 'a');
         plugins.fail = true;
-        await tester.tap(find.text('Import'));
+        await tester.tap(find.text('Import').first);
         await tester.pumpAndSettle();
         expect(find.textContaining('expected arm64-v8a'), findsOneWidget);
         expect(plugins.selected, 'a');

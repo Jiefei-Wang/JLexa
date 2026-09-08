@@ -1,6 +1,7 @@
 package com.example.local_ai_app
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -25,6 +26,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 @Keep
 class WhisperBridge(private val context: Context? = null) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
+    private val plugins by lazy { BackendPlugins(requireNotNull(context), speech = true) }
+    private val isMutating = AtomicBoolean(false)
+    fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?) =
+        plugins.handleActivityResult(requestCode, resultCode, data)
     private var activePfd: ParcelFileDescriptor? = null
 
     companion object {
@@ -109,10 +114,46 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
             return
         }
 
+        if (call.method in setOf("extractAudioInfo", "getAudioMetadata", "exportAudioClip", "cancelTranscription")) {
+            dispatch(call, result)
+            return
+        }
+        scope.launch {
+            try {
+                plugins.initialize()
+                withContext(Dispatchers.Main) { dispatch(call, result) }
+            } catch (e: Throwable) {
+                withContext(Dispatchers.Main) { result.error("PLUGIN_ERROR", e.message, null) }
+            }
+        }
+    }
+
+    private fun dispatch(call: MethodCall, result: MethodChannel.Result) {
+        if (call.method in setOf("loadModel", "unloadModel", "importPlugin", "selectPlugin", "deletePlugin", "useBuiltinPlugin")) {
+            if (isTranscribing.get() || !isMutating.compareAndSet(false, true)) {
+                result.error("BUSY", "Wait for the current speech operation to finish", null)
+                return
+            }
+        }
         when (call.method) {
+            "pluginStatus" -> result.success(plugins.snapshot())
+            "importPlugin", "selectPlugin", "deletePlugin", "useBuiltinPlugin" -> scope.launch {
+                try {
+                    when (call.method) {
+                        "importPlugin" -> plugins.importPlugin()
+                        "selectPlugin" -> plugins.selectPlugin(requireNotNull(call.argument<String>("id")))
+                        "deletePlugin" -> plugins.deletePlugin(requireNotNull(call.argument<String>("id")))
+                        else -> plugins.useBuiltin()
+                    }
+                    withContext(Dispatchers.Main) { result.success(plugins.snapshot()) }
+                } catch (e: Throwable) {
+                    withContext(Dispatchers.Main) { result.error("PLUGIN_ERROR", e.message, null) }
+                } finally { isMutating.set(false) }
+            }
             "loadModel" -> {
                 val modelPath = call.argument<String>("modelPath")
                 if (modelPath == null) {
+                    isMutating.set(false)
                     result.error("INVALID_ARGS", "modelPath is required", null)
                     return
                 }
@@ -129,7 +170,16 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
                             modelPath
                         }
 
-                        val loaded = nativeLoadModel(effectivePath)
+                        plugins.beginModelLoad()
+                        val loaded = try {
+                            val ok = nativeLoadModel(effectivePath)
+                            if (!ok && plugins.isExternal()) throw IllegalStateException("Whisper plugin could not load this model")
+                            ok
+                        } catch (e: Throwable) {
+                            if (!plugins.isExternal()) throw e
+                            plugins.fallback(e.message ?: "Whisper plugin model load failed")
+                            nativeLoadModel(effectivePath)
+                        } finally { plugins.endModelLoad() }
                         if (loaded) {
                             try {
                                 activePfd?.close()
@@ -151,7 +201,7 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
                         withContext(Dispatchers.Main) {
                             result.error("LOAD_ERROR", e.message, null)
                         }
-                    }
+                    } finally { isMutating.set(false) }
                 }
             }
 
@@ -174,7 +224,7 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
                         withContext(Dispatchers.Main) {
                             result.error("UNLOAD_ERROR", e.message, null)
                         }
-                    }
+                    } finally { isMutating.set(false) }
                 }
             }
 
@@ -278,7 +328,7 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
                     return
                 }
 
-                if (!isTranscribing.compareAndSet(false, true)) {
+                if (isMutating.get() || !isTranscribing.compareAndSet(false, true)) {
                     result.error("BUSY", "Another transcription is currently in progress", null)
                     return
                 }
@@ -328,7 +378,7 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
                             "en",
                             ProgressCallback(this@WhisperBridge, requestId)
                         )
-                        Log.i("JLexaWhisper", "inference request=$requestId backend=cpu elapsed_ms=${SystemClock.elapsedRealtime() - inferenceStarted}")
+                        Log.i("JLexaWhisper", "inference request=$requestId backend=${plugins.snapshot()["name"]} elapsed_ms=${SystemClock.elapsedRealtime() - inferenceStarted}")
 
                         if (isCancelled.get()) {
                             withContext(Dispatchers.Main) {

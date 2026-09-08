@@ -1,4 +1,4 @@
-param([switch]$Baseline, [int]$Jobs = 8)
+param([switch]$Baseline, [switch]$Whisper, [int]$Jobs = 8)
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path "$PSScriptRoot/../..").Path
 $sdkRoot = "$env:LOCALAPPDATA/Android/Sdk"
@@ -14,11 +14,13 @@ $enabled = if ($Baseline) { 'OFF' } else { 'ON' }
   '-DANDROID_STL=c++_static' '-DCMAKE_BUILD_TYPE=Release' `
   "-DJLEXA_SNAPDRAGON_OPTIMIZED=$enabled"
 if ($LASTEXITCODE) { throw 'Configure failed' }
-& $cmakeExe --build $buildRoot --target jlexa_snapdragon -j $Jobs
+$target = if ($Whisper) { 'jlexa_whisper_cpu' } else { 'jlexa_snapdragon' }
+& $cmakeExe --build $buildRoot --target $target -j $Jobs
 if ($LASTEXITCODE) { throw 'Build failed' }
 $artifactName = if ($Baseline) { 'jlexa-arm64-baseline-plugin.so' } else { 'jlexa-snapdragon-plugin.so' }
+if ($Whisper) { $artifactName = if ($Baseline) { 'jlexa-whisper-baseline-plugin.so' } else { 'jlexa-whisper-snapdragon-plugin.so' } }
 $outputPath = "$repoRoot/release/$artifactName"
-Copy-Item -LiteralPath "$buildRoot/libjlexa_snapdragon.so" -Destination $outputPath -Force
+Copy-Item -LiteralPath "$buildRoot/lib$target.so" -Destination $outputPath -Force
 & "$ndkRoot/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe" --strip-unneeded $outputPath
 if ($LASTEXITCODE) { throw 'Strip failed' }
 Get-FileHash -Algorithm SHA256 -LiteralPath $outputPath

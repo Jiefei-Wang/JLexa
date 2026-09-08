@@ -66,14 +66,22 @@ class BackendPluginInfo {
 
 class BackendPlugins {
   final bool supported;
-  static const _channel = MethodChannel('com.jlexa.app/llama');
-  BackendPlugins({bool? supported})
-    : supported = supported ?? Platform.isAndroid;
+  final bool speech;
+  final MethodChannel _channel;
+  BackendPlugins({bool? supported, this.speech = false})
+    : supported = supported ?? Platform.isAndroid,
+      _channel = MethodChannel(
+        speech ? 'com.jlexa.app/whisper' : 'com.jlexa.app/llama',
+      );
   Future<BackendPluginInfo> _call(
     String method, [
     Map<String, dynamic>? args,
   ]) async {
-    if (!supported) return const BackendPluginInfo();
+    if (!supported) {
+      return speech
+          ? const BackendPluginInfo(engine: 'whisper.cpp', backendType: 'CPU')
+          : const BackendPluginInfo();
+    }
     final map = await _channel.invokeMapMethod<dynamic, dynamic>(method, args);
     if (map == null) throw StateError('No backend plugin status returned');
     return BackendPluginInfo.fromMap(map);

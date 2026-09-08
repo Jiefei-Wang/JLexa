@@ -408,6 +408,7 @@ class NativeWhisperEngine implements SpeechRecognitionEngine {
   _WhisperRequest? _activeRequest;
   bool _isChangingModel = false;
   bool _isDisposed = false;
+  bool get isBusy => _activeRequest != null || _isChangingModel;
 
   NativeWhisperEngine() : _isAndroid = Platform.isAndroid {
     _initStream();

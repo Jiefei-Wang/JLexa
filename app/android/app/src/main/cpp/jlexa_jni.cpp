@@ -1,7 +1,7 @@
 #include <jni.h>
 #include <string>
 #include <vector>
-#include "jlexa_whisper_bridge.h"
+#include "jlexa_speech_host.h"
 #include "jlexa_backend_host.h"
 
 static inline bool clearPendingException(JNIEnv* env) {
@@ -103,7 +103,7 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeLoadModel(
 ) {
     if (!model_path) return JNI_FALSE;
     std::string path = getStdUtf8FromJavaString(env, model_path);
-    bool result = JLexaWhisperBridge::instance().loadModel(path);
+    bool result = JLexaSpeechHost::instance().loadModel(path);
     return result ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -112,7 +112,7 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeUnloadModel(
     JNIEnv* /* env */,
     jobject /* this */
 ) {
-    JLexaWhisperBridge::instance().unloadModel();
+    JLexaSpeechHost::instance().unloadModel();
 }
 
 JNIEXPORT jboolean JNICALL
@@ -120,7 +120,7 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeIsModelLoaded(
     JNIEnv* /* env */,
     jobject /* this */
 ) {
-    return JLexaWhisperBridge::instance().isModelLoaded() ? JNI_TRUE : JNI_FALSE;
+    return JLexaSpeechHost::instance().isModelLoaded() ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jobject JNICALL
@@ -167,7 +167,7 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeTranscribe(
         }
     }
 
-    auto segments = JLexaWhisperBridge::instance().transcribe(
+    auto segments = JLexaSpeechHost::instance().transcribe(
         pcm_data,
         n_samples,
         n_threads,
@@ -177,7 +177,7 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeTranscribe(
 
     env->ReleaseFloatArrayElements(samples, pcm_data, JNI_ABORT);
 
-    const std::string inferenceError = JLexaWhisperBridge::instance().getLastError();
+    const std::string inferenceError = JLexaSpeechHost::instance().getLastError();
     if (!inferenceError.empty()) {
         jclass exceptionClass = env->FindClass("java/lang/RuntimeException");
         if (exceptionClass && !env->ExceptionCheck()) {
@@ -333,7 +333,7 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeCancel(
     JNIEnv* /* env */,
     jobject /* this */
 ) {
-    JLexaWhisperBridge::instance().cancel();
+    JLexaSpeechHost::instance().cancel();
 }
 
 JNIEXPORT void JNICALL
@@ -341,7 +341,7 @@ Java_com_example_local_1ai_1app_WhisperBridge_nativeResetCancellation(
     JNIEnv* /* env */,
     jobject /* this */
 ) {
-    JLexaWhisperBridge::instance().resetCancellation();
+    JLexaSpeechHost::instance().resetCancellation();
 }
 
 // ==========================================
@@ -714,6 +714,19 @@ Java_com_example_local_1ai_1app_BackendPlugins_nativeSelect(JNIEnv *env,jobject,
     try {
         JLexaBackendHost::instance().select(getStdUtf8FromJavaString(env,path));
         auto info=JLexaBackendHost::instance().pluginInfo();
+        jobjectArray result=env->NewObjectArray(4,env->FindClass("java/lang/String"),nullptr);
+        for(int i=0;i<4;i++) env->SetObjectArrayElement(result,i,makeJavaStringFromUtf8(env,info[i]));
+        return result;
+    } catch(const std::exception &e) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),e.what());return nullptr;
+    }
+}
+
+JNIEXPORT jobjectArray JNICALL
+Java_com_example_local_1ai_1app_BackendPlugins_nativeSelectSpeech(JNIEnv *env,jobject,jstring path) {
+    try {
+        JLexaSpeechHost::instance().select(getStdUtf8FromJavaString(env,path));
+        auto info=JLexaSpeechHost::instance().pluginInfo();
         jobjectArray result=env->NewObjectArray(4,env->FindClass("java/lang/String"),nullptr);
         for(int i=0;i<4;i++) env->SetObjectArrayElement(result,i,makeJavaStringFromUtf8(env,info[i]));
         return result;

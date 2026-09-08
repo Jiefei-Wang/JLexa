@@ -1,5 +1,11 @@
 # Snapdragon CPU plugin
 
+Whisper now has a separate optimized CPU plugin: build with
+`./native/snapdragon/build.ps1 -Whisper`, then import
+`release/jlexa-whisper-snapdragon-plugin.so` under **Whisper Backend** in Settings.
+See [speech ABI and measurements](../plugin/SPEECH.md). The LLM plugin below
+does not accelerate speech recognition.
+
 This is a small, importable CPU backend for the Snapdragon 8 Elite (SM8750)
 phone tested in `docs/qa-snapdragon-backend-2026-09-07.md`. It reuses JLexa's
 pinned llama.cpp engine, model loader, sampler and stable C ABI. It compiles

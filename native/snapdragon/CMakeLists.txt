@@ -34,3 +34,15 @@ target_link_options(jlexa_snapdragon PRIVATE "-Wl,--exclude-libs,ALL" "-Wl,-Bsym
   "-Wl,-z,max-page-size=16384"
   "-Wl,--version-script=${JLEXA_ROOT}/native/plugin/exports.map")
 set_target_properties(jlexa_snapdragon PROPERTIES CXX_VISIBILITY_PRESET hidden)
+add_library(jlexa_whisper_cpu SHARED
+  "${JLEXA_ROOT}/native/plugin/whisper_plugin.cpp"
+  "${JLEXA_ROOT}/native/bindings/jlexa_whisper_bridge.cpp")
+target_include_directories(jlexa_whisper_cpu PRIVATE
+  "${JLEXA_ROOT}/native/plugin" "${JLEXA_ROOT}/native/bindings")
+target_compile_definitions(jlexa_whisper_cpu PRIVATE
+  JLEXA_WHISPER_OPTIMIZED=$<BOOL:${JLEXA_SNAPDRAGON_OPTIMIZED}>)
+target_link_libraries(jlexa_whisper_cpu PRIVATE whisper log)
+target_link_options(jlexa_whisper_cpu PRIVATE "-Wl,--exclude-libs,ALL" "-Wl,-Bsymbolic"
+  "-Wl,-z,max-page-size=16384"
+  "-Wl,--version-script=${JLEXA_ROOT}/native/plugin/speech_exports.map")
+set_target_properties(jlexa_whisper_cpu PROPERTIES CXX_VISIBILITY_PRESET hidden)
