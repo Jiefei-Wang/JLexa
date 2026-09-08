@@ -272,6 +272,91 @@ void main() {
     expect(controller.canEditCuts, true);
   });
 
+  test('deleting a completed cut atomically protects its neighbors across restart', () async {
+    await ai.setWhisperSegmentationEnabled(true);
+    for (var i = 0; i < 3; i++) {
+      await _until(() => speech.calls.length == i + 1);
+      final window = [1, 0, 2][i];
+      speech.calls[i].done.complete([
+        AudioSegment(
+          id: 'result$window',
+          lessonId: lesson.id,
+          startMs: window * 60000 + 1000,
+          endMs: window * 60000 + 8000,
+          text: 'Sentence $window.',
+          tokens: [
+            TranscriptToken(
+              text: 'Sentence $window.',
+              startMs: window * 60000 + 1000,
+              endMs: window * 60000 + 8000,
+            ),
+          ],
+        ),
+      ]);
+    }
+    await _until(
+      () =>
+          controller.segments.length == 3 &&
+          controller.segments.every((c) => c.hasValidTranscript),
+    );
+    final before = await repo.getSegmentsForLesson(lesson.id);
+    expect(before.every((c) => c.tokens.isNotEmpty), true);
+    expect(controller.currentSegment?.id, before[1].id);
+    final originalRows = before.map((c) => c.toMap()).toList();
+
+    // Fail on the second retained neighbor after the transaction has already
+    // deleted the old list and inserted the first. No partial edit may escape.
+    await db.execute('''CREATE TRIGGER reject_protected_neighbor
+      BEFORE INSERT ON audio_segments
+      WHEN NEW.is_user_edited = 1 AND NEW.start_ms > 120000
+      BEGIN SELECT RAISE(ABORT, 'injected neighbor save failure'); END''');
+    await controller.deleteCurrentCut();
+    expect(
+      (await repo.getSegmentsForLesson(lesson.id))
+          .map((c) => c.toMap())
+          .toList(),
+      originalRows,
+    );
+    expect(controller.segments.map((c) => c.toMap()).toList(), originalRows);
+    await db.execute('DROP TRIGGER reject_protected_neighbor');
+
+    await controller.deleteCurrentCut();
+    final saved = await repo.getSegmentsForLesson(lesson.id);
+    expect(saved.map((c) => c.id), [before[0].id, before[2].id]);
+    for (var i = 0; i < saved.length; i++) {
+      final original = before[i == 0 ? 0 : 2];
+      expect(saved[i].isUserEdited, true);
+      expect(
+        (saved[i].startMs, saved[i].endMs),
+        (original.startMs, original.endMs),
+      );
+      expect(saved[i].text, original.text);
+      expect(
+        saved[i].tokens.map((t) => t.toMap()).toList(),
+        original.tokens.map((t) => t.toMap()).toList(),
+      );
+      expect(saved[i].revision, original.revision + 1);
+      expect(saved[i].transcriptCutRevision, saved[i].revision);
+      expect(saved[i].transcriptModelId, original.transcriptModelId);
+      expect(saved[i].hasValidTranscript, true);
+    }
+
+    controller.dispose();
+    controller = RepeaterController(
+      lessonRepo: repo,
+      audioService: audio,
+      waveformService: FixedSpeechWaveform(),
+      aiService: ai,
+    );
+    await controller.loadLesson((await repo.getLesson(lesson.id))!);
+    await _until(() => !controller.isWindowProcessing);
+    expect(
+      controller.segments.map((c) => c.toMap()).toList(),
+      saved.map((c) => c.toMap()).toList(),
+    );
+    expect(speech.calls, hasLength(3));
+  });
+
   test('decoder padding duration difference preserves completed cache after toggling', () async {
     await ai.setWhisperSegmentationEnabled(true);
     await _until(() => speech.calls.length == 1);

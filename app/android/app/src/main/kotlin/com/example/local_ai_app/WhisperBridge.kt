@@ -66,6 +66,7 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
     private var eventSink: EventChannel.EventSink? = null
     private val isTranscribing = AtomicBoolean(false)
     private val isCancelled = AtomicBoolean(false)
+    private val audioEnergyCache = AudioEnergy.Cache()
     @Volatile private var activeRequestId: String? = null
 
     @Keep
@@ -109,12 +110,12 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-        if (!isLibraryAvailable && call.method !in setOf("extractAudioInfo", "getAudioMetadata", "exportAudioClip")) {
+        if (!isLibraryAvailable && call.method !in setOf("extractAudioInfo", "getAudioMetadata", "exportAudioClip", "getAudioEnergy")) {
             result.error("NATIVE_LIBRARY_UNAVAILABLE", "Native library libjlexa_native.so failed to load", null)
             return
         }
 
-        if (call.method in setOf("extractAudioInfo", "getAudioMetadata", "exportAudioClip", "cancelTranscription", "stopBenchmark")) {
+        if (call.method in setOf("extractAudioInfo", "getAudioMetadata", "exportAudioClip", "getAudioEnergy", "cancelTranscription", "stopBenchmark")) {
             dispatch(call, result)
             return
         }
@@ -136,6 +137,31 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
             }
         }
         when (call.method) {
+            "getAudioEnergy" -> {
+                val audioPath = call.argument<String>("audioPath")
+                val startMs = call.argument<Number>("startMs")?.toLong()
+                val endMs = call.argument<Number>("endMs")?.toLong()
+                if (audioPath.isNullOrBlank() || startMs == null || endMs == null ||
+                    startMs < 0 || endMs <= startMs || endMs > Int.MAX_VALUE ||
+                    endMs - startMs > Int.MAX_VALUE / 16) {
+                    result.error("INVALID_RANGE", "audioPath and a valid 0 <= startMs < endMs audio range are required", null)
+                    return
+                }
+                scope.launch {
+                    try {
+                        val energy = audioEnergyCache.find(audioPath, startMs, endMs) ?: run {
+                            // Independent from speech cancellation; the Dart caller owns stale-result rejection.
+                            val pcm = AudioRangeDecoder.decode(audioPath, startMs, endMs) { !isActive }
+                            AudioEnergy.fromPcm(pcm.samples, pcm.validSampleCount, startMs).also {
+                                audioEnergyCache.put(audioPath, it)
+                            }
+                        }
+                        withContext(Dispatchers.Main) { result.success(energy.toMap()) }
+                    } catch (e: Throwable) {
+                        withContext(Dispatchers.Main) { result.error("ENERGY_ERROR", e.message ?: "Could not extract audio energy", null) }
+                    }
+                }
+            }
             "runBenchmark" -> runBenchmark(call, result)
             "stopBenchmark" -> {
                 if (call.argument<String>("requestId") == activeRequestId) {
@@ -378,6 +404,11 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
                         }
 
                         val absoluteOffsetMs = if (cutId != null) cutStartMs ?: 0 else 0
+                        if (cutId?.startsWith("window-") == true) {
+                            audioEnergyCache.put(audioPath, AudioEnergy.fromPcm(
+                                pcm.samples, pcm.validSampleCount, absoluteOffsetMs.toLong()
+                            ))
+                        }
                         val inferenceStarted = SystemClock.elapsedRealtime()
                         val rawSegments = nativeTranscribe(
                             pcm.samples,
@@ -592,6 +623,7 @@ class WhisperBridge(private val context: Context? = null) : MethodChannel.Method
     }
 
     fun cleanUp() {
+        audioEnergyCache.close()
         isCancelled.set(true)
         try {
             nativeCancel()

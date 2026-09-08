@@ -612,3 +612,29 @@ At the end of every agent session after completing work:
   - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`; apksigner verified, v2 true. Installed base.apk hash matches release.
   - Existing upstream flutter_tts future Kotlin-plugin compatibility warning remains; release succeeds.
   - Automatic approval review rejected duplicate-APK cleanup with `blocked by policy`, including explicit verified paths; two build-output copies remain. Fixed release is current. Pre-existing untracked `artifacts/` left untouched.
+
+---
+
+## Session: 2026-09-08 (Whisper Energy Boundaries and Short-Cut Merging)
+- **Focus**: Implemented the requested post-Whisper boundary adjustment and short-segment merging. Detailed evidence: `docs/qa-whisper-postprocessing-pixel-2026-09-08.md`.
+- **Changes**:
+  - Automatic adjacent cuts with gaps strictly below 500 ms share the lowest-energy boundary within both original edges' +/-250 ms intervals. Analysis uses unscaled mean-square PCM in 10 ms bins.
+  - Cuts strictly below 1,500 ms merge with the shorter eligible adjacent cut, provided the complete merged span is at most 10,000 ms. Transcript text and absolute token timestamps remain ordered and revision-valid.
+  - Reused energy from Whisper's existing decoded PCM. Legacy cached recognition receives energy-only postprocessing without rerunning Whisper or requiring a loaded model.
+  - Persisted processed windows and adjusted boundary identities atomically, including across merged IDs and minute-window seams. Added cancellation/seek ownership guards and deferred neighbor-dependent merges.
+  - Excluded manually edited cuts. New manual deletions atomically protect both surviving neighbors from later boundary filling or merging; historical deletions without provenance are not reconstructed.
+- **Verification**:
+  - `flutter analyze`: No issues found, zero errors/warnings.
+  - `flutter test --concurrency=1`: 422 passed, zero failed (75 seconds), including 18 postprocessor cases, five real SQLite window-session regressions, and deletion rollback/restart protection.
+  - Standalone Kotlin AudioEnergyProbe passed for energy values, partial bins, ranges, cache coverage and closure.
+  - Pixel 6 `25311FDF6004PR` only: migrated 17 saved TED windows without Whisper inference; 229 cuts became 203. First window took 1,717 ms; full background migration about 85 seconds.
+  - Verified shared boundary 49.235 seconds against independent PCM minimum-energy analysis (+235/-75 ms from old edges), stable 60.975-second window seam, merged short-cut transcript, and restart without further polishing.
+  - Fresh 16-second WAV completed real Whisper plus postprocessing in 1,615 ms with one PCM decode. Manual deletion survived restart. Temporary lesson/source removed; original lessons/models retained.
+  - Recorded output aligned within roughly 29 ms at start and 90 ms at end; existing playback stop latency remains. Final PID 4873, no new crash-buffer entries.
+- **Signed Release**:
+  - `flutter build apk --release` succeeded in 103.2 seconds with `app/android/key.properties`.
+  - Fixed artifact: `release/app-release.apk`, 115,686,715 bytes.
+  - APK SHA-256: `D190A08C1EE93F8E109BB3EC730C3A51F0CDB73FC8BDF6A7FB2217556754A516`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`; apksigner verified, v2 true. Installed Pixel base.apk hash matches release.
+  - Existing flutter_tts future Kotlin-plugin and SDK XML version warnings remain; release succeeds.
+  - Prior automatic approval review rejected duplicate-APK cleanup with `blocked by policy`; two build-output copies remain and were not bypassed. Pre-existing untracked `artifacts/` left untouched.

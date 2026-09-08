@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -10,6 +11,7 @@ import '../../core/ai/ai_service.dart';
 import '../../core/ai/native_ai_bridge.dart';
 import '../../core/ai/prompt_builder.dart';
 import '../../core/audio/audio_models.dart';
+import '../../core/audio/audio_energy_service.dart';
 import '../../core/audio/audio_service.dart';
 import '../../core/audio/cut_editor.dart';
 import '../../core/audio/lesson_repository.dart';
@@ -142,13 +144,18 @@ class RepeaterController extends ChangeNotifier {
       if (!_isDisposed) unawaited(_startWindowSession());
       return;
     }
+    final targetLesson = _lesson!;
     final session = WhisperWindowSession(
       // Decoder padding can change the reported length by a few milliseconds.
       // Use the persisted timeline so toggling/reopening retains completed work.
-      lesson: _lesson!,
+      lesson: targetLesson,
       repository: lessonRepo,
       ai: aiService,
       cuts: List.of(_segments),
+      loadEnergy: Platform.isAndroid
+          ? (start, end) =>
+                AudioEnergyService.load(targetLesson.localPath, start, end)
+          : null,
     );
     _windowSession = session;
     session.addListener(_onWindowUpdate);
@@ -1102,7 +1109,27 @@ class RepeaterController extends ChangeNotifier {
     _transcriptionGeneration++;
     await cancelTranscription();
     _invalidateExplanation();
-    final updated = snapshot.where((c) => c.id != cut.id).toList();
+    final removedIndex = snapshot.indexWhere((c) => c.id == cut.id);
+    final updated = <AudioSegment>[];
+    for (var i = 0; i < snapshot.length; i++) {
+      final retained = snapshot[i];
+      if (i == removedIndex) continue;
+      // Keep an intentional deletion open when another Whisper window finishes.
+      // Bounds and cached text stay intact; both neighboring cuts are protected.
+      if ((i - removedIndex).abs() == 1) {
+        updated.add(
+          retained.copyWith(
+            isUserEdited: true,
+            revision: retained.revision + 1,
+            transcriptCutRevision: retained.hasValidTranscript
+                ? retained.revision + 1
+                : null,
+          ),
+        );
+      } else {
+        updated.add(retained);
+      }
+    }
     await lessonRepo.commitCutSet(_lesson!.id, expected, updated);
     _segments = updated;
     _selectedSegmentId = null;
