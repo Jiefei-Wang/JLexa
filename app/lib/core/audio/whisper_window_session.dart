@@ -12,6 +12,7 @@ import 'audio_models.dart';
 import 'lesson_repository.dart';
 import 'whisper_cut_postprocessor.dart';
 import 'whisper_segmentation.dart';
+import 'whisper_long_cut_splitter.dart';
 
 /// One serial, cancellable worker per open lesson. Auto is deliberately absent:
 /// recognition prepares durable cuts/text; the repeater decides what to display.
@@ -96,8 +97,10 @@ class WhisperWindowSession extends ChangeNotifier {
             );
           }).toList();
           completed.addAll((state['completed'] as List).cast<int>());
-          if (state['polishVersion'] == 1) {
+          if (state['polishVersion'] == 2) {
             _polished.addAll((state['polished'] as List? ?? []).cast<int>());
+          }
+          if (state['polishVersion'] == 1 || state['polishVersion'] == 2) {
             _adjustedPairs.addAll(
               (state['adjustedPairs'] as List? ?? []).cast<String>(),
             );
@@ -134,7 +137,7 @@ class WhisperWindowSession extends ChangeNotifier {
             )
             .toList(),
         'completed': done.toList(),
-        'polishVersion': 1,
+        'polishVersion': 2,
         'polished': (polished ?? _polished).toList(),
         'adjustedPairs': (pairs ?? _adjustedPairs).toList(),
       });
@@ -193,6 +196,20 @@ class WhisperWindowSession extends ChangeNotifier {
       (w) =>
           done.contains(w.index) && w.contains(c.startMs + c.durationMs ~/ 2),
     );
+    final split = WhisperLongCutSplitter.split(
+      cuts: input,
+      energy: energy,
+      eligibleIds: input.where(ready).map((c) => c.id).toSet(),
+    );
+    // Preserve already-polished exterior boundaries when a parent gets new IDs.
+    for (var i = 1; i < split.cuts.length; i++) {
+      final a = split.cuts[i - 1], b = split.cuts[i];
+      final pa = split.parents[a.id], pb = split.parents[b.id];
+      if (pa != pb && adjustedPairs.contains(jsonEncode([pa, pb]))) {
+        adjustedPairs.add(WhisperCutPostprocessor.pairKey(a, b));
+      }
+    }
+    input = split.cuts;
     final eligible = input
         .where(
           (c) =>
@@ -252,6 +269,7 @@ class WhisperWindowSession extends ChangeNotifier {
       eligibleIds: eligible,
       boundaryPairs: boundaryPairs,
       mergeCutIds: mergeIds,
+      boundaryLimits: split.boundaryLimits,
     );
     final original = {for (final cut in input) cut.id: cut};
     for (final cut in result) {

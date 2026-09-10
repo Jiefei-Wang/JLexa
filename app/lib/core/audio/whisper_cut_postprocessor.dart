@@ -30,6 +30,7 @@ class WhisperCutPostprocessor {
     required Set<String> eligibleIds,
     Set<String>? boundaryPairs,
     Set<String>? mergeCutIds,
+    Map<String, ({int startMs, int endMs})> boundaryLimits = const {},
   }) {
     final mergeInitiators = mergeCutIds == null
         ? null
@@ -62,14 +63,19 @@ class WhisperCutPostprocessor {
               !boundaryPairs.contains(pairKey(left, right)))) {
         continue;
       }
-      final lower = math.max(
+      var lower = math.max(
         math.max(left.endMs - 250, right.startMs - 250),
         left.startMs + 1,
       );
-      final upper = math.min(
+      var upper = math.min(
         math.min(left.endMs + 250, right.startMs + 250),
         right.endMs - 1,
       );
+      final limit = boundaryLimits[pairKey(left, right)];
+      if (limit != null) {
+        lower = math.max(lower, limit.startMs);
+        upper = math.min(upper, limit.endMs);
+      }
       final boundary = _quietest(
         energy,
         lower,

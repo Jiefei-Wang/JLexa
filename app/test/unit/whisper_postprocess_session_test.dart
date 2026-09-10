@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jlexa/core/ai/ai_models.dart';
@@ -138,6 +139,48 @@ void main() {
     AppDatabase.setDatabaseForTesting(null);
   });
 
+  test('version one cache splits long sentence once while preserving manual neighbors', () async {
+    final fixture = jsonDecode(
+      File('test/fixtures/whisper_small_long_sentence.json').readAsStringSync(),
+    );
+    final long = AudioSegment.fromMap(Map<String, dynamic>.from(fixture['cut']))
+        .copyWith(lessonId: 'lesson');
+    final manual = saved('manual', 113000, 119000, manual: true);
+    await seed([long, manual]);
+    final old = await state();
+    old['polishVersion'] = 1;
+    old['polished'] = [0, 1];
+    old['adjustedPairs'] = [WhisperCutPostprocessor.pairKey(long, manual)];
+    await repo.setSetting('whisper_windows_lesson', jsonEncode(old));
+    final s = await open(95000);
+    s.resume();
+    await until(() => energyCalls.isNotEmpty);
+    energyCalls.first.done.complete(
+      AudioEnergyEnvelope(
+        startMs: fixture['startMs'],
+        stepMs: 10,
+        values: (fixture['values'] as List)
+            .cast<num>()
+            .map((v) => v.toDouble())
+            .toList(),
+      ),
+    );
+    await until(() => s.cuts.length == 4);
+    await until(() => energyCalls.length == 2);
+    energyCalls.last.done.complete(envelope());
+    await until(() => !s.pending);
+    await s.pause();
+    expect(s.cuts.take(3).every((c) => c.durationMs <= 10000), isTrue);
+    expect(s.cuts.last.toMap(), manual.toMap());
+    expect(engine.calls, isEmpty);
+    final snapshot = s.cuts.map((c) => c.toMap()).toList();
+    final restored = await open(95000);
+    restored.resume();
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    expect(energyCalls.length, 2);
+    expect(restored.cuts.map((c) => c.toMap()), snapshot);
+  });
+
   test('old completed cache polishes without model; restart and resume do not drift', () async {
     await seed([
       saved('a', 0, 2000),
@@ -171,7 +214,7 @@ void main() {
     final metadata = await state();
     expect(metadata['completed'], unorderedEquals([0, 1]));
     expect(metadata['polished'], unorderedEquals([0, 1]));
-    expect(metadata['polishVersion'], 1);
+    expect(metadata['polishVersion'], 2);
     expect(
       metadata['adjustedPairs'],
       contains(WhisperCutPostprocessor.pairKey(persisted[0], persisted[1])),
