@@ -25,6 +25,10 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.WrappingMediaSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.ExtractorsFactory
+import androidx.media3.extractor.mp3.Mp3Extractor
+import androidx.media3.extractor.mp3.JlexaIndexedMp3Extractor
 import xyz.luan.audioplayers.AudioContextAndroid
 import xyz.luan.audioplayers.source.BytesSource
 import xyz.luan.audioplayers.source.Source
@@ -215,11 +219,20 @@ class ExoPlayerWrapper(
 
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     private fun buildMediaSource(source: Source): MediaSource {
+        // Xing/VBRI tables are coarse estimates. Adjacent seeks can land on
+        // different sides of the same word even with non-overlapping cuts.
+        // Index actual MP3 frames; keep the stock extractors for other formats.
+        val extractors = ExtractorsFactory {
+            DefaultExtractorsFactory().createExtractors().map {
+                if (it is Mp3Extractor) JlexaIndexedMp3Extractor() else it
+            }.toTypedArray()
+        }
         val rawSource = when (source) {
-            is UrlSource -> DefaultMediaSourceFactory(appContext)
+            is UrlSource -> DefaultMediaSourceFactory(appContext, extractors)
                 .createMediaSource(MediaItem.fromUri(source.url))
             is BytesSource -> ProgressiveMediaSource.Factory(
                 DataSource.Factory { ByteArrayDataSource(source.data) },
+                extractors,
             ).createMediaSource(MediaItem.fromUri(Uri.EMPTY))
             else -> error("Unsupported source")
         }

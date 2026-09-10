@@ -663,7 +663,6 @@ At the end of every agent session after completing work:
   - Existing upstream Kotlin compatibility, SDK XML and Java native-access warnings remain; release build and signing verification succeed.
   - Automatic approval review rejected the command containing duplicate build-output APK cleanup (`blocked by policy`). No deletion workaround was attempted; both generated copies remain. The fixed release APK was copied separately and verified.
 
-
 ---
 
 ## Session: 2026-09-10 (Whisper Small Long Sentence Splitting)
@@ -674,3 +673,16 @@ At the end of every agent session after completing work:
 - **Cleanup / Device**: Removed temporary qa_probe and native raw logging; removed the temporary imported Whisper CPU plugin and restored built-in CPU. Small English remains available. Signed release installed on Pixel 6 `25311FDF6004PR` with ADB, preserving data; launch PID 5794. Original lessons were not replaced with host audit cuts.
 - **Signed Release**: `release/app-release.apk`, 115,703,179 bytes, built with `app/android/key.properties`. APK SHA-256 `5F888A288216A76567DCAF7BEB245F3E2E967387EE65045B5CF875B18ACA8F5A`; apksigner Verifies, v2 true. Signer SHA-256 `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
 - **Shared Workspace**: Release includes the other active task's Media3 MP3 seek adapter correction, frozen during this check. That task owns its adapter commit and playback evidence. This commit contains only long-sentence implementation/tests/report and this log entry. Existing policy-blocked duplicate build APK cleanup was not retried or bypassed; generated APK copies remain under app/build. Upstream flutter_tts compatibility and Java native-access warnings remain non-blocking.
+
+---
+
+## Session: 2026-09-10 (Frame-Indexed MP3 Playback After Manual Splits)
+- **Reproduction**: Wireless Honor PTP-AN00 near 1:37 in incompetent-leaders: first selected cut contained source 94.249–98.099 s and next cut 97.386–106.086 s, confirming at least 0.713 s of repeated audio. Lossless captures, correlation evidence, and limitations: `docs/qa-manual-split-investigation-2026-09-10.md`.
+- **Root Cause / Fix**: Coarse Xing seek metadata gives different frame/time offsets to separate playback starts. Added an Apache-2.0 Media3 1.9.0 MP3 extractor variant that uses an actual frame index even when header metadata is seekable, for URL/file and byte sources. Stock 1.9.0's index flag alone only handles unseekable metadata. Cut storage, transcription, and the separate post-split 100 ms selection rewind were not changed.
+- **Computer Verification**: Independent Android emulator decoded the actual reference MP3 with stock then fixed extractors and native clipping. Stock adjacent ranges repeated nearly 2 seconds of source audio; fixed ranges had no overlap in strongly matched 50 ms blocks. Index preparation measured 360/288 ms for the two tested starts. This is not a claim of sample-accurate codec clipping.
+- **Tests**: Three native JUnit extractor tests passed (coarse-Xing baseline failure reproduction, cold/adjacent/repeated/backward/late indexed seeks, and CBR Info metadata). Final coordinated shared-workspace `flutter analyze`: no issues (6.7 s); `flutter test --concurrency=1`: 451 passed, zero failed (122 s). Logs independently inspected; duplicate concurrent Flutter builds avoided.
+- **Signed Release**: Final coordinated `flutter build apk --release` succeeded in 49.8 s with `app/android/key.properties`; this task independently verified fixed APK signature and matching build-output hash. R8 mapping contains the new extractor.
+  - Fixed path: `release/app-release.apk`, 115,703,179 bytes.
+  - APK SHA-256: `5F888A288216A76567DCAF7BEB245F3E2E967387EE65045B5CF875B18ACA8F5A`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`; apksigner Verifies, v2 true.
+- **Scope / Cleanup**: Only adapter source/tests/license/documentation and this entry belong to this commit. Other-task Whisper changes were committed separately; its diagnostic sources are removed. Honor retains existing app/data, first cut paused, Auto-stop ON/Repeat OFF/Auto transcript OFF. No fixed-release Honor installation was performed; the other task installed the combined release on Pixel. Temporary probe APK removed and emulator stopped. Previously policy-blocked duplicate app/build APK cleanup was not retried or bypassed. Existing flutter_tts and Java warnings remain non-blocking.

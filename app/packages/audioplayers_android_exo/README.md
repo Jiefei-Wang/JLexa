@@ -11,7 +11,9 @@ The copied cache already contained the project's Android build compatibility
 changes: Android compile SDK 36, Java/Kotlin JVM 17, AGP 9 built-in Kotlin style
 (no separate Kotlin Android plugin application), Media3 1.9.0 dependencies and
 `androidx.media3` imports. Its adaptive channel mixer and mono-volume handling
-are preserved. `android/build.gradle` is copied unchanged from that working cache.
+are preserved. `android/build.gradle` was initially copied from that working
+cache; the frame-indexing extension adds compile-only nullness annotations and
+the native test runtime configuration described below.
 
 ## JLexa playback end extension
 
@@ -55,3 +57,34 @@ real audio; this fork does not claim sample-accurate trimming of every codec.
 API references checked against the installed Media3 1.9.0 classes and official docs:
 - https://developer.android.com/reference/androidx/media3/exoplayer/source/ClippingMediaSource.Builder
 - https://developer.android.com/reference/androidx/media3/exoplayer/source/WrappingMediaSource
+
+## Precise MP3 positioning
+
+`JlexaIndexedMp3Extractor.java` is derived from the AndroidX Media3 **1.9.0**
+`Mp3Extractor.java` (Apache 2.0; see `LICENSE.media3`). It retains its upstream
+package because the seek implementations are package-private. Changes from
+upstream are the class name, default index-seeking flag, and using `IndexSeeker`
+even when the file's metadata advertises a seekable map. Keep this fork aligned
+with the pinned Media3 dependency when upgrading it.
+
+Upstream 1.9.0's index flag is only a fallback for **unseekable** metadata; merely
+enabling that flag does not fix coarse Xing TOCs. Such TOCs produced about
+0.7 seconds of overlapping output on the reported Honor recording, despite
+adjacent cuts. Frame indexing counts actual MP3 samples to assign timestamps.
+Cold seeks can scan the prefix up to the requested point; each rebuilt clipped
+source currently builds its own index. This trades additional local reads for
+correct positioning and does not decode or rewrite the source file.
+
+The custom extractor is selected for both URL and byte sources. Other formats
+retain the stock extractors. Existing codec-frame endpoint granularity remains;
+this change fixes file-position errors, not sample-accurate PCM trimming.
+
+Native regression tests exercise real extractor input, encoded frame identities,
+and seek maps for coarse Xing metadata, cold/adjacent/backward/late seeks, and
+CBR Info metadata:
+
+```powershell
+./gradlew.bat :audioplayers_android_exo:testDebugUnitTest --tests androidx.media3.extractor.mp3.IndexedMp3SeekTest
+```
+
+Upstream source: https://github.com/androidx/media/blob/1.9.0/libraries/extractor/src/main/java/androidx/media3/extractor/mp3/Mp3Extractor.java

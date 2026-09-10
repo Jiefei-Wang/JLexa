@@ -52,6 +52,10 @@ android {
     lint {
         disable 'InvalidPackage'
     }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
 }
 
 kotlin {
@@ -69,6 +73,7 @@ allprojects {
 }
 
 dependencies {
+    compileOnly 'org.checkerframework:checker-qual:3.43.0'
     def exoplayer_version = "1.9.0"
     implementation "androidx.media3:media3-exoplayer:${exoplayer_version}"
     implementation "androidx.media3:media3-exoplayer-hls:${exoplayer_version}"
@@ -81,6 +86,7 @@ dependencies {
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutines_version"
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:$coroutines_version"
     testImplementation 'org.junit.jupiter:junit-jupiter:5.9.0'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.9.0'
     testImplementation 'org.assertj:assertj-core:3.23.1'
 }
 repositories {
