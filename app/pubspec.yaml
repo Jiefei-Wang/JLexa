@@ -15,8 +15,9 @@ dependencies:
   path: ^1.9.0
   path_provider: ^2.1.5
   audioplayers: ^6.1.0
-  # MediaPlayer's MP3 seek estimates can play seconds past the displayed cut.
-  audioplayers_android_exo: 0.1.4
+  # ExoPlayer with native cut endpoints; keeps MP3 seeking on the file timeline.
+  audioplayers_android_exo:
+    path: packages/audioplayers_android_exo
   file_picker: ^8.1.7
   flutter_tts: ^4.2.2
   record: ^7.1.1

@@ -1,0 +1,27 @@
+package xyz.luan.audioplayers.player
+
+import xyz.luan.audioplayers.AudioContextAndroid
+import xyz.luan.audioplayers.source.Source
+
+interface PlayerWrapper {
+    val playbackEndMs: Int?
+    fun setPlaybackEnd(endMs: Int?, positionMs: Int?)
+
+    fun getDuration(): Int?
+    fun getCurrentPosition(): Int?
+
+    fun start()
+    fun pause()
+    fun stop()
+    fun seekTo(position: Int)
+
+    fun setVolume(leftVolume: Float, rightVolume: Float)
+    fun setRate(rate: Float)
+    fun setLooping(looping: Boolean)
+    fun updateContext(context: AudioContextAndroid)
+    fun setSource(source: Source)
+
+    fun prepare()
+    fun release()
+    fun dispose()
+}

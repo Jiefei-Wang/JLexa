@@ -160,3 +160,59 @@ class CutEditor {
     return (startMs: left, endMs: right);
   }
 }
+
+/// An edit mode keeps the original neighbors until the whole session is saved.
+/// Each explicit adjustment replaces that cut's previous request, so retreating
+/// restores even fully covered neighbors and never fills an original gap.
+class CutBoundarySession {
+  final List<AudioSegment> snapshot;
+  final int durationMs;
+  final Map<String, ({int? startMs, int? endMs})> _requests = {};
+  late List<AudioSegment> _current = snapshot;
+
+  CutBoundarySession(List<AudioSegment> cuts, this.durationMs)
+    : snapshot = List.unmodifiable(cuts);
+
+  ({int? startMs, int? endMs}) _request(String id, int startMs, int endMs) {
+    final current = _current.firstWhere((c) => c.id == id);
+    final previous = _requests[id];
+    // An untouched edge may have been compressed by a neighbor. It must not
+    // become an explicit edit merely because the other handle was moved.
+    return (
+      startMs: startMs != current.startMs ? startMs : previous?.startMs,
+      endMs: endMs != current.endMs ? endMs : previous?.endMs,
+    );
+  }
+
+  List<AudioSegment> preview(String id, int startMs, int endMs) {
+    final requests = {..._requests}..remove(id);
+    requests[id] = _request(id, startMs, endMs);
+    var cuts = snapshot;
+    for (final entry in requests.entries) {
+      final index = cuts.indexWhere((c) => c.id == entry.key);
+      if (index < 0) continue; // Covered by another explicitly edited cut.
+      final cut = cuts[index];
+      final start = entry.value.startMs ?? cut.startMs;
+      final end = entry.value.endMs ?? cut.endMs;
+      if (cut.startMs == start && cut.endMs == end) continue;
+      cuts = CutEditor.resize(
+        snapshot: cuts,
+        cutId: cut.id,
+        expectedRevision: cut.revision,
+        newStartMs: start,
+        newEndMs: end,
+        durationMs: durationMs,
+      ).cuts;
+    }
+    return cuts;
+  }
+
+  List<AudioSegment> resize(String id, int startMs, int endMs) {
+    final request = _request(id, startMs, endMs);
+    final cuts = preview(id, startMs, endMs);
+    _requests.remove(id);
+    _requests[id] = request;
+    _current = cuts;
+    return cuts;
+  }
+}

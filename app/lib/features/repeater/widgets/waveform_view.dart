@@ -29,6 +29,9 @@ class WaveformView extends StatefulWidget {
   final VoidCallback? onAddCut;
   final VoidCallback? onDeleteCut;
   final bool isWindowProcessing;
+  final CutBoundarySession? boundarySession;
+  final Future<void> Function(Map<String, int>)? onMergeSegments;
+  final Future<void> Function(bool)? onBoundaryEditingChanged;
   const WaveformView({
     super.key,
     required this.fullPeaks,
@@ -44,6 +47,9 @@ class WaveformView extends StatefulWidget {
     this.onAddCut,
     this.onDeleteCut,
     this.isWindowProcessing = false,
+    this.boundarySession,
+    this.onMergeSegments,
+    this.onBoundaryEditingChanged,
   });
   @override
   State<WaveformView> createState() => _WaveformViewState();
@@ -51,6 +57,8 @@ class WaveformView extends StatefulWidget {
 
 class _WaveformViewState extends State<WaveformView> {
   bool _editEnabled = false;
+  bool _mergeEnabled = false;
+  final Map<String, int> _mergeSelection = {};
   int? _previewStart, _previewEnd;
   AudioSegment? _gestureCut;
   final _plotKey = GlobalKey();
@@ -65,9 +73,13 @@ class _WaveformViewState extends State<WaveformView> {
   @override
   void didUpdateWidget(covariant WaveformView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.isWindowProcessing || widget.onSegmentBoundsChanged == null) {
+    if (widget.isWindowProcessing ||
+        widget.onSegmentBoundsChanged == null ||
+        (oldWidget.boundarySession != null && widget.boundarySession == null)) {
       final wasDragging = _gestureCut != null;
       _editEnabled = false;
+      _mergeEnabled = false;
+      _mergeSelection.clear();
       _gestureCut = null;
       _gestureWindowStart = null;
       _previewStart = null;
@@ -95,14 +107,20 @@ class _WaveformViewState extends State<WaveformView> {
     var displayedCuts = widget.segments;
     if (_gestureCut != null) {
       try {
-        displayedCuts = CutEditor.resize(
-          snapshot: widget.segments,
-          cutId: _gestureCut!.id,
-          expectedRevision: _gestureCut!.revision,
-          newStartMs: _previewStart!,
-          newEndMs: _previewEnd!,
-          durationMs: widget.totalDurationMs,
-        ).cuts;
+        displayedCuts =
+            widget.boundarySession?.preview(
+              _gestureCut!.id,
+              _previewStart!,
+              _previewEnd!,
+            ) ??
+            CutEditor.resize(
+              snapshot: widget.segments,
+              cutId: _gestureCut!.id,
+              expectedRevision: _gestureCut!.revision,
+              newStartMs: _previewStart!,
+              newEndMs: _previewEnd!,
+              durationMs: widget.totalDurationMs,
+            ).cuts;
       } on StateError {
         /* A newer lesson/edit superseded this gesture. */
       }
@@ -142,30 +160,93 @@ class _WaveformViewState extends State<WaveformView> {
                   widget.isWindowProcessing ||
                       widget.onSegmentBoundsChanged == null
                   ? null
-                  : () {
+                  : () async {
+                      final enabled = !_editEnabled;
+                      _mergeEnabled = false;
+                      _mergeSelection.clear();
                       _clearEdit();
-                      setState(() => _editEnabled = !_editEnabled);
+                      await widget.onBoundaryEditingChanged?.call(enabled);
+                      if (mounted) setState(() => _editEnabled = enabled);
                     },
               icon: const Icon(Icons.edit_outlined),
               selectedIcon: const Icon(Icons.edit),
             ),
             IconButton(
+              key: const ValueKey('merge-segments-button'),
+              tooltip: _mergeEnabled
+                  ? 'Merge selected segments'
+                  : 'Select segments to merge',
+              isSelected: _mergeEnabled,
+              visualDensity: VisualDensity.compact,
+              style: IconButton.styleFrom(
+                foregroundColor: _mergeEnabled ? AppColors.primary : null,
+                backgroundColor: _mergeEnabled
+                    ? AppColors.primary.withValues(alpha: 0.14)
+                    : null,
+              ),
+              onPressed:
+                  widget.isWindowProcessing ||
+                      widget.onMergeSegments == null ||
+                      widget.onSegmentBoundsChanged == null
+                  ? null
+                  : () async {
+                      _clearEdit();
+                      if (_mergeEnabled) {
+                        final selected = Map<String, int>.from(_mergeSelection);
+                        setState(() {
+                          _mergeEnabled = false;
+                          _mergeSelection.clear();
+                        });
+                        if (selected.length >= 2) {
+                          await widget.onMergeSegments!(selected);
+                        } else {
+                          await widget.onBoundaryEditingChanged?.call(false);
+                        }
+                      } else {
+                        if (_editEnabled) {
+                          await widget.onBoundaryEditingChanged?.call(false);
+                        }
+                        await widget.onBoundaryEditingChanged?.call(true);
+                        if (mounted) {
+                          setState(() {
+                            _editEnabled = false;
+                            _mergeEnabled = true;
+                          });
+                        }
+                      }
+                    },
+              icon: const Icon(Icons.merge_outlined),
+              selectedIcon: const Icon(Icons.merge),
+            ),
+            IconButton(
               tooltip: 'Add cut at playhead',
               visualDensity: VisualDensity.compact,
-              onPressed: widget.isWindowProcessing ? null : widget.onAddCut,
+              onPressed:
+                  widget.isWindowProcessing || _editEnabled || _mergeEnabled
+                  ? null
+                  : widget.onAddCut,
               icon: const Icon(Icons.add_circle_outline),
             ),
             IconButton(
               tooltip: 'Delete active cut',
               visualDensity: VisualDensity.compact,
               onPressed:
-                  !widget.isWindowProcessing && widget.currentSegment != null
+                  !widget.isWindowProcessing &&
+                      !_editEnabled &&
+                      !_mergeEnabled &&
+                      widget.currentSegment != null
                   ? widget.onDeleteCut
                   : null,
               icon: const Icon(Icons.delete_outline),
             ),
           ],
         ),
+        if (_mergeEnabled)
+          Text(
+            '${_mergeSelection.length} selected · Tap segments, then tap Merge again',
+            key: const ValueKey('merge-selection-count'),
+            style: AppTypography.labelSmall,
+          ),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -314,7 +395,12 @@ class _WaveformViewState extends State<WaveformView> {
                               child: IgnorePointer(
                                 child: ColoredBox(
                                   color: AppColors.segmentHighlight.withValues(
-                                    alpha: c.id == active?.id ? 0.42 : 0.16,
+                                    alpha:
+                                        (_mergeEnabled
+                                            ? _mergeSelection.containsKey(c.id)
+                                            : c.id == active?.id)
+                                        ? 0.42
+                                        : 0.16,
                                   ),
                                 ),
                               ),
@@ -324,6 +410,47 @@ class _WaveformViewState extends State<WaveformView> {
                         child: GestureDetector(
                           key: const ValueKey('waveform-seek-area'),
                           behavior: HitTestBehavior.opaque,
+                          onTapUp: _mergeEnabled
+                              ? (details) {
+                                  final ms = toMs(details.localPosition.dx);
+                                  final index = widget.segments.indexWhere(
+                                    (c) => c.containsPosition(ms),
+                                  );
+                                  if (index < 0) return;
+                                  setState(() {
+                                    final selected = widget.segments[index];
+                                    final indices = [
+                                      index,
+                                      for (
+                                        var i = 0;
+                                        i < widget.segments.length;
+                                        i++
+                                      )
+                                        if (_mergeSelection.containsKey(
+                                          widget.segments[i].id,
+                                        ))
+                                          i,
+                                    ]..sort();
+                                    if (_mergeSelection.containsKey(
+                                      selected.id,
+                                    )) {
+                                      if (index == indices.first ||
+                                          index == indices.last) {
+                                        _mergeSelection.remove(selected.id);
+                                      }
+                                    } else {
+                                      for (
+                                        var i = indices.first;
+                                        i <= indices.last;
+                                        i++
+                                      ) {
+                                        final cut = widget.segments[i];
+                                        _mergeSelection[cut.id] = cut.revision;
+                                      }
+                                    }
+                                  });
+                                }
+                              : null,
                           onHorizontalDragStart: (_) {
                             _seekDx = 0;
                             _seekOrigin = widget.currentPositionMs;

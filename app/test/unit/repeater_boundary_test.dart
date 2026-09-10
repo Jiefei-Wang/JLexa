@@ -78,6 +78,41 @@ void main() {
     expect(updatedSeg1.endMs - updatedSeg1.startMs, equals(100));
     expect(updatedSeg1.endMs, lessThanOrEqualTo(seg2.startMs));
 
+    await controller.setBoundaryEditing(true);
+    await controller.updateSegmentBounds(
+      segmentId: seg1.id,
+      newStartMs: 2000,
+      newEndMs: 6000,
+    );
+    expect(controller.segments[1].startMs, 6000);
+    expect((await lessonRepo.getSegmentsForLesson(lesson.id))[1].startMs, 4000);
+    await controller.updateSegmentBounds(
+      segmentId: seg1.id,
+      newStartMs: 2000,
+      newEndMs: 5000,
+    );
+    expect(controller.segments[1].startMs, 5000);
+    await controller.setBoundaryEditing(false);
+    expect((await lessonRepo.getSegmentsForLesson(lesson.id))[1].startMs, 5000);
+    await controller.setBoundaryEditing(true);
+    await controller.updateSegmentBounds(
+      segmentId: seg1.id,
+      newStartMs: 2000,
+      newEndMs: 3000,
+    );
+    expect(controller.segments[1].startMs, 5000);
+    await controller.setBoundaryEditing(false);
+    await controller.setBoundaryEditing(true);
+    await controller.mergeSegments({
+      for (final c in controller.segments) c.id: c.revision,
+    });
+    expect(controller.segments, hasLength(1));
+    expect(controller.segments.single.startMs, 2000);
+    expect(controller.segments.single.endMs, 8000);
+    expect(controller.segments.single.id, seg1.id);
+    expect(controller.segments.single.isUserEdited, isTrue);
+    expect(controller.segments.single.hasValidTranscript, isFalse);
+    expect(await lessonRepo.getSegmentsForLesson(lesson.id), hasLength(1));
     controller.dispose();
   });
 }

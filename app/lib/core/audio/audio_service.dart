@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import 'audio_models.dart';
 
@@ -39,6 +40,11 @@ class AudioPlaybackState {
 }
 
 class AudioService extends ChangeNotifier {
+  final bool _nativeClipping;
+  static const _nativeMethods = MethodChannel('xyz.luan/audioplayers');
+  int? _nativeEndMs;
+  bool _nativeEndConfigured = false;
+  Future<void> _nativeEndTask = Future.value();
   AudioPlayer? _playerInstance;
   AudioPlayer get _player => _playerInstance ??= _createPlayer();
 
@@ -58,6 +64,7 @@ class AudioService extends ChangeNotifier {
   bool _isRepeatOne = false;
   bool _isAutoStop = true;
   bool _wantsPlaying = false;
+  bool _pausedByAutoStop = false;
   bool _isDisposed = false;
   bool _isSeeking = false;
   int _seekGeneration = 0;
@@ -98,13 +105,14 @@ class AudioService extends ChangeNotifier {
           orElse: () => null,
         );
 
-  AudioService();
+  AudioService({bool? nativeClipping})
+    : _nativeClipping = nativeClipping ?? Platform.isAndroid;
 
   AudioPlayer _createPlayer() {
     final player = AudioPlayer();
     var positionQueryPending = false;
-    // A file picker or another activity can stop Flutter frames while native
-    // audio keeps playing. Poll independently so cut boundaries still apply.
+    // Poll for display and for platforms without native clipping. Android
+    // enforces the endpoint in its media source, independently of Dart timing.
     // Reject queries that finish after a seek, pause or lesson switch.
     player.positionUpdater = TimerPositionUpdater(
       interval: const Duration(milliseconds: 40),
@@ -155,7 +163,10 @@ class AudioService extends ChangeNotifier {
         _positionMs = pos.inMilliseconds;
         final target = loopTarget;
         if (target != null && _positionMs >= target.endMs) {
-          _startBoundaryAction(target);
+          _positionMs = target.endMs;
+          if (!_nativeClipping) _startBoundaryAction(target);
+          // Keep this cut selected until native completion, including while
+          // the final buffered audio drains. Never advance its endpoint here.
           return;
         }
         _updateActiveSegment();
@@ -197,6 +208,7 @@ class AudioService extends ChangeNotifier {
     final gen = ++_loadGeneration;
     ++_playbackGeneration;
     _wantsPlaying = false;
+    _pausedByAutoStop = false;
     _stoppedCutId = null;
     final completer = Completer<void>();
 
@@ -229,6 +241,7 @@ class AudioService extends ChangeNotifier {
     final loadId = ++_loadGeneration;
     ++_playbackGeneration;
     _wantsPlaying = false;
+    _pausedByAutoStop = false;
     _stoppedCutId = null;
     _loopTargetCutId = null;
     _hasLoadError = false;
@@ -296,7 +309,9 @@ class AudioService extends ChangeNotifier {
         _positionMs = lesson.currentPositionMs;
         _durationMs = lesson.durationMs;
         _updateActiveSegment();
-        _syncLoopTargetToActiveCut();
+        _nativeEndConfigured = false;
+        _syncLoopTargetToActiveCut(seekPositionMs: _positionMs);
+        await _nativeEndTask;
         notifyListeners();
         completer.complete();
       } catch (e) {
@@ -342,19 +357,50 @@ class AudioService extends ChangeNotifier {
     );
   }
 
-  void _syncLoopTargetToActiveCut() {
+  void _syncLoopTargetToActiveCut({int? seekPositionMs}) {
     _loopTargetCutId = null;
-    if (!_isRepeatOne && !_isAutoStop) return;
-    _loopTargetCutId = currentSegment?.id;
-    // Starting in a gap must still catch the first segment, even if a native
-    // update jumps across that entire short segment.
-    _loopTargetCutId ??= _segments
-        .cast<AudioSegment?>()
-        .firstWhere(
-          (s) => s != null && s.startMs >= _positionMs,
-          orElse: () => null,
-        )
-        ?.id;
+    if (_isRepeatOne || _isAutoStop) {
+      _loopTargetCutId = currentSegment?.id;
+      // Starting in a gap must still catch the first segment, even if a native
+      // update jumps across that entire short segment.
+      _loopTargetCutId ??= _segments
+          .cast<AudioSegment?>()
+          .firstWhere(
+            (s) => s != null && s.startMs >= _positionMs,
+            orElse: () => null,
+          )
+          ?.id;
+    }
+    // Settings/edit notifications are synchronous. Keep the same future for
+    // Play/Seek to await; errors are surfaced by _setNativeEnd, not dropped.
+    unawaited(_setNativeEnd(seekPositionMs: seekPositionMs).catchError((_) {}));
+  }
+
+  Future<void> _setNativeEnd({int? seekPositionMs}) {
+    if (!_nativeClipping || _currentLesson == null) return Future.value();
+    final endMs = loopTarget?.endMs;
+    if (_nativeEndConfigured && endMs == _nativeEndMs) return _nativeEndTask;
+    _nativeEndConfigured = true;
+    _nativeEndMs = endMs;
+    final load = _loadGeneration;
+    final task = _nativeMethods.invokeMethod<void>('setPlaybackEnd', {
+      'playerId': _player.playerId,
+      'endMs': endMs,
+      'positionMs': seekPositionMs,
+    });
+    _nativeEndTask = task.catchError((Object error, StackTrace stack) async {
+      if (!_isDisposed && load == _loadGeneration && endMs == _nativeEndMs) {
+        _nativeEndConfigured = false;
+        _wantsPlaying = false;
+        _isPlaying = false;
+        _hasLoadError = true;
+        _loadErrorMessage = 'Failed to set audio playback boundary: $error';
+        await _player.pause();
+        notifyListeners();
+      }
+      Error.throwWithStackTrace(error, stack);
+    });
+    return _nativeEndTask;
   }
 
   void _startBoundaryAction(AudioSegment target) {
@@ -363,7 +409,7 @@ class AudioService extends ChangeNotifier {
         (!_isRepeatOne && !_isAutoStop)) {
       return;
     }
-    final task = _performBoundary(target, repeat: _isRepeatOne);
+    final task = _performBoundary(target, repeat: _isRepeatOne && !_isAutoStop);
     _boundaryTask = task;
     unawaited(
       task.whenComplete(() {
@@ -392,7 +438,14 @@ class AudioService extends ChangeNotifier {
           'bounds=${target.startMs}-${target.endMs} position=$_positionMs',
         );
         await seekTo(target.startMs, userInitiated: false);
-        if (ownsAction() && _isRepeatOne && _wantsPlaying) {
+        await _nativeEndTask;
+        // Switching Repeat off while its seek is pending still means play.
+        // The new mode's endpoint has already been installed; only a newer
+        // playback action or lesson can cancel this resume.
+        if (!_isDisposed &&
+            playbackGeneration == _playbackGeneration &&
+            loadGeneration == _loadGeneration &&
+            _wantsPlaying) {
           await _player.resume();
           debugPrint(
             '[JLexaAudio] loop resumed cut=${target.id} at=${target.startMs}',
@@ -400,6 +453,7 @@ class AudioService extends ChangeNotifier {
         }
       } else {
         _wantsPlaying = false;
+        _pausedByAutoStop = true;
         _isPlaying = false;
         _positionMs = target.endMs;
         _stoppedCutId = target.id;
@@ -428,17 +482,26 @@ class AudioService extends ChangeNotifier {
   Future<void> play() async {
     final generation = ++_playbackGeneration;
     _wantsPlaying = true;
+    final stoppedCut = _pausedByAutoStop ? currentSegment : null;
+    _pausedByAutoStop = false;
     try {
       await _boundaryTask;
       if (_isDisposed || generation != _playbackGeneration) return;
       _stoppedCutId = null;
+      if (_isRepeatOne && stoppedCut != null) {
+        await seekTo(stoppedCut.startMs, userInitiated: false);
+      }
       if (_durationMs > 0 && _positionMs >= _durationMs) {
         await seekTo(0, userInitiated: false);
       }
       if (_isDisposed || generation != _playbackGeneration) return;
       _completed = false;
       _updateActiveSegment();
-      _syncLoopTargetToActiveCut();
+      _syncLoopTargetToActiveCut(seekPositionMs: _positionMs);
+      await _nativeEndTask;
+      if (_isDisposed || generation != _playbackGeneration || !_wantsPlaying) {
+        return;
+      }
       await _player.resume();
     } catch (_) {}
   }
@@ -446,6 +509,7 @@ class AudioService extends ChangeNotifier {
   Future<void> pause() async {
     final generation = ++_playbackGeneration;
     _wantsPlaying = false;
+    _pausedByAutoStop = false;
     _isPlaying = false;
     notifyListeners();
     try {
@@ -460,6 +524,7 @@ class AudioService extends ChangeNotifier {
         ? ++_playbackGeneration
         : _playbackGeneration;
     if (userInitiated) {
+      _pausedByAutoStop = false;
       _stoppedCutId = null;
       if (_boundaryTask != null) await _boundaryTask;
       if (_isDisposed || playback != _playbackGeneration) return;
@@ -471,11 +536,19 @@ class AudioService extends ChangeNotifier {
         .clamp(0, _durationMs > 0 ? _durationMs : positionMs)
         .toInt();
     _updateActiveSegment();
-    if (userInitiated) _syncLoopTargetToActiveCut();
+    if (userInitiated) {
+      _syncLoopTargetToActiveCut(seekPositionMs: _positionMs);
+    }
     notifyListeners();
 
     try {
       final target = _positionMs;
+      await _nativeEndTask;
+      if (_isDisposed ||
+          generation != _seekGeneration ||
+          playback != _playbackGeneration) {
+        return;
+      }
       await _player.seek(Duration(milliseconds: target));
     } catch (_) {
     } finally {
@@ -496,6 +569,7 @@ class AudioService extends ChangeNotifier {
   Future<void> stop() async {
     final generation = ++_playbackGeneration;
     _wantsPlaying = false;
+    _pausedByAutoStop = false;
     _stoppedCutId = null;
     try {
       await _boundaryTask;
@@ -514,14 +588,30 @@ class AudioService extends ChangeNotifier {
 
   void toggleAutoStop() {
     _isAutoStop = !_isAutoStop;
+    if (!_isAutoStop) _pausedByAutoStop = false;
     _syncLoopTargetToActiveCut();
     notifyListeners();
+  }
+
+  Future<void> _navigateToSegment(int startMs) async {
+    // A boundary pause waits for the learner to choose another segment. An
+    // explicit Pause or scrub still leaves navigation silent.
+    final resume = _wantsPlaying || _pausedByAutoStop;
+    _wantsPlaying = resume;
+    final generation = _playbackGeneration + 1;
+    await seekTo(startMs);
+    if (resume &&
+        !_isDisposed &&
+        generation == _playbackGeneration &&
+        !_isPlaying) {
+      await play();
+    }
   }
 
   Future<void> previousSentence() async {
     if (_segments.isEmpty) return;
     if (currentSegment != null) {
-      await seekTo(
+      await _navigateToSegment(
         _segments[(_currentSegmentIndex - 1).clamp(0, _segments.length - 1)]
             .startMs,
       );
@@ -529,13 +619,13 @@ class AudioService extends ChangeNotifier {
     }
     final before = _segments.where((s) => s.endMs <= _positionMs).toList();
     final target = before.isEmpty ? _segments.first : before.last;
-    await seekTo(target.startMs);
+    await _navigateToSegment(target.startMs);
   }
 
   Future<void> nextSentence() async {
     if (_segments.isEmpty) return;
     if (currentSegment != null) {
-      await seekTo(
+      await _navigateToSegment(
         _segments[(_currentSegmentIndex + 1).clamp(0, _segments.length - 1)]
             .startMs,
       );
@@ -543,7 +633,7 @@ class AudioService extends ChangeNotifier {
     }
     final after = _segments.where((s) => s.startMs > _positionMs).toList();
     final target = after.isEmpty ? _segments.last : after.first;
-    await seekTo(target.startMs);
+    await _navigateToSegment(target.startMs);
   }
 
   Future<void> repeatCurrentSentence() async {

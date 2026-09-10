@@ -40,6 +40,7 @@ class RepeaterController extends ChangeNotifier {
   bool _autoTranscribe = false;
   int _autoPreferenceGeneration = 0;
   bool _isEditingCuts = false;
+  CutBoundarySession? boundarySession;
   bool get isEditingCuts => _isEditingCuts;
   String? _visibleTranscriptCutId;
 
@@ -85,7 +86,9 @@ class RepeaterController extends ChangeNotifier {
   bool _observedSegmentationEnabled = false;
   String? _observedSpeechPath;
   void retryWhisperSegmentation() {
-    if (_isEditingCuts || _transcriptionState != TranscriptionState.idle) {
+    if (_isEditingCuts ||
+        boundarySession != null ||
+        _transcriptionState != TranscriptionState.idle) {
       return;
     }
     _windowSession?.retry();
@@ -104,7 +107,9 @@ class RepeaterController extends ChangeNotifier {
       _stopWindowSession();
       audioService.updateSegments(_segments);
     } else {
-      if (_transcriptionState == TranscriptionState.idle && !_isEditingCuts) {
+      if (_transcriptionState == TranscriptionState.idle &&
+          !_isEditingCuts &&
+          boundarySession == null) {
         _windowSession?.retry();
       }
       unawaited(_startWindowSession());
@@ -124,6 +129,7 @@ class RepeaterController extends ChangeNotifier {
 
   Future<void> _startWindowSession() async {
     if (_isDisposed ||
+        boundarySession != null ||
         !aiService.whisperSegmentationEnabled ||
         _isLoading ||
         _isWaveformLoading ||
@@ -172,7 +178,12 @@ class RepeaterController extends ChangeNotifier {
   }
 
   void _onWindowUpdate() {
-    if (_syncingWindow || _windowSession == null || _isDisposed) return;
+    if (_syncingWindow ||
+        _windowSession == null ||
+        _isDisposed ||
+        boundarySession != null) {
+      return;
+    }
     _syncingWindow = true;
     final revealedId = _visibleTranscriptCutId;
     _segments = _windowSession!.cuts;
@@ -195,7 +206,7 @@ class RepeaterController extends ChangeNotifier {
     if (session == null) return;
     session.cuts = List.of(_segments);
     _onWindowUpdate();
-    if (!_isEditingCuts) session.resume();
+    if (!_isEditingCuts && boundarySession == null) session.resume();
   }
 
   List<double> get fullWaveformPeaks => _fullWaveformPeaks;
@@ -309,7 +320,9 @@ class RepeaterController extends ChangeNotifier {
       _visibleTranscriptCutId =
           _autoTranscribe && cut?.hasValidTranscript == true ? cut!.id : null;
     }
-    if (!_syncingWindow) _windowSession?.updatePosition(positionMs);
+    if (!_syncingWindow && boundarySession == null) {
+      _windowSession?.updatePosition(positionMs);
+    }
     notifyListeners();
   }
 
@@ -382,6 +395,7 @@ class RepeaterController extends ChangeNotifier {
 
   // Non-blocking atomic lesson load
   Future<void> loadLesson(AudioLesson lesson) async {
+    if (boundarySession != null) await setBoundaryEditing(false);
     // 1. Persist previous lesson position before switching only if audio matched
     final oldLesson = _lesson;
     if (oldLesson != null && audioService.currentLesson?.id == oldLesson.id) {
@@ -470,7 +484,7 @@ class RepeaterController extends ChangeNotifier {
   }
 
   Future<void> transcribeCurrentCut({bool automatic = false}) async {
-    if (!canEditCuts || _isLoading) return;
+    if (!canEditCuts || _isLoading || boundarySession != null) return;
     final cut = currentSegment;
     if (_lesson == null || cut == null) {
       _transcriptionError = 'Move the playhead into a cut before transcribing.';
@@ -689,6 +703,7 @@ class RepeaterController extends ChangeNotifier {
   Future<void> redoSegments() => _replaceLessonCuts(regenerate: true);
 
   Future<void> _replaceLessonCuts({required bool regenerate}) async {
+    if (boundarySession != null) await setBoundaryEditing(false);
     final target = _lesson;
     if (target == null || !canEditCuts || _isWaveformLoading) return;
     _isEditingCuts = true;
@@ -877,6 +892,43 @@ class RepeaterController extends ChangeNotifier {
     await audioService.play();
   }
 
+  Future<void> setBoundaryEditing(bool enabled) async {
+    if (enabled) {
+      if (!canEditCuts || boundarySession != null) return;
+      _isEditingCuts = true;
+      final generation = _loadGeneration;
+      try {
+        await _quiesceCutWork();
+        if (_isDisposed || generation != _loadGeneration) return;
+        boundarySession = CutBoundarySession(_segments, durationMs);
+      } finally {
+        _isEditingCuts = false;
+      }
+      notifyListeners();
+      return;
+    }
+    final session = boundarySession;
+    final lessonId = _lesson?.id;
+    if (session == null || lessonId == null) return;
+    boundarySession = null;
+    _isEditingCuts = true;
+    try {
+      await lessonRepo.commitCutSet(lessonId, {
+        for (final c in session.snapshot) c.id: c.revision,
+      }, _segments);
+    } catch (e) {
+      _notice = 'Cut edit was not saved: $e';
+      if (!_isDisposed && _lesson?.id == lessonId) {
+        _segments = await lessonRepo.getSegmentsForLesson(lessonId);
+        audioService.updateSegments(_segments);
+      }
+    } finally {
+      _isEditingCuts = false;
+      if (!_isDisposed && _lesson?.id == lessonId) _resumeWindowSession();
+      notifyListeners();
+    }
+  }
+
   // Item 12: Rewritten segment boundary algorithm — legal range first, then preferences
   Future<void> updateSegmentBounds({
     required String segmentId,
@@ -933,6 +985,13 @@ class RepeaterController extends ChangeNotifier {
         (finalStart == original.startMs && finalEnd == original.endMs)) {
       return;
     }
+    final editing = boundarySession;
+    if (editing != null) {
+      _segments = editing.resize(segmentId, finalStart, finalEnd);
+      audioService.updateSegments(_segments);
+      notifyListeners();
+      return;
+    }
     final snapshot = [..._segments];
     final expected = {for (final c in snapshot) c.id: c.revision};
     final result = CutEditor.resize(
@@ -987,6 +1046,7 @@ class RepeaterController extends ChangeNotifier {
 
   Future<void> _runCutEdit(Future<void> Function() edit) async {
     if (_lesson == null || !canEditCuts) return;
+    if (boundarySession != null) await setBoundaryEditing(false);
     _isEditingCuts = true;
     final generation = _loadGeneration;
     try {
@@ -1138,6 +1198,44 @@ class RepeaterController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> mergeSegments(Map<String, int> selected) =>
+      _runCutEdit(() async {
+        if (selected.length < 2 || _lesson == null) return;
+        final snapshot = [..._segments];
+        final indices = <int>[];
+        for (var i = 0; i < snapshot.length; i++) {
+          if (!selected.containsKey(snapshot[i].id)) continue;
+          if (selected[snapshot[i].id] != snapshot[i].revision) {
+            throw StateError('Selected segments changed. Select them again.');
+          }
+          indices.add(i);
+        }
+        if (indices.length != selected.length ||
+            indices.last - indices.first + 1 != indices.length) {
+          throw StateError('Select consecutive segments to merge.');
+        }
+        final first = snapshot[indices.first];
+        final last = snapshot[indices.last];
+        final result = CutEditor.resize(
+          snapshot: snapshot,
+          cutId: first.id,
+          expectedRevision: first.revision,
+          newStartMs: first.startMs,
+          newEndMs: last.endMs,
+          durationMs: durationMs,
+        );
+        final lessonId = _lesson!.id;
+        await lessonRepo.commitCutSet(lessonId, {
+          for (final c in snapshot) c.id: c.revision,
+        }, result.cuts);
+        if (_isDisposed || _lesson?.id != lessonId) return;
+        _segments = result.cuts;
+        _selectedSegmentId = first.id;
+        _visibleTranscriptCutId = null;
+        audioService.updateSegments(_segments);
+        notifyListeners();
+      });
+
   Future<void> mergeWithNextSegment() async {
     final curIndex = _segments.indexWhere((c) => c.id == currentSegment?.id);
     if (curIndex < 0 || curIndex >= _segments.length - 1) return;
@@ -1260,6 +1358,7 @@ class RepeaterController extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (boundarySession != null) unawaited(setBoundaryEditing(false));
     _aiExplanationGeneration++;
     _transcriptionGeneration++;
     _stopWindowSession();

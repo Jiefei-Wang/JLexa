@@ -638,3 +638,27 @@ At the end of every agent session after completing work:
   - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`; apksigner verified, v2 true. Installed Pixel base.apk hash matches release.
   - Existing flutter_tts future Kotlin-plugin and SDK XML version warnings remain; release succeeds.
   - Prior automatic approval review rejected duplicate-APK cleanup with `blocked by policy`; two build-output copies remain and were not bypassed. Pre-existing untracked `artifacts/` left untouched.
+
+
+---
+
+## Session: 2026-09-10 (Boundary Edit Sessions, Playback Modes, and Multi-Cut Merge)
+- **Changes**:
+  - Boundary edit mode now retains an original cut snapshot across gestures, previews overlap compression, and atomically saves only when editing ends. Retreat restores partially or completely covered neighbors up to their original edges, preserving original gaps and restored transcript metadata. Explicit edits to a neighbor's other edge do not lock its compressed edge.
+  - Suspended background segmentation and manual transcription during temporary edits. Revision checks protect final saves; mode exit, lesson switches, and controller disposal finalize edits.
+  - Auto-stop now pauses at the cut end with either Repeat setting. Play continues forward with Repeat OFF and replays the finished cut with Repeat ON. Repeat without Auto-stop loops; both OFF play continuously to EOF. Starting in a gap targets the first upcoming cut.
+  - Added a highlighted Merge button to the right of Edit. Modes are mutually exclusive; taps select a consecutive range across gaps and a second Merge tap atomically combines it using the first start and last end. Merged transcripts are invalidated and the first cut ID is retained.
+  - Preserved and included the pre-existing, uncommitted native ExoPlayer cutoff adapter, path dependency, and related playback tests needed by AudioService. Unrelated pre-existing artifacts and QA documents were left untouched.
+- **Verification**:
+  - `flutter analyze`: No issues found, zero errors/warnings.
+  - `flutter test --concurrency=1`: 446 passed, zero failed (final complete run: 74 seconds).
+  - Coverage includes all four playback modes, gap/EOF behavior, native endpoint configuration before resume, reversible left/right compression and complete coverage, transactional save timing, multi-cut selection, mutual exclusion, and merge persistence.
+  - No physical device installation or hands-on validation was performed in this session.
+- **Signed Release**:
+  - `flutter build apk --release` succeeded in 78.6 seconds using `app/android/key.properties`.
+  - Fixed artifact: `release/app-release.apk`, 115,703,179 bytes; copied file SHA-256 matches the build output.
+  - APK SHA-256: `5E1884D8D6984785F84ADF5DBEC630EC2B71F5B1998C15CCCCA33D88E87D11A6`.
+  - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`.
+  - `apksigner verify --verbose --print-certs`: Verifies, APK signature scheme v2 true.
+  - Existing upstream Kotlin compatibility, SDK XML and Java native-access warnings remain; release build and signing verification succeed.
+  - Automatic approval review rejected the command containing duplicate build-output APK cleanup (`blocked by policy`). No deletion workaround was attempted; both generated copies remain. The fixed release APK was copied separately and verified.

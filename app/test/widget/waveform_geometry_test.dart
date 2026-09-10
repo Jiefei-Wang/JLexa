@@ -5,6 +5,75 @@ import 'package:jlexa/core/audio/waveform_service.dart';
 import 'package:jlexa/features/repeater/widgets/waveform_view.dart';
 
 void main() {
+  testWidgets(
+    'Merge selects a continuous range across gaps and excludes boundary editing',
+    (tester) async {
+      final cuts = [
+        for (var i = 0; i < 3; i++)
+          AudioSegment(
+            id: '$i',
+            lessonId: 'l',
+            startMs: 1000 + i * 4000,
+            endMs: 3000 + i * 4000,
+            text: '',
+          ),
+      ];
+      Map<String, int>? merged;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 400,
+              child: WaveformView(
+                fullPeaks: const [],
+                totalDurationMs: 20000,
+                currentPositionMs: 10000,
+                segments: cuts,
+                currentSegment: cuts.first,
+                waveformService: WaveformService(),
+                onSegmentBoundsChanged: (_, _, _, _) {},
+                onBoundaryEditingChanged: (_) async {},
+                onMergeSegments: (selection) async {
+                  merged = selection;
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byTooltip('Edit segment boundaries'));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('cut-start-line')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('merge-segments-button')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('cut-start-line')), findsNothing);
+      final plot = tester.getRect(
+        find.byKey(const ValueKey('waveform-seek-area')),
+      );
+      await tester.tapAt(Offset(plot.left + 40, plot.center.dy));
+      await tester.pump();
+      await tester.tapAt(
+        Offset(plot.left + 80, plot.center.dy),
+      ); // gap: unchanged
+      await tester.pump();
+      expect(find.textContaining('1 selected'), findsOneWidget);
+      await tester.tapAt(Offset(plot.left + 200, plot.center.dy));
+      await tester.pump();
+      expect(find.textContaining('3 selected'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('merge-segments-button')));
+      await tester.pump();
+      expect(merged?.keys, ['0', '1', '2']);
+      expect(find.byKey(const ValueKey('merge-selection-count')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('merge-segments-button')));
+      await tester.pump();
+      await tester.tap(find.byTooltip('Edit segment boundaries'));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('merge-selection-count')), findsNothing);
+      expect(find.byKey(const ValueKey('cut-start-line')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   test(
     'Scrolling retains the time and amplitude of every shared waveform bar',
     () {

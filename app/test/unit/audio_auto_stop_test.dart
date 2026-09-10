@@ -150,7 +150,7 @@ void main() {
           await audio.play();
           calls.clear();
           await position(1100);
-          if (repeat) {
+          if (repeat && !autoStop) {
             expect(audio.positionMs, 0);
             expect(audio.currentSegment?.id, 'a');
             expect(audio.isPlaying, isTrue);
@@ -174,6 +174,44 @@ void main() {
       );
     }
   }
+
+  test(
+    'Repeat plus Auto-stop waits, then Play restarts the finished cut',
+    () async {
+      audio.toggleRepeatOne();
+      await audio.play();
+      await position(1100);
+      expect(audio.isPlaying, isFalse);
+      expect(audio.positionMs, 1000);
+      await audio.play();
+      expect(audio.positionMs, 0);
+      expect(audio.currentSegment?.id, 'a');
+      await position(1100);
+      expect(audio.isPlaying, isFalse);
+      await audio.seekTo(2500);
+      await audio.play();
+      await position(5100);
+      expect(audio.isPlaying, isFalse);
+      await audio.play();
+      expect(audio.positionMs, 3000);
+      await audio.pause();
+    },
+  );
+
+  test(
+    'Repeat without Auto-stop loops the first cut entered from a gap',
+    () async {
+      audio.toggleRepeatOne();
+      audio.toggleAutoStop();
+      await audio.seekTo(2500);
+      await audio.play();
+      await position(5100);
+      expect(audio.positionMs, 3000);
+      expect(audio.currentSegment?.id, 'c');
+      expect(audio.isPlaying, isTrue);
+      await audio.pause();
+    },
+  );
 
   test(
     'Auto-stop preserves Replay and Play continues through adjacent cuts',
@@ -240,6 +278,7 @@ void main() {
 
   test('User pause during a loop seek prevents the loop resuming', () async {
     audio.toggleRepeatOne();
+    audio.toggleAutoStop();
     await audio.play();
     final pendingSeek = Completer<void>();
     seekGate = pendingSeek;
@@ -253,21 +292,143 @@ void main() {
     expect(calls.any((c) => c.method == 'resume'), isFalse);
   });
 
+  test('Previous and Next resume the cut selected after Auto-stop', () async {
+    await audio.play();
+    await position(1100);
+    await audio.nextSentence();
+    expect(audio.positionMs, 1000);
+    expect(audio.currentSegment?.id, 'b');
+    await waitUntil(() => audio.isPlaying);
+    expect(audio.isPlaying, isTrue);
+    await position(2100);
+    await audio.previousSentence();
+    expect(audio.positionMs, 0);
+    expect(audio.currentSegment?.id, 'a');
+    await waitUntil(() => audio.isPlaying);
+    expect(audio.isPlaying, isTrue);
+    await audio.pause();
+  });
+
+  test('Manual pause keeps Previous and Next silent', () async {
+    await audio.seekTo(1400);
+    await audio.play();
+    await audio.pause();
+    calls.clear();
+    await audio.nextSentence();
+    expect(audio.currentSegment?.id, 'c');
+    expect(audio.isPlaying, isFalse);
+    await audio.previousSentence();
+    expect(audio.currentSegment?.id, 'b');
+    expect(audio.isPlaying, isFalse);
+    expect(calls.where((call) => call.method == 'resume'), isEmpty);
+  });
+
+  test('Explicit pause after Auto-stop cancels navigation autoplay', () async {
+    await audio.play();
+    await position(1100);
+    await audio.pause();
+    calls.clear();
+    await audio.nextSentence();
+    expect(audio.currentSegment?.id, 'b');
+    expect(audio.isPlaying, isFalse);
+    expect(calls.where((call) => call.method == 'resume'), isEmpty);
+  });
+
+  test('Scrubbing after Auto-stop keeps later navigation silent', () async {
+    await audio.play();
+    await position(1100);
+    await audio.beginScrub();
+    await audio.seekTo(1400);
+    await audio.endScrub();
+    await audio.nextSentence();
+    expect(audio.currentSegment?.id, 'c');
+    expect(audio.isPlaying, isFalse);
+  });
+
+  test('Next resumes after an in-flight automatic pause completes', () async {
+    await audio.play();
+    final pendingPause = Completer<void>();
+    pauseGate = pendingPause;
+    await position(1100);
+    calls.clear();
+    final navigating = audio.nextSentence();
+    pendingPause.complete();
+    await navigating;
+    expect(audio.positionMs, 1000);
+    expect(audio.currentSegment?.id, 'b');
+    await waitUntil(() => audio.isPlaying);
+    expect(audio.isPlaying, isTrue);
+    expect(
+      calls
+          .where((call) => call.method == 'seek')
+          .map((call) => call.arguments['position']),
+      [1000],
+    );
+    await audio.pause();
+  });
+
+  test('Pause during navigation seek prevents autoplay', () async {
+    await audio.play();
+    await position(1100);
+    final pendingSeek = Completer<void>();
+    seekGate = pendingSeek;
+    calls.clear();
+    final navigating = audio.nextSentence();
+    await waitUntil(() => seekGate == null);
+    await audio.pause();
+    pendingSeek.complete();
+    await navigating;
+    expect(audio.currentSegment?.id, 'b');
+    expect(audio.isPlaying, isFalse);
+    expect(calls.where((call) => call.method == 'resume'), isEmpty);
+  });
+
   test(
-    'Previous and Next navigate from the cut retained after Auto-stop',
+    'Clearing the lesson during navigation seek prevents autoplay',
     () async {
       await audio.play();
       await position(1100);
-      await audio.nextSentence();
-      expect(audio.positionMs, 1000);
-      expect(audio.currentSegment?.id, 'b');
-      await audio.play();
-      await position(2100);
-      await audio.previousSentence();
-      expect(audio.positionMs, 0);
-      expect(audio.currentSegment?.id, 'a');
+      final pendingSeek = Completer<void>();
+      seekGate = pendingSeek;
+      calls.clear();
+      final navigating = audio.nextSentence();
+      await waitUntil(() => seekGate == null);
+      await audio.clearLesson();
+      pendingSeek.complete();
+      await navigating;
+      expect(audio.currentLesson, isNull);
+      expect(audio.isPlaying, isFalse);
+      expect(calls.where((call) => call.method == 'resume'), isEmpty);
     },
   );
+
+  test('Rapid Next presses resume only the last selected segment', () async {
+    await audio.play();
+    await position(1100);
+    final pendingSeek = Completer<void>();
+    seekGate = pendingSeek;
+    calls.clear();
+    final firstNavigation = audio.nextSentence();
+    await waitUntil(() => seekGate == null);
+    final secondNavigation = audio.nextSentence();
+    pendingSeek.complete();
+    await Future.wait([firstNavigation, secondNavigation]);
+    expect(audio.currentSegment?.id, 'c');
+    expect(audio.positionMs, 3000);
+    await waitUntil(() => audio.isPlaying);
+    expect(audio.isPlaying, isTrue);
+    expect(calls.where((call) => call.method == 'resume'), hasLength(1));
+    await audio.pause();
+  });
+
+  test('Disabling Auto-stop clears navigation autoplay', () async {
+    await audio.play();
+    await position(1100);
+    audio.toggleAutoStop();
+    await audio.nextSentence();
+    expect(audio.currentSegment?.id, 'b');
+    expect(audio.isPlaying, isFalse);
+  });
 
   test(
     'Slow timer query cannot overlap or stop a cut selected by a later seek',

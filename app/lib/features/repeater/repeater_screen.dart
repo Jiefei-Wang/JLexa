@@ -414,6 +414,9 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                       segments: _controller.segments,
                       currentSegment: _controller.currentSegment,
                       waveformService: widget.waveformService,
+                      boundarySession: _controller.boundarySession,
+                      onMergeSegments: _controller.mergeSegments,
+                      onBoundaryEditingChanged: _controller.setBoundaryEditing,
                       isWindowProcessing: _controller.isWindowProcessing,
                       onSeek: _controller.seekTo,
                       onSeekStart: _controller.beginWaveformSeek,
@@ -467,6 +470,7 @@ class RepeaterScreenState extends State<RepeaterScreen> {
                       error: _controller.transcriptionError,
                       onTranscribe:
                           _controller.currentSegment == null ||
+                              _controller.boundarySession != null ||
                               _controller.isWhisperBusyElsewhere
                           ? null
                           : _controller.transcribeCurrentCut,

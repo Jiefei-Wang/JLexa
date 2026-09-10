@@ -15,6 +15,64 @@ AudioSegment cut(String id, int start, int end, {int revision = 0}) =>
     );
 
 void main() {
+  test('editing a compressed neighbor does not lock its untouched edge', () {
+    final session = CutBoundarySession([
+      cut('A', 0, 2000),
+      cut('B', 3000, 6000),
+    ], 10000);
+    session.resize('A', 0, 4000);
+    session.resize('B', 4000, 7000);
+    final cuts = session.resize('A', 0, 2000);
+    expect(cuts.map((c) => (c.startMs, c.endMs)), [(0, 2000), (3000, 7000)]);
+  });
+
+  test(
+    'edit session restores compressed and covered neighbors up to originals',
+    () {
+      final original = [
+        cut('A', 1000, 3000),
+        cut('B', 4000, 6000),
+        cut('C', 7000, 9000),
+      ];
+      final session = CutBoundarySession(original, 10000);
+      expect(session.resize('A', 1000, 8000).map((c) => c.id), ['A', 'C']);
+      var cuts = session.resize('A', 1000, 5000);
+      expect(cuts.map((c) => (c.startMs, c.endMs)), [
+        (1000, 5000),
+        (5000, 6000),
+        (7000, 9000),
+      ]);
+      cuts = session.resize('A', 1000, 2500);
+      expect(cuts[1], same(original[1]));
+      expect(cuts[2], same(original[2]));
+      expect(cuts[1].hasValidTranscript, isTrue);
+      // The next editing session uses committed edges, not historical ones.
+      final next = CutBoundarySession(session.resize('A', 1000, 5000), 10000);
+      expect(next.resize('A', 1000, 3000)[1].startMs, 5000);
+    },
+  );
+
+  test('left retreat and both sides restore independently across gestures', () {
+    final session = CutBoundarySession([
+      cut('A', 0, 2000),
+      cut('B', 3000, 6000),
+      cut('C', 7000, 9000),
+    ], 10000);
+    session.resize('B', 1000, 8000);
+    final preview = session.preview('B', 2500, 6500);
+    expect(preview.map((c) => (c.startMs, c.endMs)), [
+      (0, 2000),
+      (2500, 6500),
+      (7000, 9000),
+    ]);
+    final cuts = session.resize('B', 1500, 7500);
+    expect(cuts.map((c) => (c.startMs, c.endMs)), [
+      (0, 1500),
+      (1500, 7500),
+      (7500, 9000),
+    ]);
+  });
+
   group('independent cut interval rules', () {
     final original = [
       cut('A', 2000, 4000),
