@@ -1,5 +1,7 @@
 # Whisper Small long-sentence segmentation — 2026-09-10
 
+The ordinary-word/comma splitting rule and three-part target result below describe the initial experiment. The subsequent [conservative clause-only revision](qa-conservative-clause-splits-2026-09-10.md) supersedes them; the target now remains in two complete clauses, including a 16.340-second clause.
+
 ## Reproduction and evidence
 
 Used ADB on Pixel 6 `25311FDF6004PR`, with the supplied 16:12 MP3 (972,434 ms app duration). The app catalog model was Whisper Small English (`ggml-small.en.bin`), SHA-256 `c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d`. Existing lessons and models were retained.

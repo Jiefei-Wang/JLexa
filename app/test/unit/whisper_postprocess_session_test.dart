@@ -165,12 +165,12 @@ void main() {
             .toList(),
       ),
     );
-    await until(() => s.cuts.length == 4);
+    await until(() => s.cuts.length == 3);
     await until(() => energyCalls.length == 2);
     energyCalls.last.done.complete(envelope());
     await until(() => !s.pending);
     await s.pause();
-    expect(s.cuts.take(3).every((c) => c.durationMs <= 10000), isTrue);
+    expect(s.cuts[1].durationMs, greaterThan(10000));
     expect(s.cuts.last.toMap(), manual.toMap());
     expect(engine.calls, isEmpty);
     final snapshot = s.cuts.map((c) => c.toMap()).toList();

@@ -88,7 +88,9 @@ class WhisperLongCutSplitter {
         RegExp(r"[^a-z'-]"),
         '',
       );
-      final rightWord = next.text.trim().toLowerCase();
+      // Gate on clause structure before considering acoustic energy. A comma
+      // or a long pause alone does not make a phrase safe to split.
+      if (!_clauseBoundary(tokens, i)) continue;
       // Never split a BPE word, hyphenated expression, or after a function word
       // that belongs to the following noun/verb phrase.
       if (leftText.endsWith('-') || leftText.endsWith("'")) continue;
@@ -165,39 +167,7 @@ class WhisperLongCutSplitter {
         (left.endMs + next.startMs) ~/ 2,
       );
       if (quiet == null) continue;
-      final punctuation = RegExp(r'[,;:，；：]["”’]*$').hasMatch(leftText);
-      final clause = const {
-        'and',
-        'but',
-        'or',
-        'so',
-        'because',
-        'although',
-        'while',
-        'whereas',
-        'who',
-        'which',
-        'when',
-        'where',
-        'if',
-        'unless',
-      }.contains(rightWord);
-      // A brief acoustic dip alone is insufficient inside a phrase.
-      // Non-clause boundaries require a substantially longer audible pause.
-      if (!punctuation && !clause && quiet.$3 - quiet.$2 + 40 < 200) continue;
-      candidates.add(
-        _Boundary(
-          i,
-          quiet.$1,
-          quiet.$2,
-          quiet.$3,
-          punctuation
-              ? 0
-              : clause
-              ? .3
-              : 1.0,
-        ),
-      );
+      candidates.add(_Boundary(i, quiet.$1, quiet.$2, quiet.$3, 0));
     }
     candidates.sort((a, b) => a.time.compareTo(b.time));
     // Dynamic programming avoids leaving a tiny tail. Overlong spans are legal
@@ -238,6 +208,67 @@ class WhisperLongCutSplitter {
       index = previous[index];
     }
     return selected.reversed.toList();
+  }
+
+  // Deliberately narrow English clause recognizer, not a POS parser. Unknown
+  // structures stay whole. In particular, shared-subject verbs and noun lists
+  // do not qualify just because they contain and/or/but.
+  static bool _clauseBoundary(List<TranscriptToken> tokens, int index) {
+    final left = tokens.take(index).map((t) => t.text).join().toLowerCase();
+    final right = tokens.skip(index).map((t) => t.text).join().toLowerCase();
+    final connector = RegExp(
+      r'^\s*(and|but|or|yet|so|because|although|though|whereas|while|unless|if)\b',
+    ).firstMatch(right);
+    if (connector == null) return false;
+    final tail = left.split(RegExp(r'[,;.!?]')).last;
+    // Correlative pairs remain together, even with a long acoustic pause.
+    if (RegExp(r'\b(both|either|neither)\b|\bnot\s+(only|just)\b')
+        .hasMatch(tail)) {
+      return false;
+    }
+    if (RegExp(r'\b(either|neither)\b|\bnot\s+(only|just)\b').hasMatch(left)) {
+      return false;
+    }
+    final name = connector.group(1)!;
+    final comma = RegExp(r'[,;]\s*$').hasMatch(left);
+    // Without punctuation, subordinators can introduce required complements
+    // ("I wonder if ...", "we know because ..."). Decline that ambiguity.
+    if (!{'and', 'but', 'or', 'yet', 'so'}.contains(name) && !comma) {
+      return false;
+    }
+    final body = right.substring(connector.end).trimLeft();
+    if (!_explicitClause(body, allowIntro: comma)) return false;
+    return _explicitClause(left, allowIntro: true);
+  }
+
+  static bool _explicitClause(String text, {required bool allowIntro}) {
+    // Contractions are expanded only for structural recognition, never in the
+    // transcript. A short introductory adjunct is allowed before the subject.
+    text = text
+        .replaceAll('’', "'")
+        .replaceAll(RegExp(r"\b(i|you|we|they)'re\b"), 'they are')
+        .replaceAll(RegExp(r"\b(he|she|it)'s\b"), 'it is')
+        .replaceAll(RegExp(r"\b(i|you|we|they)'ve\b"), 'they have')
+        .replaceAll(RegExp(r"\b(i|you|he|she|it|we|they)'ll\b"), 'they will')
+        .replaceAll("i'm", 'i am');
+    const predicate =
+        r'(?:am|is|are|was|were|has|have|had|do|does|did|can|could|will|would|shall|should|must|may|might|know|knows|knew|think|thinks|thought|want|wants|wanted|need|needs|needed|see|sees|saw|say|says|said|feel|feels|felt|work|works|worked|live|lives|lived|left|stayed|returned|arrived|failed|succeeded)';
+    const subject =
+        r'(?:i|you|he|she|it|we|they|there|one\s+of\s+(?:them|us)|(?:the|this|that|these|those|both\s+of\s+these)\s+(?!(?:and|or|but)\b)[a-z]+(?:\s+(?!(?:and|or|but)\b)[a-z]+){0,2})';
+    const adverb =
+        r'(?:(?:not|never|always|often|also|still|already|really|just|[a-z]+ly)\s+){0,2}';
+    final match = RegExp('\\b$subject\\s+$adverb$predicate\\b')
+        .firstMatch(text);
+    if (match == null) return false;
+    final intro = text.substring(0, match.start).trim();
+    if (intro.isEmpty) return true;
+    if (!allowIntro) return false;
+    // Do not find a later subject by crossing another clause/list item.
+    if (RegExp(r'\b(and|or|but|because|although|if|who|which|that)\b')
+        .hasMatch(intro)) {
+      return false;
+    }
+    return RegExp(r"[a-z]+(?:'[a-z]+)?").allMatches(intro).length <= 8;
   }
 
   static (int, int, int)? _quietCore(

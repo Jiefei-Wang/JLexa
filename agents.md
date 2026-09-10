@@ -686,3 +686,14 @@ At the end of every agent session after completing work:
   - APK SHA-256: `5F888A288216A76567DCAF7BEB245F3E2E967387EE65045B5CF875B18ACA8F5A`.
   - Signer SHA-256: `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`; apksigner Verifies, v2 true.
 - **Scope / Cleanup**: Only adapter source/tests/license/documentation and this entry belong to this commit. Other-task Whisper changes were committed separately; its diagnostic sources are removed. Honor retains existing app/data, first cut paused, Auto-stop ON/Repeat OFF/Auto transcript OFF. No fixed-release Honor installation was performed; the other task installed the combined release on Pixel. Temporary probe APK removed and emulator stopped. Previously policy-blocked duplicate app/build APK cleanup was not retried or bypassed. Existing flutter_tts and Java warnings remain non-blocking.
+
+
+---
+
+## Session: 2026-09-10 (Conservative Clause Integrity)
+- **Request**: Preserve adverb/verb and other phrase constituents; do not split simple A and B coordination merely because a conjunction or pause exists.
+- **Change**: Removed ordinary-word and comma-only fallbacks. Require an explicit connector with conservative subject/predicate evidence on both sides before checking the existing quiet corridor. Preserve lists, shared-subject verbs and correlative coordination; retain uncertain/long clauses. Existing saved cuts stay unchanged until explicit Redo segments. Details: `docs/qa-conservative-clause-splits-2026-09-10.md`.
+- **Actual Audio**: Reused original Pixel Small token data and whole-source energy. Target now 88.130–95.675 (7.545 s) and 95.675–112.015 (16.340 s). Independently cut PCM and re-recognized both on host Small; complete exploration/and boundary, consistently celebrated and the entire noun list survived. No new Pixel inference in this revision. Whole-article original Small transcript: 125 -> 128 cuts, 33 -> 30 over 10 s; conservative clause integrity takes priority over duration.
+- **Validation**: Focused 20 tests pass; `flutter analyze` No issues found (5.0 s); `flutter test --concurrency=1` 461 passed, zero failed (95 s). Signed release build passed using app/android/key.properties; signature v2 verified. Existing upstream flutter_tts and Java native-access warnings remain non-blocking.
+- **Release**: Fixed `release/app-release.apk`, 115,703,179 bytes. APK SHA-256 `3A4E12699517659AF4C52E6998E805BAAB2462A0E9D6FB9122C71E1323818169`. Signer SHA-256 `68:90:D4:8A:B8:F1:B2:60:83:92:FA:D0:F9:DF:FA:D9:D7:7F:12:57:55:4B:17:E2:A8:66:A7:D2:E7:D1:16:DA`. Previously blocked duplicate build-APK cleanup was not retried or bypassed; build copies remain. Saved lessons/manual cuts were preserved.
+- **Pixel update**: Signed release installed with ADB successfully and launched; no segmentation redo or manual-cut overwrite was performed.
